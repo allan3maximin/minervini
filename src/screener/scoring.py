@@ -41,3 +41,17 @@ def renormalize_to_100(
         return 0.0, {k: v[0] for k, v in available.items()}
     total = points_sum / weight_sum * 100.0
     return round(total, 1), {k: v[0] for k, v in available.items()}
+
+
+def combined_score(phase1_score: float, vcp_score: float, config: dict | None = None) -> float:
+    """Overall score = phase1_score * 0.5 + vcp_score * 0.5 (design doc 4.4).
+
+    `phase1_score` is the full_score for "confirmed"-tier stocks or the
+    tech_score for "pool"-tier stocks; ranking only ever happens within a tier.
+    """
+    from src.config import load_config
+
+    config = config or load_config()
+    w = config["scoring"]
+    total = phase1_score * w["phase1_weight"] + vcp_score * w["vcp_weight"]
+    return round(total, 1)
