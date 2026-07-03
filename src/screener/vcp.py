@@ -92,8 +92,10 @@ def compute_zigzag(base_df: pd.DataFrame, threshold: float) -> list[dict]:
     4.2.3. If instead the trend is 'up' at the end, the last confirmed low is
     already a complete, unambiguous contraction and needs no adjustment.
     """
-    highs = base_df["high"].to_numpy()
-    lows = base_df["low"].to_numpy()
+    # Plain Python floats, not numpy scalars: comparisons on numpy scalars
+    # return numpy.bool_, which json.dump cannot serialize downstream.
+    highs = [float(v) for v in base_df["high"].to_numpy()]
+    lows = [float(v) for v in base_df["low"].to_numpy()]
     n = len(base_df)
     if n < 2:
         return []
@@ -187,8 +189,8 @@ def check_vcp_must_conditions(
     tol = vcp_cfg["monotonic_tolerance"]
     v2 = all(depths[i] <= depths[i - 1] * tol for i in range(1, n)) if n >= 2 else n >= 1
 
-    v3 = (depths[0] <= vcp_cfg["first_depth_max"]) if n >= 1 else False
-    v4 = (depths[-1] <= vcp_cfg["last_depth_max"]) if n >= 1 else False
+    v3 = bool(depths[0] <= vcp_cfg["first_depth_max"]) if n >= 1 else False
+    v4 = bool(depths[-1] <= vcp_cfg["last_depth_max"]) if n >= 1 else False
 
     recent_vol = latest_row.get("recent10_vol_avg")
     vol_ma50 = latest_row.get("vol_ma50")

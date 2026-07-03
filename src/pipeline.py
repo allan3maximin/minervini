@@ -1,0 +1,164 @@
+"""Daily pipeline entrypoint.
+
+Usage:
+    python -m src.pipeline                  # daily run (uses cached universe)
+    python -m src.pipeline --universe-rebuild  # rebuild universe.json first
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime
+
+import jpholiday
+
+from src.config import REPO_ROOT, load_config
+from src.data import prices as prices_mod
+from src.data.fundamentals import build_fundamentals_by_code, load_fundamentals_csv, score_stock
+from src.indicators import compute_all, rs_percentile_rank
+from src.report import build_site
+from src.screener import entry as entry_mod
+from src.screener import trend_template
+from src.screener import vcp as vcp_mod
+from src.universe import build_universe, load_universe
+
+DEBUG_PATH = REPO_ROOT / "data" / "trend_template_debug.json"
+
+# Statuses worth surfacing on the dashboard: an active setup, or a stock
+# that's already broken out of one (tracked via the locked historical pivot).
+ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED"}
+
+
+def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int:
+    config = config or load_config()
+    today = datetime.now().date()
+
+    if jpholiday.is_holiday(today):
+        print(f"{today} is a JP holiday; skipping.")
+        return 0
+
+    if universe_rebuild:
+        build_universe(config)
+
+    universe = load_universe()
+    codes = [s["code"] for s in universe["stocks"]]
+    name_by_code = {s["code"]: s["name"] for s in universe["stocks"]}
+    if not codes:
+        print("Universe is empty; run with --universe-rebuild first.")
+        return 1
+
+    price_result = prices_mod.update_prices(codes, config)
+    if price_result.job_failed:
+        print(f"Too many failed tickers ({len(price_result.failed_tickers)}/{len(codes)}); aborting.")
+        return 1
+
+    benchmark_close = prices_mod.get_benchmark_close(config)
+    topix_return = None
+    if len(benchmark_close) >= 2:
+        topix_return = float(benchmark_close.iloc[-1] / benchmark_close.iloc[-2] - 1.0)
+
+    indicator_by_code = {
+        code: compute_all(df, benchmark_close) for code, df in price_result.frames.items()
+    }
+
+    rs_raw_by_code = {code: df.iloc[-1]["rs_raw"] for code, df in indicator_by_code.items()}
+    rs_by_code = rs_percentile_rank(rs_raw_by_code)
+
+    latest_by_code = {}
+    for code, df in indicator_by_code.items():
+        rs = rs_by_code.get(code)
+        if rs is None:
+            continue  # insufficient history for RS -- excluded from screening
+        latest = df.iloc[-1].to_dict()
+        latest["rs"] = rs
+        latest_by_code[code] = latest
+
+    tt_results = trend_template.screen_universe(latest_by_code, config)
+    tt_by_code = {r["code"]: r for r in tt_results}
+    with open(DEBUG_PATH, "w", encoding="utf-8") as f:
+        json.dump(tt_results, f, ensure_ascii=False, indent=2, default=str)
+
+    csv_df, csv_warnings = load_fundamentals_csv()
+    fundamentals_by_code = build_fundamentals_by_code(csv_df)
+
+    history = entry_mod.load_status_history()
+    previous_status_by_code = {code: entry_mod.previous_status(history, code) for code in codes}
+
+    today_str = today.isoformat()
+    stock_records = []
+    watch_count = 0
+
+    for code, tt_result in tt_by_code.items():
+        if not tt_result["passed"]:
+            continue
+
+        df_ind = indicator_by_code[code]
+        vcp_result = vcp_mod.evaluate_vcp(df_ind, config)
+        entry_result = entry_mod.evaluate_entry(code, latest_by_code[code], vcp_result, history, config)
+
+        if entry_result.get("pivot") is None or entry_result["status"] not in ACTIONABLE_ENTRY_STATUSES:
+            continue
+
+        stop_ref_low = None
+        if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
+            stop_ref_low = vcp_result["contractions"][-1]["low_price"]
+        else:
+            locked = entry_mod.locked_pivot(history, code)
+            if locked:
+                stop_ref_low = locked.get("stop_ref_low")
+
+        history = entry_mod.record_status(
+            history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
+        )
+
+        if entry_result["status"] in ("WATCH_A", "WATCH_B"):
+            watch_count += 1
+
+        fund_info = score_stock(code, latest_by_code[code], fundamentals_by_code, today, config)
+        record = build_site.assemble_stock_record(
+            code,
+            name_by_code.get(code, ""),
+            latest_by_code[code],
+            tt_result["must_flags"],
+            vcp_result,
+            entry_result,
+            fund_info,
+            config,
+        )
+
+        if entry_result["status"] == "BREAKOUT":
+            record["new_breakout_today"] = previous_status_by_code.get(code) == "WATCH_A"
+            if topix_return is not None and entry_mod.market_guard_triggered(topix_return, config):
+                record["market_guard_warning"] = True
+
+        stock_records.append(record)
+        chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
+        build_site.write_chart_data(code, chart_data)
+
+    entry_mod.save_status_history(history)
+
+    template_pass = sum(1 for r in tt_results if r["passed"])
+    data_warnings = {
+        "failed_tickers": price_result.failed_tickers,
+        "stale_tickers": price_result.stale_tickers,
+        "csv_errors": csv_warnings,
+    }
+    build_site.build_report(
+        stock_records, universe_size=len(codes), template_pass=template_pass, data_warnings=data_warnings
+    )
+    build_site.update_breadth(today_str, len(codes), template_pass, watch_count, history)
+
+    print(f"Done. {template_pass}/{len(codes)} passed trend template, {len(stock_records)} actionable stocks.")
+    return 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Minervini screener daily pipeline")
+    parser.add_argument("--universe-rebuild", action="store_true", help="Rebuild data/universe.json first")
+    args = parser.parse_args()
+    sys.exit(run_daily(universe_rebuild=args.universe_rebuild))
+
+
+if __name__ == "__main__":
+    main()

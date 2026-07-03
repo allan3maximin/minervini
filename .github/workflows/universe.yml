@@ -1,0 +1,57 @@
+name: Monthly universe rebuild
+
+on:
+  schedule:
+    - cron: "0 22 * * 6" # every Saturday 22:00 UTC; filtered to the 1st Saturday below
+  workflow_dispatch:
+
+concurrency:
+  group: minervini-universe
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Only run on the first Saturday of the month
+        id: check
+        run: |
+          day=$(date -u +%d)
+          if [ "$day" -le 7 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.run == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        if: steps.check.outputs.run == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Rebuild universe and run pipeline
+        if: steps.check.outputs.run == 'true'
+        run: python -m src.pipeline --universe-rebuild
+
+      - name: Pull latest before pushing
+        if: steps.check.outputs.run == 'true'
+        run: git pull --rebase origin ${{ github.ref_name }}
+
+      - name: Commit and push results
+        if: steps.check.outputs.run == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ docs/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: monthly universe rebuild $(date -u +%Y-%m-%d)"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
