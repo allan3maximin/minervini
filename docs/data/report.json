@@ -1,11 +1,55 @@
 {
-  "generated_at": "2026-07-04T01:06:38.714177+09:00",
-  "universe_size": 0,
-  "template_pass": 0,
+  "generated_at": "2026-07-04T02:16:54.973591+09:00",
+  "universe_size": 1000,
+  "template_pass": 222,
   "data_warnings": {
     "failed_tickers": [],
     "stale_tickers": [],
     "csv_errors": []
   },
-  "stocks": []
+  "stocks": [
+    {
+      "code": "8418",
+      "name": "山口フィナンシャルグループ",
+      "tier": "pool",
+      "status": "BREAKOUT_WEAK",
+      "close": 2933.5,
+      "total_score": 59.6,
+      "tech_score": 49.7,
+      "full_score": null,
+      "vcp_score": 69.5,
+      "rs": 74,
+      "footprint": "3W 7/6/5/4 4T",
+      "pivot": 2932.0,
+      "buy_stop": 2937.0,
+      "stop_loss": 2797.44,
+      "risk_pct": 4.75,
+      "dist_to_pivot": -0.05,
+      "fund_coverage": "none",
+      "fund_stale": false,
+      "fund_checked_date": null,
+      "eps_accel_slope": null,
+      "must_flags": {
+        "tt": {
+          "close_above_ma150_ma200": true,
+          "ma150_above_ma200": true,
+          "ma200_uptrend_1m": true,
+          "ma_stack_50_150_200": true,
+          "close_above_ma50": true,
+          "above_low52w_margin": true,
+          "within_high52w_margin": true,
+          "rs_above_min": true
+        },
+        "vcp": {
+          "V1": true,
+          "V2": true,
+          "V3": true,
+          "V4": true,
+          "V5": true,
+          "V6": true,
+          "V7": true
+        }
+      }
+    }
+  ]
 }
