@@ -43,6 +43,24 @@ entry:
   market_guard_pct: -0.015
   extended_cooldown_days: 14
   status_history_days: 90
+  # Simplified JPX tick-size table (regular stocks, not the finer TOPIX100
+  # increments -- see design doc 5.1 note). Each row is [price_upper_bound, tick].
+  tick_table:
+    - [1000, 1]
+    - [3000, 5]
+    - [5000, 10]
+    - [10000, 50]
+    - [30000, 100]
+    - [50000, 500]
+    - [100000, 1000]
+    - [300000, 5000]
+    - [500000, 10000]
+    - [1000000, 50000]
+    - [3000000, 100000]
+    - [5000000, 500000]
+    - [10000000, 1000000]
+    - [30000000, 5000000]
+    - [50000000, 10000000]
 
 fundamentals:
   min_quarters_for_full: 7
