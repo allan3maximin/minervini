@@ -1,0 +1,53 @@
+universe:
+  size: 1000
+  liquidity_window: 20
+  jpx_list_url: "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
+
+data:
+  history_days: 520
+  chunk_size: 50
+  sleep_range: [2.0, 4.0]
+  max_fail_ratio: 0.10
+  stooq_sleep_sec: 2.0
+  backoff_sec: [5, 15, 45]
+  topix_proxy_ticker: "1306.T"
+
+trend_template:
+  ma200_up_days_min: 21
+  low52w_margin: 1.30
+  high52w_margin: 0.75
+  rs_min: 70
+  score_weights: {rs: 30, ma200_days: 10, near_high: 15, eps_accel: 25, rev_accel: 10, monthly: 10}
+
+vcp:
+  scan_days: 130
+  scan_days_extended: 200
+  base_min_days: 15
+  base_max_days: 200
+  min_days_from_high: 5
+  zigzag_min_pct: 0.03
+  zigzag_atr_mult: 1.2
+  contraction_count: [2, 6]
+  monotonic_tolerance: 1.0
+  first_depth_max: 0.35
+  last_depth_max: 0.10
+  volume_dryup_ratio: 0.80
+  swing_low_tolerance: 0.99
+  score_weights: {tightness: 30, halving: 20, vol_trend: 20, first_depth: 15, duration: 15}
+
+entry:
+  breakout_vol_mult: 1.4
+  extended_pct: 0.05
+  stop_loss_pct: 0.05
+  market_guard_pct: -0.015
+  extended_cooldown_days: 14
+  status_history_days: 90
+
+fundamentals:
+  min_quarters_for_full: 7
+  recommended_quarters: 8
+  stale_days: 120
+
+scoring:
+  phase1_weight: 0.5
+  vcp_weight: 0.5
