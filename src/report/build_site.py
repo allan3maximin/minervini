@@ -1,0 +1,235 @@
+"""Site generation: report.json, breadth.json, per-stock chart JSON, and
+copying the static dashboard/detail-page assets into docs/ (design doc 7).
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+
+from src.config import REPO_ROOT, load_config
+from src.screener.scoring import combined_score
+
+DOCS_DIR = REPO_ROOT / "docs"
+DOCS_DATA_DIR = DOCS_DIR / "data"
+CHARTS_DIR = DOCS_DATA_DIR / "charts"
+REPORT_PATH = DOCS_DATA_DIR / "report.json"
+BREADTH_PATH = DOCS_DATA_DIR / "breadth.json"
+
+STATUS_ORDER = {"BREAKOUT": 0, "WATCH_A": 1, "WATCH_B": 2, "EXTENDED": 3}
+TIER_ORDER = {"confirmed": 0, "pool": 1}
+
+
+# ---------------------------------------------------------------------------
+# 7.2 report.json assembly
+# ---------------------------------------------------------------------------
+
+def assemble_stock_record(
+    code: str,
+    name: str,
+    latest_row: dict,
+    tt_flags: dict,
+    vcp_result: dict,
+    entry_result: dict,
+    fund_info: dict,
+    config: dict | None = None,
+) -> dict:
+    """Combine the outputs of trend_template/vcp/entry/fundamentals into one
+    report.json stock record."""
+    config = config or load_config()
+
+    tier = fund_info["tier"]
+    phase1_score = fund_info.get("full_score") if tier == "confirmed" and fund_info.get("full_score") is not None else fund_info.get("tech_score")
+    vcp_score = vcp_result.get("vcp_score")
+    total_score = combined_score(phase1_score, vcp_score, config) if (phase1_score is not None and vcp_score is not None) else None
+
+    return {
+        "code": code,
+        "name": name,
+        "tier": tier,
+        "status": entry_result.get("status"),
+        "close": latest_row.get("close"),
+        "total_score": total_score,
+        "tech_score": fund_info.get("tech_score"),
+        "full_score": fund_info.get("full_score"),
+        "vcp_score": vcp_score,
+        "rs": latest_row.get("rs"),
+        "footprint": vcp_result.get("footprint"),
+        "pivot": entry_result.get("pivot"),
+        "buy_stop": entry_result.get("buy_stop"),
+        "stop_loss": entry_result.get("stop_loss"),
+        "risk_pct": entry_result.get("risk_pct"),
+        "dist_to_pivot": entry_result.get("dist_to_pivot"),
+        "fund_coverage": fund_info.get("fund_coverage"),
+        "fund_stale": fund_info.get("fund_stale", False),
+        "fund_checked_date": fund_info.get("fund_checked_date"),
+        "eps_accel_slope": fund_info.get("eps_accel_slope"),
+        "must_flags": {"tt": tt_flags, "vcp": vcp_result.get("must_flags")},
+    }
+
+
+def _sort_key(stock: dict) -> tuple:
+    tier_rank = TIER_ORDER.get(stock["tier"], 99)
+    status_rank = STATUS_ORDER.get(stock["status"], 99)
+    score = stock.get("total_score") or 0.0
+    return (tier_rank, status_rank, -score)
+
+
+def build_report(
+    stocks: list[dict],
+    universe_size: int,
+    template_pass: int,
+    data_warnings: dict | None = None,
+    generated_at: str | None = None,
+) -> dict:
+    ordered = sorted(stocks, key=_sort_key)
+    report = {
+        "generated_at": generated_at or datetime.now().astimezone().isoformat(),
+        "universe_size": universe_size,
+        "template_pass": template_pass,
+        "data_warnings": data_warnings or {"failed_tickers": [], "stale_tickers": [], "csv_errors": []},
+        "stocks": ordered,
+    }
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(REPORT_PATH, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    return report
+
+
+# ---------------------------------------------------------------------------
+# 6. Breadth meter
+# ---------------------------------------------------------------------------
+
+def load_breadth() -> dict:
+    if not BREADTH_PATH.exists():
+        return {"history": []}
+    with open(BREADTH_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def compute_breakout_success_rate(
+    status_history: dict, lookback_days: int = 20, hold_days: int = 5
+) -> float | None:
+    """Share of BREAKOUT events (in the trailing `lookback_days` entries per
+    code) that were still above their pivot `hold_days` trading days later.
+
+    Uses status alone as a proxy: BREAKOUT/BREAKOUT_WEAK/EXTENDED all imply
+    close > pivot, while WATCH_A implies the stock fell back below pivot.
+    """
+    successes = 0
+    total = 0
+    for entries in status_history.values():
+        n = len(entries)
+        start = max(0, n - lookback_days - hold_days)
+        for i in range(start, n - hold_days):
+            if entries[i]["status"] == "BREAKOUT":
+                total += 1
+                later_status = entries[i + hold_days]["status"]
+                if later_status in ("BREAKOUT", "BREAKOUT_WEAK", "EXTENDED"):
+                    successes += 1
+    if total == 0:
+        return None
+    return round(successes / total, 3)
+
+
+def update_breadth(
+    date_str: str,
+    universe_size: int,
+    template_pass: int,
+    watch_count: int,
+    status_history: dict,
+    keep_days: int = 60,
+) -> dict:
+    breadth = load_breadth()
+    breadth["history"].append(
+        {
+            "date": date_str,
+            "universe_size": universe_size,
+            "template_pass": template_pass,
+            "template_pass_rate": round(template_pass / universe_size, 4) if universe_size else None,
+            "watch_count": watch_count,
+            "breakout_success_rate": compute_breakout_success_rate(status_history),
+        }
+    )
+    breadth["history"] = breadth["history"][-keep_days:]
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(BREADTH_PATH, "w", encoding="utf-8") as f:
+        json.dump(breadth, f, ensure_ascii=False, indent=2)
+    return breadth
+
+
+# ---------------------------------------------------------------------------
+# 7.4 per-stock chart data
+# ---------------------------------------------------------------------------
+
+def _series_points(df: pd.DataFrame, col: str) -> list[dict]:
+    if col not in df.columns:
+        return []
+    out = []
+    for row in df.itertuples(index=False):
+        value = getattr(row, col)
+        if pd.isna(value):
+            continue
+        out.append({"time": row.date.strftime("%Y-%m-%d"), "value": round(float(value), 4)})
+    return out
+
+
+def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result: dict, lookback_days: int = 260) -> dict:
+    recent = df.tail(lookback_days).reset_index(drop=True)
+
+    candles = [
+        {
+            "time": row.date.strftime("%Y-%m-%d"),
+            "open": round(float(row.open), 2),
+            "high": round(float(row.high), 2),
+            "low": round(float(row.low), 2),
+            "close": round(float(row.close), 2),
+        }
+        for row in recent.itertuples(index=False)
+    ]
+    volume = [
+        {"time": row.date.strftime("%Y-%m-%d"), "value": float(row.volume)}
+        for row in recent.itertuples(index=False)
+    ]
+
+    markers = []
+    for c in vcp_result.get("contractions", []) or []:
+        markers.append({"type": "swing_high", "price": c["high_price"]})
+        markers.append({"type": "swing_low", "price": c["low_price"]})
+
+    return {
+        "code": code,
+        "candles": candles,
+        "volume": volume,
+        "ma50": _series_points(recent, "ma50"),
+        "ma150": _series_points(recent, "ma150"),
+        "ma200": _series_points(recent, "ma200"),
+        "rs_line": _series_points(recent, "rs_line"),
+        "pivot": entry_result.get("pivot"),
+        "stop_loss": entry_result.get("stop_loss"),
+        "markers": markers,
+    }
+
+
+def write_chart_data(code: str, chart_data: dict) -> None:
+    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CHARTS_DIR / f"{code}.json", "w", encoding="utf-8") as f:
+        json.dump(chart_data, f, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Static asset placeholders (index.html/stock.html/assets/* are static files
+# maintained directly in the repo; this just guarantees the data/ directory
+# tree exists so the pages don't 404 on a clean checkout before the first run)
+# ---------------------------------------------------------------------------
+
+def ensure_data_dir_exists() -> None:
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+    if not REPORT_PATH.exists():
+        build_report(stocks=[], universe_size=0, template_pass=0)
+    if not BREADTH_PATH.exists():
+        with open(BREADTH_PATH, "w", encoding="utf-8") as f:
+            json.dump({"history": []}, f, ensure_ascii=False, indent=2)

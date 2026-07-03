@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ミネルヴィニ式スクリーナー</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="page-header">
+  <h1>ミネルヴィニ式スクリーナー</h1>
+  <div id="generated-at" class="meta-line"></div>
+  <div id="breadth-meter" class="breadth-meter"></div>
+</header>
+
+<main>
+  <section class="tier-section">
+    <h2>〔本命〕ファンダ確認済み</h2>
+    <div id="confirmed-tier-body"></div>
+  </section>
+
+  <section class="tier-section">
+    <h2>〔候補プール〕テクニカルのみ</h2>
+    <p class="tier-note">ファンダの裏付けなし。純テクニカル評価によるランキング。気になった銘柄は「ファンダ入力する」でCSVテンプレートをコピーし、manual/fundamentals.csv に追記してください。</p>
+    <div id="pool-tier-body"></div>
+  </section>
+</main>
+
+<footer class="page-footer">
+  <p>既知の制約: EODデータのためザラ場中のブレイクは当日実行まで検知されません(逆指値の事前設定が前提)。RSパーセンタイルの母集団はユニバース内銘柄です。発注前のチャート確認は必須です。</p>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
