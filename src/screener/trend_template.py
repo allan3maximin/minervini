@@ -64,7 +64,7 @@ def technical_score(latest: dict, config: dict | None = None) -> float:
     return round(sum(raw.values()) / max_pts * 100.0, 1)
 
 
-def _quarter_sort_key(fiscal_quarter: str) -> tuple[int, int]:
+def quarter_sort_key(fiscal_quarter: str) -> tuple[int, int]:
     year, q = fiscal_quarter.split("Q")
     return int(year), int(q)
 
@@ -78,14 +78,14 @@ def compute_accel_slope(quarters: list[dict], value_col: str) -> float | None:
     """
     by_q = {q["fiscal_quarter"]: q.get(value_col) for q in quarters}
     by_q = {k: v for k, v in by_q.items() if v is not None}
-    sorted_keys = sorted(by_q.keys(), key=_quarter_sort_key, reverse=True)
+    sorted_keys = sorted(by_q.keys(), key=quarter_sort_key, reverse=True)
 
     growths = []  # (age, growth_pct); age 0 = most recent quarter
     for age in range(4):
         if age >= len(sorted_keys):
             break
         key = sorted_keys[age]
-        year, q = _quarter_sort_key(key)
+        year, q = quarter_sort_key(key)
         prior_key = f"{year - 1}Q{q}"
         prior_val = by_q.get(prior_key)
         if prior_val is None or prior_val <= 0:
@@ -106,8 +106,8 @@ def latest_yoy_growth(quarters: list[dict], value_col: str) -> float | None:
     by_q = {k: v for k, v in by_q.items() if v is not None}
     if not by_q:
         return None
-    latest_key = max(by_q.keys(), key=_quarter_sort_key)
-    year, q = _quarter_sort_key(latest_key)
+    latest_key = max(by_q.keys(), key=quarter_sort_key)
+    year, q = quarter_sort_key(latest_key)
     prior_key = f"{year - 1}Q{q}"
     prior_val = by_q.get(prior_key)
     if prior_val is None or prior_val <= 0:
