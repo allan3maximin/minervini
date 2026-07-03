@@ -2,6 +2,7 @@ universe:
   size: 1000
   liquidity_window: 20
   jpx_list_url: "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
+  manual_exclude_codes: []  # 監理・整理銘柄等、手動除外コード(JPXの当該リストを別途確認して追記)
 
 data:
   history_days: 520
