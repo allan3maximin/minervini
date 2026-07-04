@@ -2,12 +2,15 @@ name: Daily screener run
 
 on:
   schedule:
-    - cron: "30 10 * * 1-5" # 19:30 JST, Mon-Fri
+    - cron: "0 8 * * 1-5" # 17:00 JST, Mon-Fri
   workflow_dispatch:
 
 concurrency:
   group: minervini-daily
   cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   run:

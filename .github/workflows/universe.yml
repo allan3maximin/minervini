@@ -9,6 +9,9 @@ concurrency:
   group: minervini-universe
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   rebuild:
     runs-on: ubuntu-latest
