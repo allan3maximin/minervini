@@ -24,15 +24,46 @@ const COLUMNS = [
 // Dashboard (index.html)
 // ---------------------------------------------------------------------------
 
+let pendingFund = {};
+
 async function initDashboard() {
+  wireHeaderButtons();
+  if (window.MinerviniFundamentalsUI) {
+    window.MinerviniFundamentalsUI.onSaved = initDashboard;
+  }
+
   const [report, breadth] = await Promise.all([
     fetch("data/report.json").then((r) => r.json()),
     fetch("data/breadth.json").then((r) => r.json()).catch(() => ({ history: [] })),
   ]);
+
+  pendingFund = window.MinerviniFundamentalsUI
+    ? window.MinerviniFundamentalsUI.reconcilePending(report.generated_at)
+    : {};
+
   renderHeader(report);
   renderBreadth(breadth);
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
+}
+
+function wireHeaderButtons() {
+  const settingsBtn = document.getElementById("settings-btn");
+  if (settingsBtn && !settingsBtn.dataset.wired) {
+    settingsBtn.dataset.wired = "1";
+    settingsBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openSettingsModal());
+  }
+  const rerunBtn = document.getElementById("rerun-btn");
+  if (rerunBtn && !rerunBtn.dataset.wired) {
+    rerunBtn.dataset.wired = "1";
+    rerunBtn.addEventListener("click", () => {
+      if (!window.MinerviniGitHub.hasToken()) {
+        window.MinerviniFundamentalsUI.openSettingsModal();
+        return;
+      }
+      window.MinerviniFundamentalsUI.triggerManualRerun(rerunBtn);
+    });
+  }
 }
 
 function renderHeader(report) {
@@ -117,9 +148,7 @@ function renderTable(stocks, tier) {
       });
       headRow.appendChild(th);
     }
-    if (tier === "pool") {
-      headRow.appendChild(document.createElement("th"));
-    }
+    headRow.appendChild(document.createElement("th")); // fund input/edit button column
     thead.appendChild(headRow);
     table.appendChild(thead);
 
@@ -136,14 +165,18 @@ function renderTable(stocks, tier) {
         td.textContent = col.key === "fund_status" ? fundStatusLabel(s) : s[col.key] ?? "-";
         row.appendChild(td);
       }
-      if (tier === "pool") {
-        const td = document.createElement("td");
-        const btn = document.createElement("button");
-        btn.textContent = "ファンダ入力する";
-        btn.addEventListener("click", () => copyFundamentalsTemplate(s.code));
-        td.appendChild(btn);
-        row.appendChild(td);
+      const actionTd = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.textContent = "ファンダ入力/編集";
+      btn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(s.code, s.name));
+      actionTd.appendChild(btn);
+      if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pendingFund, s.code)) {
+        const badge = document.createElement("span");
+        badge.className = "pending-badge";
+        badge.textContent = "入力済み・次回実行で本命に昇格予定";
+        actionTd.appendChild(badge);
       }
+      row.appendChild(actionTd);
       tbody.appendChild(row);
     }
     table.appendChild(tbody);
@@ -158,28 +191,6 @@ function fundStatusLabel(s) {
   if (s.fund_coverage === "full") return "full";
   if (s.fund_coverage === "partial") return "partial";
   return "-";
-}
-
-function copyFundamentalsTemplate(code) {
-  const quarters = [];
-  const now = new Date();
-  let year = now.getFullYear();
-  let q = Math.floor(now.getMonth() / 3) + 1;
-  for (let i = 0; i < 8; i++) {
-    quarters.unshift(`${year}Q${q}`);
-    q -= 1;
-    if (q < 1) {
-      q = 4;
-      year -= 1;
-    }
-  }
-  const today = now.toISOString().slice(0, 10);
-  const lines = quarters.map((fq, i) => `${code},${fq},,,,${i === quarters.length - 1 ? today : ""}`);
-  const text = lines.join("\n");
-  navigator.clipboard.writeText(text).then(
-    () => alert(`コード${code}のCSVテンプレート行をコピーしました。manual/fundamentals.csv に貼り付けてください。`),
-    () => alert("クリップボードへのコピーに失敗しました。")
-  );
 }
 
 // ---------------------------------------------------------------------------

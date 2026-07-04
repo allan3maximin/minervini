@@ -8,7 +8,13 @@
 </head>
 <body>
 <header class="page-header">
-  <h1>ミネルヴィニ式スクリーナー</h1>
+  <div class="page-header-top">
+    <h1>ミネルヴィニ式スクリーナー</h1>
+    <div class="page-header-actions">
+      <button type="button" id="rerun-btn" class="secondary">今すぐ再スクリーニング</button>
+      <button type="button" id="settings-btn" class="secondary">設定</button>
+    </div>
+  </div>
   <div id="generated-at" class="meta-line"></div>
   <div id="breadth-meter" class="breadth-meter"></div>
 </header>
@@ -21,7 +27,7 @@
 
   <section class="tier-section">
     <h2>〔候補プール〕テクニカルのみ</h2>
-    <p class="tier-note">ファンダの裏付けなし。純テクニカル評価によるランキング。気になった銘柄は「ファンダ入力する」でCSVテンプレートをコピーし、manual/fundamentals.csv に追記してください。</p>
+    <p class="tier-note">ファンダの裏付けなし。純テクニカル評価によるランキング。気になった銘柄は「ファンダ入力/編集」からデータを入力すると、コミット後の次回実行で〔本命〕に昇格します。</p>
     <div id="pool-tier-body"></div>
   </section>
 </main>
@@ -30,6 +36,9 @@
   <p>既知の制約: EODデータのためザラ場中のブレイクは当日実行まで検知されません(逆指値の事前設定が前提)。RSパーセンタイルの母集団はユニバース内銘柄です。発注前のチャート確認は必須です。</p>
 </footer>
 
+<script src="assets/config.js"></script>
+<script src="assets/github-api.js"></script>
+<script src="assets/fundamentals-modal.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>
