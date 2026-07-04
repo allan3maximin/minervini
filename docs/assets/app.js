@@ -31,6 +31,7 @@ async function initDashboard() {
   if (window.MinerviniFundamentalsUI) {
     window.MinerviniFundamentalsUI.onSaved = initDashboard;
   }
+  await initVaultUi();
 
   const [report, breadth] = await Promise.all([
     fetch("data/report.json").then((r) => r.json()),
@@ -51,19 +52,76 @@ function wireHeaderButtons() {
   const settingsBtn = document.getElementById("settings-btn");
   if (settingsBtn && !settingsBtn.dataset.wired) {
     settingsBtn.dataset.wired = "1";
-    settingsBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openSettingsModal());
+    settingsBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: true }));
   }
   const rerunBtn = document.getElementById("rerun-btn");
   if (rerunBtn && !rerunBtn.dataset.wired) {
     rerunBtn.dataset.wired = "1";
     rerunBtn.addEventListener("click", () => {
-      if (!window.MinerviniGitHub.hasToken()) {
-        window.MinerviniFundamentalsUI.openSettingsModal();
-        return;
-      }
+      if (!window.MinerviniGitHub.hasToken()) return; // guarded by disabled state; safety net
       window.MinerviniFundamentalsUI.triggerManualRerun(rerunBtn);
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Vault (passkey unlock) state -- controls whether write actions are enabled.
+// ---------------------------------------------------------------------------
+
+async function initVaultUi() {
+  const unlockBtn = document.getElementById("vault-unlock-btn");
+  if (!unlockBtn || unlockBtn.dataset.wired) {
+    applyLockState(window.MinerviniGitHub.hasToken());
+    return;
+  }
+  unlockBtn.dataset.wired = "1";
+
+  let vault = null;
+  try {
+    vault = await window.MinerviniVault.fetchVault();
+  } catch (e) {
+    unlockBtn.textContent = "🔓 解錠 (エラー)";
+    unlockBtn.title = e.message || String(e);
+  }
+
+  if (!vault) {
+    unlockBtn.textContent = "🔐 初回セットアップ";
+    unlockBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: false }));
+    applyLockState(false);
+    return;
+  }
+
+  unlockBtn.textContent = "🔓 解錠";
+  unlockBtn.addEventListener("click", async () => {
+    unlockBtn.disabled = true;
+    const original = unlockBtn.textContent;
+    unlockBtn.textContent = "認証中...";
+    try {
+      await window.MinerviniVault.unlock(vault);
+      unlockBtn.textContent = "🔒 解錠済み";
+      applyLockState(true);
+    } catch (e) {
+      unlockBtn.textContent = original;
+      alert(`解錠に失敗しました: ${e.message || e}`);
+    } finally {
+      unlockBtn.disabled = window.MinerviniGitHub.hasToken(); // stays disabled once unlocked (nothing more to do)
+    }
+  });
+
+  applyLockState(window.MinerviniGitHub.hasToken());
+}
+
+// Enables/disables every write-capable button (fund edit, manual rerun)
+// based on whether the vault is currently unlocked.
+function applyLockState(unlocked) {
+  document.querySelectorAll(".write-btn").forEach((btn) => {
+    if (btn.id === "vault-unlock-btn") return; // has its own state, not a plain toggle
+    btn.disabled = !unlocked;
+  });
+  document.querySelectorAll(".fund-edit-btn").forEach((btn) => {
+    btn.disabled = !unlocked;
+    btn.title = unlocked ? "" : "先に🔓解錠してください";
+  });
 }
 
 function renderHeader(report) {
@@ -168,6 +226,9 @@ function renderTable(stocks, tier) {
       const actionTd = document.createElement("td");
       const btn = document.createElement("button");
       btn.textContent = "ファンダ入力/編集";
+      btn.className = "fund-edit-btn";
+      btn.disabled = !window.MinerviniGitHub.hasToken();
+      if (btn.disabled) btn.title = "先に🔓解錠してください";
       btn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(s.code, s.name));
       actionTd.appendChild(btn);
       if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pendingFund, s.code)) {

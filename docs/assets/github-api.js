@@ -1,22 +1,28 @@
 // GitHub Contents/Actions API client + CSV parse/merge/serialize helpers for
 // the browser-based fundamentals editor. No build step: plain globals on
-// `window.MinerviniGitHub`, loaded before fundamentals-modal.js and app.js.
+// `window.MinerviniGitHub`, loaded before webauthn-vault.js/fundamentals-modal.js/app.js.
+//
+// The PAT is held in memory only (module-scope variable) -- never written to
+// localStorage/sessionStorage/IndexedDB. It's set once per tab by
+// webauthn-vault.js after a successful passkey unlock, and disappears when
+// the tab closes. This is intentional: the dashboard is used exclusively in
+// private browsing, where any persistent browser storage is unavailable anyway.
 (function () {
   const GH_API = "https://api.github.com";
-  const TOKEN_KEY = "minervini_gh_token";
   const CSV_HEADER = ["code", "fiscal_quarter", "eps", "revenue", "monthly_yoy", "checked_date"];
 
+  let activeToken = "";
+
   function getToken() {
-    return localStorage.getItem(TOKEN_KEY) || "";
+    return activeToken;
   }
 
   function setToken(token) {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
+    activeToken = token || "";
   }
 
   function hasToken() {
-    return !!getToken();
+    return !!activeToken;
   }
 
   // ---------------------------------------------------------------------
@@ -127,30 +133,41 @@
     return new GitHubApiError(resp.status, detail || `GitHub APIエラー (${resp.status})`);
   }
 
-  async function getFundamentalsFile() {
-    const { owner, repo, fundamentalsPath, branch } = window.MINERVINI_CONFIG;
-    const resp = await ghFetch(`/repos/${owner}/${repo}/contents/${fundamentalsPath}?ref=${encodeURIComponent(branch)}`);
+  // Generic Contents API read/write, reused by the fundamentals CSV editor
+  // and the WebAuthn vault (docs/auth/vault.json).
+  async function getRepoFile(path) {
+    const { owner, repo, branch } = window.MINERVINI_CONFIG;
+    const resp = await ghFetch(`/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
     if (resp.status === 404) {
-      return { rows: [], sha: null };
+      return { content: null, sha: null };
     }
     if (!resp.ok) throw await toApiError(resp);
     const data = await resp.json();
-    const text = decodeBase64Utf8(data.content);
-    return { rows: parseCsv(text), sha: data.sha };
+    return { content: decodeBase64Utf8(data.content), sha: data.sha };
   }
 
-  async function putFundamentalsFile(rows, sha, code) {
-    const { owner, repo, fundamentalsPath, branch } = window.MINERVINI_CONFIG;
-    const body = {
-      message: `fund: ${code} updated via dashboard`,
-      content: encodeBase64Utf8(serializeCsv(rows)),
-      branch,
-    };
+  async function putRepoFile(path, contentText, sha, message) {
+    const { owner, repo, branch } = window.MINERVINI_CONFIG;
+    const body = { message, content: encodeBase64Utf8(contentText), branch };
     if (sha) body.sha = sha;
-    return ghFetch(`/repos/${owner}/${repo}/contents/${fundamentalsPath}`, {
+    return ghFetch(`/repos/${owner}/${repo}/contents/${path}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
+  }
+
+  async function getFundamentalsFile() {
+    const { content, sha } = await getRepoFile(window.MINERVINI_CONFIG.fundamentalsPath);
+    return { rows: content === null ? [] : parseCsv(content), sha };
+  }
+
+  async function putFundamentalsFile(rows, sha, code) {
+    return putRepoFile(
+      window.MINERVINI_CONFIG.fundamentalsPath,
+      serializeCsv(rows),
+      sha,
+      `fund: ${code} updated via dashboard`
+    );
   }
 
   // GET current file -> merge -> PUT. On a 409 (sha changed under us, e.g.
@@ -202,11 +219,14 @@
     parseCsv,
     serializeCsv,
     mergeRows,
+    getRepoFile,
+    putRepoFile,
     getFundamentalsFile,
     putFundamentalsFile,
     saveFundamentalsRows,
     getExistingRowsForCode,
     dispatchDailyWorkflow,
+    toApiError,
     CSV_HEADER,
   };
 })();

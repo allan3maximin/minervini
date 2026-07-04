@@ -148,42 +148,73 @@
   }
 
   // -----------------------------------------------------------------------
-  // Settings modal (token entry)
+  // Settings modal: passkey vault setup / rotation.
+  //
+  // Same modal handles both first-time setup and re-enrollment (rotation)
+  // -- setupVault() always creates a fresh passkey + vault and overwrites
+  // whatever vault.json currently holds, so a stale/lost passkey is
+  // recoverable by just entering a new PAT here.
   // -----------------------------------------------------------------------
 
-  function openSettingsModal(onSaved) {
+  function openVaultSetupModal(options) {
+    options = options || {};
+    const isRotation = !!options.isRotation;
     const el = document.createElement("div");
     el.className = "modal-content";
     el.innerHTML = `
-      <h2>設定 (GitHub Personal Access Token)</h2>
+      <h2>${isRotation ? "パスキーの再セットアップ / ローテーション" : "初回セットアップ (パスキー)"}</h2>
       <p class="modal-note">
-        Fine-grained PATを発行し、対象リポジトリの <strong>Contents: Read and write</strong>
-        権限のみを付与してください。手動再実行ボタンを使う場合は
-        <strong>Actions: Read and write</strong> も追加で付与します。<br>
-        トークンはこのブラウザの localStorage にのみ保存され、サーバへは送信されません。
-        <strong>共有端末では保存しないでください。</strong>
+        入力したPATは、この端末のFace ID/Touch IDで保護されたパスキーで暗号化し、
+        <code>docs/auth/vault.json</code> としてリポジトリにコミットします。
+        このリポジトリは公開設定のため <strong>vault.json自体は誰でも閲覧できます</strong>
+        (中身は暗号化済みですが)。PATは必ず
+        <strong>Fine-grained・対象リポジトリ限定・最小権限</strong>で発行してください。<br><br>
+        対応環境: <strong>iOS 18以降のSafari</strong> のみです。復号鍵やPATはどのストレージにも
+        保存されず、このタブを閉じると消えます。
       </p>
       <label class="field-label">Personal Access Token</label>
-      <input type="password" id="gh-token-input" class="modal-input" autocomplete="off" placeholder="github_pat_..." />
+      <input type="password" id="vault-pat-input" class="modal-input" autocomplete="off" placeholder="github_pat_..." />
+      <div id="vault-setup-error" class="form-error" hidden></div>
       <div class="modal-actions">
-        <button type="button" id="gh-token-clear">クリア</button>
-        <button type="button" id="gh-token-cancel">キャンセル</button>
-        <button type="button" id="gh-token-save" class="primary">保存</button>
+        <button type="button" id="vault-setup-cancel">キャンセル</button>
+        <button type="button" id="vault-setup-submit" class="primary">パスキーを作成してコミット</button>
       </div>
     `;
     openModal(el);
-    document.getElementById("gh-token-input").value = GH.getToken();
-    document.getElementById("gh-token-cancel").addEventListener("click", closeModal);
-    document.getElementById("gh-token-clear").addEventListener("click", () => {
-      GH.setToken("");
-      document.getElementById("gh-token-input").value = "";
-    });
-    document.getElementById("gh-token-save").addEventListener("click", () => {
-      const value = document.getElementById("gh-token-input").value.trim();
-      GH.setToken(value);
-      closeModal();
-      if (onSaved) onSaved();
-    });
+    document.getElementById("vault-setup-cancel").addEventListener("click", closeModal);
+    document.getElementById("vault-setup-submit").addEventListener("click", onSubmit);
+
+    async function onSubmit() {
+      const errEl = document.getElementById("vault-setup-error");
+      errEl.hidden = true;
+      const patInput = document.getElementById("vault-pat-input");
+      let pat = patInput.value.trim();
+      if (!pat) {
+        errEl.textContent = "PATを入力してください。";
+        errEl.hidden = false;
+        return;
+      }
+      const submitBtn = document.getElementById("vault-setup-submit");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "パスキー作成中...(Face ID/Touch IDの確認が表示されます)";
+      try {
+        await window.MinerviniVault.setupVault(pat);
+        pat = ""; // drop the local reference to the plaintext PAT
+        patInput.value = "";
+        closeModal();
+        alert(
+          "セットアップが完了し、vault.jsonをコミットしました。解錠済みなのでこのまま操作できます。\n" +
+            "他の端末/タブでは反映まで数分かかる場合があります(Pagesのキャッシュ)。"
+        );
+        if (window.MinerviniFundamentalsUI.onSaved) window.MinerviniFundamentalsUI.onSaved();
+      } catch (e) {
+        errEl.textContent = e.message || String(e);
+        errEl.hidden = false;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "パスキーを作成してコミット";
+      }
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -192,7 +223,9 @@
 
   async function openFundamentalsModal(code, name) {
     if (!GH.hasToken()) {
-      openSettingsModal(() => openFundamentalsModal(code, name));
+      // Write buttons are disabled while locked, so this is a defense-in-depth
+      // guard, not the primary path -- unlocking happens via the header button.
+      alert("先にヘッダーの「🔓 解錠」でパスキー認証してください。");
       return;
     }
 
@@ -389,7 +422,7 @@
   }
 
   window.MinerviniFundamentalsUI = {
-    openSettingsModal,
+    openVaultSetupModal,
     openFundamentalsModal,
     closeModal,
     reconcilePending,
