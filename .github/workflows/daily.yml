@@ -2,7 +2,7 @@ name: Daily screener run
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5" # 17:00 JST, Mon-Fri
+    - cron: "30 10 * * 1-5" # 19:30 JST, Mon-Fri
   workflow_dispatch:
 
 concurrency:
@@ -29,17 +29,26 @@ jobs:
       - name: Run daily pipeline
         run: python -m src.pipeline
 
-      - name: Pull latest before pushing
-        run: git pull --rebase origin ${{ github.ref_name }}
-
-      - name: Commit and push results
+      - name: Commit results
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/ docs/
           if git diff --cached --quiet; then
             echo "No changes to commit."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: daily screener run $(date -u +%Y-%m-%d)"
-            git push origin HEAD:${{ github.ref_name }}
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # Committing locally *before* pulling means the working tree is clean
+      # here, so `pull --rebase` can cleanly replay our new commit on top of
+      # any commit that landed in the meantime (e.g. a manual CSV edit via
+      # the dashboard) instead of failing outright on local changes.
+      - name: Pull latest and push
+        if: steps.commit.outputs.has_changes == 'true'
+        run: |
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}

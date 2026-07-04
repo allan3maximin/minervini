@@ -317,6 +317,30 @@ function renderStockMeta(stock) {
   `;
 }
 
+// Formats the hovered/crosshair date label as "MM/DD" (zero-padded). Chart
+// data uses "YYYY-MM-DD" strings, which Lightweight Charts parses into a
+// {year, month, day} BusinessDay object.
+function formatChartDate(time) {
+  let d;
+  if (typeof time === "string") {
+    // "YYYY-MM-DD" business-day string, as used by tickMarkFormatter
+    const [y, m, day] = time.split("-").map(Number);
+    d = new Date(y, m - 1, day);
+  } else if (typeof time === "object" && time !== null) {
+    // {year, month, day} BusinessDay object, as used by timeFormatter
+    d = new Date(time.year, time.month - 1, time.day);
+  } else {
+    // UTCTimestamp (seconds since epoch)
+    d = new Date(time * 1000);
+  }
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}`;
+}
+
+const CHART_LOCALIZATION = { timeFormatter: formatChartDate };
+const CHART_TIME_SCALE = { tickMarkFormatter: formatChartDate };
+
 function renderCharts(chart) {
   const priceEl = document.getElementById("chart-container");
   const priceChart = LightweightCharts.createChart(priceEl, {
@@ -324,6 +348,8 @@ function renderCharts(chart) {
     height: 400,
     layout: { background: { color: "#171a21" }, textColor: "#e6e8ec" },
     grid: { vertLines: { color: "#2a2e37" }, horzLines: { color: "#2a2e37" } },
+    localization: CHART_LOCALIZATION,
+    timeScale: CHART_TIME_SCALE,
   });
   const candleSeries = priceChart.addCandlestickSeries();
   candleSeries.setData(chart.candles);
@@ -347,6 +373,8 @@ function renderCharts(chart) {
     width: volEl.clientWidth,
     height: 120,
     layout: { background: { color: "#171a21" }, textColor: "#e6e8ec" },
+    localization: CHART_LOCALIZATION,
+    timeScale: CHART_TIME_SCALE,
   });
   volChart.addHistogramSeries({ color: "#5b9bf0" }).setData(chart.volume || []);
 
@@ -356,6 +384,8 @@ function renderCharts(chart) {
       width: rsEl.clientWidth,
       height: 120,
       layout: { background: { color: "#171a21" }, textColor: "#e6e8ec" },
+      localization: CHART_LOCALIZATION,
+      timeScale: CHART_TIME_SCALE,
     });
     rsChart.addLineSeries({ color: "#009688" }).setData(chart.rs_line);
   } else {
