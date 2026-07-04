@@ -27,11 +27,15 @@ const COLUMNS = [
 let pendingFund = {};
 
 async function initDashboard() {
-  wireHeaderButtons();
-  if (window.MinerviniFundamentalsUI) {
-    window.MinerviniFundamentalsUI.onSaved = initDashboard;
+  if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
+    hidePasskeyAuthUi();
+  } else {
+    wireHeaderButtons();
+    if (window.MinerviniFundamentalsUI) {
+      window.MinerviniFundamentalsUI.onSaved = initDashboard;
+    }
+    await initVaultUi();
   }
-  await initVaultUi();
 
   const [report, breadth] = await Promise.all([
     fetch("data/report.json").then((r) => r.json()),
@@ -46,6 +50,15 @@ async function initDashboard() {
   renderBreadth(breadth);
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
+}
+
+// Kill switch: hides every passkey/write-related control so the dashboard
+// reads as plain read-only while the feature is still being tuned.
+function hidePasskeyAuthUi() {
+  ["vault-unlock-btn", "rerun-btn", "settings-btn"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
 }
 
 function wireHeaderButtons() {
@@ -206,7 +219,10 @@ function renderTable(stocks, tier) {
       });
       headRow.appendChild(th);
     }
-    headRow.appendChild(document.createElement("th")); // fund input/edit button column
+    const authEnabled = window.MINERVINI_CONFIG.passkeyAuthEnabled;
+    if (authEnabled) {
+      headRow.appendChild(document.createElement("th")); // fund input/edit button column
+    }
     thead.appendChild(headRow);
     table.appendChild(thead);
 
@@ -223,21 +239,23 @@ function renderTable(stocks, tier) {
         td.textContent = col.key === "fund_status" ? fundStatusLabel(s) : s[col.key] ?? "-";
         row.appendChild(td);
       }
-      const actionTd = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.textContent = "ファンダ入力/編集";
-      btn.className = "fund-edit-btn";
-      btn.disabled = !window.MinerviniGitHub.hasToken();
-      if (btn.disabled) btn.title = "先に🔓解錠してください";
-      btn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(s.code, s.name));
-      actionTd.appendChild(btn);
-      if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pendingFund, s.code)) {
-        const badge = document.createElement("span");
-        badge.className = "pending-badge";
-        badge.textContent = "入力済み・次回実行で本命に昇格予定";
-        actionTd.appendChild(badge);
+      if (authEnabled) {
+        const actionTd = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.textContent = "ファンダ入力/編集";
+        btn.className = "fund-edit-btn";
+        btn.disabled = !window.MinerviniGitHub.hasToken();
+        if (btn.disabled) btn.title = "先に🔓解錠してください";
+        btn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(s.code, s.name));
+        actionTd.appendChild(btn);
+        if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pendingFund, s.code)) {
+          const badge = document.createElement("span");
+          badge.className = "pending-badge";
+          badge.textContent = "入力済み・次回実行で本命に昇格予定";
+          actionTd.appendChild(badge);
+        }
+        row.appendChild(actionTd);
       }
-      row.appendChild(actionTd);
       tbody.appendChild(row);
     }
     table.appendChild(tbody);

@@ -9,4 +9,8 @@ window.MINERVINI_CONFIG = {
   fundamentalsPath: "manual/fundamentals.csv",
   vaultPath: "docs/auth/vault.json",
   workflowFile: "daily.yml",
+  // Kill switch for the passkey auth / write feature while it's still being
+  // tuned. When false, the unlock/rerun/settings buttons are hidden and no
+  // vault.json fetch happens; the dashboard is read-only.
+  passkeyAuthEnabled: false,
 };
