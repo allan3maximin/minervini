@@ -222,23 +222,26 @@
   // -----------------------------------------------------------------------
 
   async function openFundamentalsModal(code, name) {
-    if (!GH.hasToken()) {
-      // Write buttons are disabled while locked, so this is a defense-in-depth
-      // guard, not the primary path -- unlocking happens via the header button.
-      alert("先にヘッダーの「🔓 解錠」でパスキー認証してください。");
-      return;
-    }
+    // Two persistence modes: with a PAT the form commits via the Contents
+    // API; without one ("no git key" mode) it validates, copies ready-made
+    // CSV rows to the clipboard, and links to GitHub's web editor so the
+    // user can paste + commit manually. Prefill works in both modes (the
+    // repo is public, so the CSV is readable without auth).
+    const manualMode = !GH.hasToken();
+    const saveLabel = manualMode ? "CSV行をコピー(手動コミット)" : "保存してコミット";
 
     const el = document.createElement("div");
     el.className = "modal-content";
     el.innerHTML = `
       <h2>ファンダ入力 / 編集</h2>
       <div class="modal-note">コード: <strong>${escapeHtml(code)}</strong> ${escapeHtml(name || "")}</div>
+      ${manualMode ? '<div class="modal-note">現在は手動コミットモードです。保存を押すとCSV行をクリップボードにコピーするので、GitHubの編集画面で manual/fundamentals.csv に貼り付けてコミットしてください。</div>' : ""}
       <div id="fund-form-body">読み込み中...</div>
       <div id="fund-form-error" class="form-error" hidden></div>
+      <div id="fund-manual-result" class="modal-note" hidden></div>
       <div class="modal-actions">
         <button type="button" id="fund-cancel">キャンセル</button>
-        <button type="button" id="fund-save" class="primary" disabled>保存してコミット</button>
+        <button type="button" id="fund-save" class="primary" disabled>${saveLabel}</button>
       </div>
     `;
     openModal(el);
@@ -248,7 +251,9 @@
     let existingByQuarter = {};
     let latestExisting = null;
     try {
-      const existingRows = await GH.getExistingRowsForCode(code);
+      const existingRows = manualMode
+        ? (await GH.fetchFundamentalsCsvPublic()).filter((r) => r.code === code)
+        : await GH.getExistingRowsForCode(code);
       existingRows.forEach((r) => {
         existingByQuarter[r.fiscal_quarter] = r;
       });
@@ -357,8 +362,9 @@
       clearFieldErrors();
 
       const saveBtn = document.getElementById("fund-save");
+      const originalLabel = saveBtn.textContent;
       saveBtn.disabled = true;
-      saveBtn.textContent = "保存中...";
+      saveBtn.textContent = "処理中...";
 
       try {
         const newRows = rows
@@ -370,19 +376,43 @@
             revenue: r.revenue,
             monthly_yoy: i === 0 ? monthlyYoy : "",
             checked_date: i === 0 ? checkedDate : "",
-          }));
-        await GH.saveFundamentalsRows(code, newRows);
-        markPending(code);
-        closeModal();
-        alert(`${code} のファンダデータを manual/fundamentals.csv に保存しました。次回パイプライン実行で反映されます。`);
-        if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.onSaved) {
-          window.MinerviniFundamentalsUI.onSaved();
+          }))
+          // drop quarters with no actual data so the CSV doesn't accumulate
+          // empty placeholder rows
+          .filter((r) => r.eps !== "" || r.revenue !== "" || r.monthly_yoy !== "");
+
+        if (newRows.length === 0) {
+          renderFormError("EPSまたは売上高をどこかの四半期に入力してください。");
+          return;
+        }
+
+        if (manualMode) {
+          const csvLines = newRows
+            .map((r) => [r.code, r.fiscal_quarter, r.eps, r.revenue, r.monthly_yoy, r.checked_date].join(","))
+            .join("\n");
+          await navigator.clipboard.writeText(csvLines);
+          const { owner, repo, branch, fundamentalsPath } = window.MINERVINI_CONFIG;
+          const editUrl = `https://github.com/${owner}/${repo}/edit/${branch}/${fundamentalsPath}`;
+          const resultEl = document.getElementById("fund-manual-result");
+          resultEl.innerHTML =
+            `${newRows.length}行をクリップボードにコピーしました。` +
+            `<a href="${editUrl}" target="_blank" rel="noopener">GitHubで fundamentals.csv を編集</a>` +
+            `を開き、この銘柄(${escapeHtml(code)})の既存行を置き換える形で貼り付けてコミットしてください。`;
+          resultEl.hidden = false;
+        } else {
+          await GH.saveFundamentalsRows(code, newRows);
+          markPending(code);
+          closeModal();
+          alert(`${code} のファンダデータを manual/fundamentals.csv に保存しました。次回パイプライン実行で反映されます。`);
+          if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.onSaved) {
+            window.MinerviniFundamentalsUI.onSaved();
+          }
         }
       } catch (e) {
         renderFormError(e.message || String(e));
       } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = "保存してコミット";
+        saveBtn.textContent = originalLabel;
       }
     }
   }

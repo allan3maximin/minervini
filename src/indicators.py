@@ -66,9 +66,14 @@ def add_rs_raw(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_rs_line(df: pd.DataFrame, benchmark_close: pd.Series) -> pd.DataFrame:
-    """Price relative to a benchmark (e.g. TOPIX proxy), for chart display."""
+    """Price relative to a benchmark (e.g. TOPIX proxy), for chart display.
+
+    `df` carries its dates in a "date" column (its index is positional), while
+    `benchmark_close` is indexed by date -- so align via the date column, not
+    the index, then forward-fill benchmark gaps (e.g. ETF non-trading days).
+    """
     df = df.copy()
-    bench = benchmark_close.reindex(df.index).ffill()
+    bench = df["date"].map(benchmark_close).ffill()
     df["rs_line"] = df["close"] / bench
     return df
 

@@ -231,6 +231,19 @@ def update_prices(codes: list[str], config: dict | None = None) -> PriceUpdateRe
     return result
 
 
+def drop_benchmark_outliers(close: pd.Series, max_dev: float = 0.3) -> pd.Series:
+    """Drop obviously bad ticks from an index-ETF close series.
+
+    Yahoo occasionally serves isolated rows off by ~10x (seen on 1306.T);
+    a TOPIX ETF never legitimately deviates 30% from its 11-day median, so
+    such rows are data glitches. Dropped days are later forward-filled by
+    consumers (add_rs_line) or simply absent from the return calc.
+    """
+    med = close.rolling(11, center=True, min_periods=1).median()
+    bad = (close / med - 1).abs() > max_dev
+    return close[~bad]
+
+
 def get_benchmark_close(config: dict | None = None) -> pd.Series:
     """Fetch/cache the TOPIX proxy ETF and return its close series indexed by date."""
     config = config or load_config()
@@ -240,4 +253,4 @@ def get_benchmark_close(config: dict | None = None) -> pd.Series:
     df = res.frames.get(code)
     if df is None:
         raise RuntimeError(f"Failed to fetch benchmark ticker {ticker_full}")
-    return df.set_index("date")["close"]
+    return drop_benchmark_outliers(df.set_index("date")["close"])

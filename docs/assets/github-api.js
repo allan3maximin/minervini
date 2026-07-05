@@ -161,6 +161,18 @@
     return { rows: content === null ? [] : parseCsv(content), sha };
   }
 
+  // Unauthenticated read of the fundamentals CSV via raw.githubusercontent.com
+  // (public repo, CORS-enabled). Used to prefill the input form when no PAT
+  // is available -- the "no git key" manual-commit mode.
+  async function fetchFundamentalsCsvPublic() {
+    const { owner, repo, branch, fundamentalsPath } = window.MINERVINI_CONFIG;
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${fundamentalsPath}`;
+    const resp = await fetch(url, { cache: "no-store" });
+    if (resp.status === 404) return [];
+    if (!resp.ok) throw new Error(`fundamentals.csvの取得に失敗しました (${resp.status})`);
+    return parseCsv(await resp.text());
+  }
+
   async function putFundamentalsFile(rows, sha, code) {
     return putRepoFile(
       window.MINERVINI_CONFIG.fundamentalsPath,
@@ -222,6 +234,7 @@
     getRepoFile,
     putRepoFile,
     getFundamentalsFile,
+    fetchFundamentalsCsvPublic,
     putFundamentalsFile,
     saveFundamentalsRows,
     getExistingRowsForCode,
