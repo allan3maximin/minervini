@@ -53,9 +53,12 @@ async function initDashboard() {
 
   // no-store: the daily bot commit refreshes these files; a heuristically
   // cached copy is exactly the "dashboard shows two-day-old data" failure.
-  const [report, breadth] = await Promise.all([
+  const [report, breadth, indices] = await Promise.all([
     fetch("data/report.json", { cache: "no-store" }).then((r) => r.json()),
     fetch("data/breadth.json", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ history: [] })),
+    // indices.json only exists after the first pipeline run with the market
+    // overview feature; render nothing (section stays hidden) until then.
+    fetch("data/indices.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
 
   pendingFund = window.MinerviniFundamentalsUI
@@ -63,6 +66,7 @@ async function initDashboard() {
     : {};
 
   renderHeader(report);
+  renderMarketOverview(indices);
   renderBreadth(breadth);
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
@@ -158,6 +162,67 @@ function renderHeader(report) {
   const el = document.getElementById("generated-at");
   const when = report.generated_at ? new Date(report.generated_at).toLocaleString("ja-JP") : "-";
   el.textContent = `最終更新: ${when} / ユニバース: ${report.universe_size}銘柄 / テンプレート通過: ${report.template_pass}銘柄`;
+}
+
+// ---------------------------------------------------------------------------
+// Market overview (indices.json): one card per index with last value,
+// day-over-day change, and an inline SVG sparkline of the recent series.
+// ---------------------------------------------------------------------------
+
+function formatIndexValue(entry) {
+  const v = entry.last;
+  if (v == null) return "-";
+  if (entry.unit === "%") return v.toFixed(3) + "%";
+  return v.toLocaleString("ja-JP", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatIndexChange(entry) {
+  if (entry.change == null) return "-";
+  const sign = entry.change > 0 ? "+" : "";
+  // Yields move in points, not percent-of-themselves; everything else in %.
+  if (entry.unit === "%") return `${sign}${entry.change.toFixed(3)}pt`;
+  const pct = entry.change_pct != null ? ` (${sign}${entry.change_pct.toFixed(2)}%)` : "";
+  return `${sign}${entry.change.toLocaleString("ja-JP")}${pct}`;
+}
+
+function sparklineSvg(series, isUp) {
+  const points = (series || []).slice(-60).map((p) => p.v);
+  if (points.length < 2) return "";
+  const w = 120;
+  const h = 32;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const step = w / (points.length - 1);
+  const coords = points
+    .map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+    .join(" ");
+  const color = isUp ? "var(--accent)" : "var(--danger)";
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+}
+
+function renderMarketOverview(indices) {
+  const section = document.getElementById("market-overview");
+  const cards = document.getElementById("market-cards");
+  if (!section || !cards) return;
+  if (!indices || !indices.indices || !indices.indices.length) return; // stays hidden
+
+  const staleKeys = new Set(indices.stale_keys || []);
+  cards.innerHTML = indices.indices
+    .map((entry) => {
+      const isUp = (entry.change ?? 0) >= 0;
+      const stale = staleKeys.has(entry.key);
+      return `
+        <div class="market-card${stale ? " is-stale" : ""}">
+          <div class="market-card-name">${entry.name}${stale ? '<span class="stale-badge" title="最新データの取得に失敗（キャッシュ表示）">stale</span>' : ""}</div>
+          <div class="market-card-value">${formatIndexValue(entry)}</div>
+          <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
+          ${sparklineSvg(entry.series, isUp)}
+          <div class="market-card-date">${entry.last_date || ""}</div>
+        </div>`;
+    })
+    .join("");
+  section.hidden = false;
 }
 
 function renderBreadth(breadth) {
@@ -442,6 +507,9 @@ function syncTimeScales(charts) {
   }
 }
 
+// Number of most-recent daily bars shown on first paint (~1 month of trading).
+const INITIAL_DAILY_BARS = 22;
+
 function renderCharts(chart) {
   const monthly = aggregateMonthly(chart);
   const dailyVolume = colorizeVolume(chart);
@@ -450,11 +518,15 @@ function renderCharts(chart) {
   const volEl = document.getElementById("volume-container");
   const rsEl = document.getElementById("rs-container");
   const hasRs = !!(chart.rs_line && chart.rs_line.length);
-  if (!hasRs && rsEl) rsEl.remove();
+  if (!hasRs) {
+    const rsCard = document.getElementById("rs-card");
+    if (rsCard) rsCard.remove();
+  }
 
-  // Only the bottom-most pane shows the time axis; the panes are synced.
-  const priceChart = makeChart(priceEl, { showTimeAxis: false });
-  const volChart = makeChart(volEl, { showTimeAxis: !hasRs });
+  // Each pane lives in its own card now, so each shows its own time axis
+  // (they still pan/zoom in lockstep via syncTimeScales).
+  const priceChart = makeChart(priceEl, { showTimeAxis: true });
+  const volChart = makeChart(volEl, { showTimeAxis: true });
   const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true }) : null;
 
   const candleSeries = priceChart.addCandlestickSeries({
@@ -476,19 +548,115 @@ function renderCharts(chart) {
 
   const rsSeries = rsChart ? rsChart.addLineSeries({ color: "#2dd4bf", lineWidth: 1 }) : null;
 
-  if (chart.pivot) {
-    candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "pivot" });
+  // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
+  // checkboxes in the toolbar. Handles are kept so the lines can be removed.
+  let pivotLine = null;
+  let stopLine = null;
+
+  function wireLineToggle(id, price, apply) {
+    const box = document.getElementById(id);
+    if (!box) return;
+    if (price == null) {
+      box.disabled = true;
+      box.closest("label")?.classList.add("disabled");
+      return;
+    }
+    box.checked = false;
+    box.addEventListener("change", () => apply(box.checked));
   }
-  if (chart.stop_loss) {
-    candleSeries.createPriceLine({ price: chart.stop_loss, color: CHART_COLORS.down, lineWidth: 1, lineStyle: 2, title: "stop loss" });
-  }
+
+  wireLineToggle("toggle-pivot", chart.pivot, (on) => {
+    if (on && !pivotLine) {
+      pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "ピボット" });
+    } else if (!on && pivotLine) {
+      candleSeries.removePriceLine(pivotLine);
+      pivotLine = null;
+    }
+  });
+  wireLineToggle("toggle-stop", chart.stop_loss, (on) => {
+    if (on && !stopLine) {
+      stopLine = candleSeries.createPriceLine({ price: chart.stop_loss, color: CHART_COLORS.down, lineWidth: 1, lineStyle: 2, title: "損切り" });
+    } else if (!on && stopLine) {
+      candleSeries.removePriceLine(stopLine);
+      stopLine = null;
+    }
+  });
 
   const charts = [priceChart, volChart, ...(rsChart ? [rsChart] : [])];
   syncTimeScales(charts);
   window.__minerviniCharts = charts; // debug/testing handle
 
+  // ---- crosshair OHLCV legend -------------------------------------------
+  // Lookup tables keyed by bar time so hovering ANY pane can resolve the
+  // full 日付/OHLC/出来高 row for that day (or month, on the monthly view).
+  function buildBarLookup(candles, volume) {
+    const volByTime = new Map((volume || []).map((v) => [v.time, v.value]));
+    const map = new Map();
+    for (const c of candles) map.set(c.time, { ...c, volume: volByTime.get(c.time) });
+    return map;
+  }
+  const barLookup = {
+    D: buildBarLookup(chart.candles, chart.volume),
+    M: buildBarLookup(monthly.candles, monthly.volume),
+  };
+  let currentTf = "D";
+
+  const legendEl = document.getElementById("ohlc-legend");
+
+  function timeKey(time) {
+    if (typeof time === "string") return time;
+    if (typeof time === "object" && time !== null) {
+      const mm = String(time.month).padStart(2, "0");
+      const dd = String(time.day).padStart(2, "0");
+      return `${time.year}-${mm}-${dd}`;
+    }
+    return null;
+  }
+
+  function fmtPrice(v) {
+    return v == null ? "-" : v.toLocaleString("ja-JP");
+  }
+
+  function fmtVolume(v) {
+    if (v == null) return "-";
+    if (v >= 1e8) return (v / 1e8).toFixed(2) + "億";
+    if (v >= 1e4) return (v / 1e4).toFixed(1) + "万";
+    return String(Math.round(v));
+  }
+
+  function updateLegend(bar) {
+    if (!legendEl) return;
+    if (!bar) {
+      legendEl.innerHTML = "";
+      return;
+    }
+    const dirClass = bar.close >= bar.open ? "chg-up" : "chg-down";
+    legendEl.innerHTML = `
+      <span class="lg-date">${bar.time}</span>
+      <span>始 <b class="${dirClass}">${fmtPrice(bar.open)}</b></span>
+      <span>高 <b class="${dirClass}">${fmtPrice(bar.high)}</b></span>
+      <span>安 <b class="${dirClass}">${fmtPrice(bar.low)}</b></span>
+      <span>終 <b class="${dirClass}">${fmtPrice(bar.close)}</b></span>
+      <span>出来高 <b>${fmtVolume(bar.volume)}</b></span>`;
+  }
+
+  function latestBar() {
+    const candles = currentTf === "M" ? monthly.candles : chart.candles;
+    if (!candles.length) return null;
+    return barLookup[currentTf].get(candles[candles.length - 1].time) || null;
+  }
+
+  for (const c of charts) {
+    c.subscribeCrosshairMove((param) => {
+      const key = param.time != null ? timeKey(param.time) : null;
+      const bar = key ? barLookup[currentTf].get(key) : null;
+      updateLegend(bar || latestBar()); // fall back to the latest bar when not hovering
+    });
+  }
+
   function setTimeframe(tf) {
     const isMonthly = tf === "M";
+    currentTf = tf;
     candleSeries.setData(isMonthly ? monthly.candles : chart.candles);
     volSeries.setData(isMonthly ? monthly.volume : dailyVolume);
     if (rsSeries) rsSeries.setData(isMonthly ? monthly.rs_line : chart.rs_line);
@@ -496,7 +664,15 @@ function renderCharts(chart) {
     ma50.setData(isMonthly ? [] : chart.ma50 || []);
     ma150.setData(isMonthly ? [] : chart.ma150 || []);
     ma200.setData(isMonthly ? [] : chart.ma200 || []);
-    for (const c of charts) c.timeScale().fitContent();
+    if (isMonthly) {
+      for (const c of charts) c.timeScale().fitContent();
+    } else {
+      // Daily opens on roughly the last month of bars; pan/zoom for more.
+      const n = chart.candles.length;
+      const range = { from: Math.max(0, n - INITIAL_DAILY_BARS), to: n + 1 };
+      for (const c of charts) c.timeScale().setVisibleLogicalRange(range);
+    }
+    updateLegend(latestBar());
   }
 
   setTimeframe("D");
@@ -518,6 +694,30 @@ function renderCharts(chart) {
   });
 }
 
+// Japanese labels for the MUST-condition flags. Unknown keys fall back to
+// the raw flag name so新規条件を足してもUIが壊れない.
+const MUST_FLAG_LABELS = {
+  tt: {
+    close_above_ma150_ma200: "終値が150日線・200日線より上",
+    ma150_above_ma200: "150日線が200日線より上",
+    ma200_uptrend_1m: "200日線が1ヶ月以上上向き",
+    ma_stack_50_150_200: "50日線 > 150日線 > 200日線",
+    close_above_ma50: "終値が50日線より上",
+    above_low52w_margin: "52週安値から+30%以上",
+    within_high52w_margin: "52週高値から-25%以内",
+    rs_above_min: "RSレーティング70以上",
+  },
+  vcp: {
+    V1: "収縮回数が2〜6回",
+    V2: "収縮の深さが段階的に減少",
+    V3: "最初の収縮が35%以内",
+    V4: "最後の収縮が10%以内",
+    V5: "出来高ドライアップ(直近10日 ≤ 50日平均×0.8)",
+    V6: "ベース期間が15〜200日",
+    V7: "収縮の安値が切り上がり",
+  },
+};
+
 function renderMustChecklist(mustFlags) {
   const el = document.getElementById("must-checklist");
   el.innerHTML = "";
@@ -525,7 +725,7 @@ function renderMustChecklist(mustFlags) {
     el.textContent = "データなし";
     return;
   }
-  const groupLabels = { tt: "トレンドテンプレート (8条件)", vcp: "VCP (V1-V7)" };
+  const groupLabels = { tt: "トレンドテンプレート (8条件)", vcp: "VCP (V1〜V7)" };
   for (const key of ["tt", "vcp"]) {
     const flags = mustFlags[key];
     if (!flags) continue;
@@ -533,9 +733,10 @@ function renderMustChecklist(mustFlags) {
     h4.textContent = groupLabels[key];
     el.appendChild(h4);
     const ul = document.createElement("ul");
+    const labels = MUST_FLAG_LABELS[key] || {};
     for (const [name, value] of Object.entries(flags)) {
       const li = document.createElement("li");
-      li.textContent = `${value ? "✓" : "✗"} ${name}`;
+      li.textContent = `${value ? "✓" : "✗"} ${labels[name] || name}`;
       li.className = value ? "flag-pass" : "flag-fail";
       ul.appendChild(li);
     }

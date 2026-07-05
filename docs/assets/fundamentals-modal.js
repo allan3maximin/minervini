@@ -127,6 +127,24 @@
   // Generic modal shell
   // -----------------------------------------------------------------------
 
+  // Body scroll lock while a modal is open. `overflow: hidden` alone is not
+  // enough on iOS Safari (the page behind still rubber-bands, which is the
+  // "modal scroll jitters" bug), so pin the body with position:fixed and
+  // restore the scroll offset on close.
+  let savedScrollY = 0;
+
+  function lockBodyScroll() {
+    savedScrollY = window.scrollY || 0;
+    document.body.style.top = `-${savedScrollY}px`;
+    document.body.classList.add("modal-open");
+  }
+
+  function unlockBodyScroll() {
+    document.body.classList.remove("modal-open");
+    document.body.style.top = "";
+    window.scrollTo(0, savedScrollY);
+  }
+
   function openModal(contentEl) {
     closeModal();
     const overlay = document.createElement("div");
@@ -140,11 +158,15 @@
     box.appendChild(contentEl);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+    lockBodyScroll();
   }
 
   function closeModal() {
     const existing = document.getElementById("minervini-modal-overlay");
-    if (existing) existing.remove();
+    if (existing) {
+      existing.remove();
+      unlockBodyScroll();
+    }
   }
 
   // -----------------------------------------------------------------------

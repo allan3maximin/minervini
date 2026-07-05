@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>銘柄詳細 | ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=2">
+<link rel="stylesheet" href="assets/style.css?v=3">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -13,23 +13,44 @@
 <div id="stock-meta" class="meta-chips"></div>
 
 <div class="chart-toolbar">
+  <div class="line-toggles">
+    <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label>
+    <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label>
+  </div>
   <div class="segmented" id="timeframe-toggle">
     <button type="button" data-tf="D" class="active">日足</button>
     <button type="button" data-tf="M">月足</button>
   </div>
 </div>
-<div class="chart-panes">
+
+<section class="chart-card">
+  <div class="chart-card-head">
+    <h2>株価・移動平均線</h2>
+    <div id="ohlc-legend" class="ohlc-legend"></div>
+  </div>
   <div id="chart-container" class="chart-box"></div>
+</section>
+
+<section class="chart-card" id="volume-card">
+  <div class="chart-card-head"><h2>出来高</h2></div>
   <div id="volume-container" class="chart-box chart-box-small"></div>
+</section>
+
+<section class="chart-card" id="rs-card">
+  <div class="chart-card-head"><h2>RSライン（対TOPIX相対力）</h2></div>
   <div id="rs-container" class="chart-box chart-box-small"></div>
-</div>
+</section>
 
-<h2>MUST条件チェックリスト</h2>
-<div id="must-checklist"></div>
+<section class="detail-card">
+  <h2>MUST条件チェックリスト</h2>
+  <div id="must-checklist"></div>
+</section>
 
-<h2>スコア内訳</h2>
-<div id="score-breakdown"></div>
+<section class="detail-card">
+  <h2>スコア内訳</h2>
+  <div id="score-breakdown"></div>
+</section>
 
-<script src="assets/app.js?v=2"></script>
+<script src="assets/app.js?v=3"></script>
 </body>
 </html>

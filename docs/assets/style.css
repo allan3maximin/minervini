@@ -215,24 +215,119 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
   white-space: normal;
 }
 
+/* ------------------------------------------------------- market overview */
+
+.market-overview { margin-bottom: 16px; }
+.market-overview h2 { margin-bottom: 8px; }
+
+.market-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.market-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 8px;
+  min-width: 0;
+}
+.market-card.is-stale { opacity: 0.75; }
+.market-card-name {
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stale-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+.market-card-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.market-card-change { font-size: 11px; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+.chg-up { color: var(--accent); }
+.chg-down { color: var(--danger); }
+.sparkline { display: block; width: 100%; height: 32px; }
+.market-card-date { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
+
 /* --------------------------------------------------------------- charts */
 
 .back-link { color: var(--link); text-decoration: none; font-size: 13px; }
 
 .chart-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin: 12px 0 8px;
 }
 
-.chart-panes {
+.line-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+.line-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  min-height: 34px;
+}
+.line-toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+.line-toggle:has(input:checked) { color: var(--text); }
+.line-toggle.disabled { opacity: 0.4; cursor: not-allowed; }
+
+.chart-card {
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  background: #131720;
+  margin-bottom: 10px;
 }
+.chart-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.chart-card-head h2 { margin: 0; font-size: 13px; color: var(--text-dim); }
+
+.ohlc-legend {
+  display: flex;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ohlc-legend b { font-weight: 600; }
+.ohlc-legend .lg-date { color: var(--text); font-weight: 600; }
+
 .chart-box { height: 400px; }
-.chart-box-small { height: 110px; border-top: 1px solid var(--border); }
+.chart-box-small { height: 140px; }
+
+.detail-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.detail-card h2 { margin-bottom: 6px; }
 
 /* --------------------------------------------------------- must checklist */
 
@@ -275,6 +370,15 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
 
 /* ---------------------------------------------------------------- modal */
 
+/* Set by JS while a modal is open: pins the page behind the overlay so iOS
+   Safari can't rubber-band/scroll it (the modal jitter bug). */
+body.modal-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -284,6 +388,7 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
   justify-content: center;
   z-index: 100;
   padding: 16px;
+  overscroll-behavior: contain;
 }
 .modal-box {
   background: var(--panel);
@@ -292,7 +397,11 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
   max-width: 640px;
   width: 100%;
   max-height: 90vh;
+  max-height: 90dvh; /* dvh: stable under mobile URL-bar show/hide */
   overflow-y: auto;
+  overflow-x: hidden; /* the modal must never scroll sideways */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 20px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
@@ -319,11 +428,14 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
 .form-error { color: var(--danger); font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
 .field-error { color: var(--danger); font-size: 11px; margin: 2px 0 0; }
 
-.fund-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; min-width: 0; }
-.fund-table th, .fund-table td { padding: 4px 4px; text-align: left; border-bottom: none; white-space: normal; }
+/* table-layout: fixed + min-width: 0 inputs keep the quarter-input table
+   inside the modal width on narrow screens (no horizontal overflow). */
+.fund-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; min-width: 0; table-layout: fixed; }
+.fund-table th, .fund-table td { padding: 4px 4px; text-align: left; border-bottom: none; white-space: normal; overflow-wrap: break-word; }
 .fund-table th { position: static; background: transparent; cursor: default; }
 .fund-table input {
   width: 100%;
+  min-width: 0;
   background: var(--bg);
   border: 1px solid var(--border-strong);
   color: var(--text);
@@ -340,11 +452,26 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
   h1 { font-size: 17px; }
   .tier-section { padding: 12px 10px; }
   .chart-box { height: 300px; }
-  .chart-box-small { height: 90px; }
+  .chart-box-small { height: 110px; }
   .breadth-meter { gap: 6px 14px; padding: 8px 10px; }
   .page-header-actions button { flex: 1 1 auto; }
   /* 16px inputs prevent iOS Safari's focus auto-zoom */
   .modal-input, .fund-table input { font-size: 16px; }
-  .modal-box { padding: 14px; }
+  .modal-overlay { padding: 10px; align-items: flex-end; }
+  .modal-box { padding: 14px; max-height: 92dvh; border-radius: 14px 14px 0 0; }
   .score-bar-row { grid-template-columns: 96px 1fr 40px; }
+
+  /* market overview: 2-up cards, tighter */
+  .market-cards { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .market-card { padding: 8px 10px 6px; }
+  .market-card-value { font-size: 15px; }
+
+  /* stock page: stack the toolbar, full-width segmented control */
+  .chart-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .segmented { display: flex; }
+  .segmented button { flex: 1; }
+  .chart-card-head { padding: 6px 10px; }
+  .ohlc-legend { font-size: 11px; gap: 2px 8px; }
+  .detail-card { padding: 10px 10px; }
+  #must-checklist ul { grid-template-columns: 1fr; }
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=2">
+<link rel="stylesheet" href="assets/style.css?v=3">
 </head>
 <body>
 <header class="page-header">
@@ -21,6 +21,11 @@
 </header>
 
 <main>
+  <section class="market-overview" id="market-overview" hidden>
+    <h2>市場概況</h2>
+    <div id="market-cards" class="market-cards"></div>
+  </section>
+
   <section class="tier-section">
     <h2>〔本命〕ファンダ確認済み</h2>
     <div id="confirmed-tier-body"></div>
@@ -43,10 +48,10 @@
   <p>既知の制約: EODデータのためザラ場中のブレイクは当日実行まで検知されません(逆指値の事前設定が前提)。RSパーセンタイルの母集団はユニバース内銘柄です。発注前のチャート確認は必須です。</p>
 </footer>
 
-<script src="assets/config.js?v=2"></script>
-<script src="assets/github-api.js?v=2"></script>
-<script src="assets/webauthn-vault.js?v=2"></script>
-<script src="assets/fundamentals-modal.js?v=2"></script>
-<script src="assets/app.js?v=2"></script>
+<script src="assets/config.js?v=3"></script>
+<script src="assets/github-api.js?v=3"></script>
+<script src="assets/webauthn-vault.js?v=3"></script>
+<script src="assets/fundamentals-modal.js?v=3"></script>
+<script src="assets/app.js?v=3"></script>
 </body>
 </html>

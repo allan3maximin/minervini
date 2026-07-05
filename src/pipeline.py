@@ -14,6 +14,7 @@ from datetime import datetime
 import jpholiday
 
 from src.config import REPO_ROOT, load_config
+from src.data import indices as indices_mod
 from src.data import prices as prices_mod
 from src.data.fundamentals import build_fundamentals_by_code, load_fundamentals_csv, score_stock
 from src.indicators import compute_all, rs_percentile_rank
@@ -37,6 +38,15 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     if jpholiday.is_holiday(today):
         print(f"{today} is a JP holiday; skipping.")
         return 0
+
+    # Market overview indices (Nikkei/TOPIX/Growth/JGB10y/USDJPY/NASDAQ/SOX).
+    # Fully independent of the screener; a failure here must never block it.
+    try:
+        idx_result = indices_mod.update_indices(config)
+        if idx_result["failed"]:
+            print(f"Index fetch failed (kept cache if any): {idx_result['failed']}")
+    except Exception as e:
+        print(f"Index update crashed (ignored): {e}")
 
     if universe_rebuild:
         build_universe(config)
