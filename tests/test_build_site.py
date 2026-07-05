@@ -47,6 +47,30 @@ def test_assemble_stock_record_pool_uses_tech_score_for_total():
     assert record["total_score"] == 65.0  # (60*0.5 + 70*0.5)
 
 
+def test_assemble_stock_record_watchlist_tier_override_falls_back_to_phase1_score():
+    tt_flags = {"cond1": True}
+    # No VCP setup yet: status is one of the "not actionable" VCP states,
+    # vcp_score/footprint/contractions are all absent.
+    vcp_result = {"status": "IMMATURE", "vcp_score": None, "footprint": None, "must_flags": None}
+    entry_result = {"status": "IMMATURE", "pivot": None}
+
+    record = assemble_stock_record(
+        "5555",
+        "Watchlist Co",
+        CONFIG_LATEST,
+        tt_flags,
+        vcp_result,
+        entry_result,
+        _fund_info(tier="pool", tech_score=72.0, full_score=None),
+        tier_override="watchlist",
+    )
+    assert record["tier"] == "watchlist"
+    assert record["status"] == "IMMATURE"
+    assert record["pivot"] is None
+    # no vcp_score available -> total_score falls back to the phase1 (tech) score alone
+    assert record["total_score"] == 72.0
+
+
 def test_build_report_sorts_confirmed_before_pool_and_by_status_then_score(tmp_path, monkeypatch):
     import src.report.build_site as bs
 
@@ -58,12 +82,13 @@ def test_build_report_sorts_confirmed_before_pool_and_by_status_then_score(tmp_p
         {"code": "B", "tier": "confirmed", "status": "BREAKOUT", "total_score": 50},
         {"code": "C", "tier": "confirmed", "status": "WATCH_A", "total_score": 95},
         {"code": "D", "tier": "confirmed", "status": "WATCH_A", "total_score": 60},
+        {"code": "E", "tier": "watchlist", "status": "IMMATURE", "total_score": 99},
     ]
     report = build_report(stocks, universe_size=1000, template_pass=87)
     codes = [s["code"] for s in report["stocks"]]
     # confirmed tier first; within confirmed, BREAKOUT before WATCH_A; within
-    # WATCH_A, higher score first
-    assert codes == ["B", "C", "D", "A"]
+    # WATCH_A, higher score first; watchlist always last regardless of score
+    assert codes == ["B", "C", "D", "A", "E"]
 
 
 def test_compute_breakout_success_rate_counts_holds_above_pivot():

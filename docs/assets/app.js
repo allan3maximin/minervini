@@ -4,8 +4,22 @@ const STATUS_LABELS = {
   WATCH_A: "WATCH_A (ピボット待ち)",
   WATCH_B: "WATCH_B (ベース形成中)",
   EXTENDED: "EXTENDED (追いかけ禁止)",
+  REJECTED: "ベース崩れ",
+  IMMATURE: "ベース形成中(未成熟)",
+  TOO_RECENT: "高値更新中(ベース未形成)",
+  NO_BASE: "ベース未検出",
 };
-const STATUS_ORDER = ["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED"];
+const STATUS_ORDER = [
+  "BREAKOUT",
+  "BREAKOUT_WEAK",
+  "WATCH_A",
+  "WATCH_B",
+  "EXTENDED",
+  "REJECTED",
+  "IMMATURE",
+  "TOO_RECENT",
+  "NO_BASE",
+];
 
 const COLUMNS = [
   { key: "code", label: "コード" },
@@ -50,6 +64,7 @@ async function initDashboard() {
   renderBreadth(breadth);
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
+  renderTier(report, "watchlist", "watchlist-tier-body");
 }
 
 // Kill switch: hides every passkey/write-related control so the dashboard

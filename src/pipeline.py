@@ -88,6 +88,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     today_str = today.isoformat()
     stock_records = []
     watch_count = 0
+    actionable_count = 0
 
     for code, tt_result in tt_by_code.items():
         if not tt_result["passed"]:
@@ -96,41 +97,59 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         df_ind = indicator_by_code[code]
         vcp_result = vcp_mod.evaluate_vcp(df_ind, config)
         entry_result = entry_mod.evaluate_entry(code, latest_by_code[code], vcp_result, history, config)
-
-        if entry_result.get("pivot") is None or entry_result["status"] not in ACTIONABLE_ENTRY_STATUSES:
-            continue
-
-        stop_ref_low = None
-        if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
-            stop_ref_low = vcp_result["contractions"][-1]["low_price"]
-        else:
-            locked = entry_mod.locked_pivot(history, code)
-            if locked:
-                stop_ref_low = locked.get("stop_ref_low")
-
-        history = entry_mod.record_status(
-            history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
-        )
-
-        if entry_result["status"] in ("WATCH_A", "WATCH_B"):
-            watch_count += 1
-
         fund_info = score_stock(code, latest_by_code[code], fundamentals_by_code, today, config)
-        record = build_site.assemble_stock_record(
-            code,
-            name_by_code.get(code, ""),
-            latest_by_code[code],
-            tt_result["must_flags"],
-            vcp_result,
-            entry_result,
-            fund_info,
-            config,
-        )
 
-        if entry_result["status"] == "BREAKOUT":
-            record["new_breakout_today"] = previous_status_by_code.get(code) == "WATCH_A"
-            if topix_return is not None and entry_mod.market_guard_triggered(topix_return, config):
-                record["market_guard_warning"] = True
+        is_actionable = entry_result.get("pivot") is not None and entry_result["status"] in ACTIONABLE_ENTRY_STATUSES
+
+        if is_actionable:
+            actionable_count += 1
+            stop_ref_low = None
+            if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
+                stop_ref_low = vcp_result["contractions"][-1]["low_price"]
+            else:
+                locked = entry_mod.locked_pivot(history, code)
+                if locked:
+                    stop_ref_low = locked.get("stop_ref_low")
+
+            history = entry_mod.record_status(
+                history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
+            )
+
+            if entry_result["status"] in ("WATCH_A", "WATCH_B"):
+                watch_count += 1
+
+            record = build_site.assemble_stock_record(
+                code,
+                name_by_code.get(code, ""),
+                latest_by_code[code],
+                tt_result["must_flags"],
+                vcp_result,
+                entry_result,
+                fund_info,
+                config,
+            )
+
+            if entry_result["status"] == "BREAKOUT":
+                record["new_breakout_today"] = previous_status_by_code.get(code) == "WATCH_A"
+                if topix_return is not None and entry_mod.market_guard_triggered(topix_return, config):
+                    record["market_guard_warning"] = True
+        else:
+            # Watchlist: passed the trend template, but VCP hasn't produced
+            # an actionable base yet (still building, too recent, or the
+            # base broke down). No pivot/stop levels, but still worth
+            # surfacing as a tier below the pool instead of disappearing
+            # entirely once it falls out of an active setup.
+            record = build_site.assemble_stock_record(
+                code,
+                name_by_code.get(code, ""),
+                latest_by_code[code],
+                tt_result["must_flags"],
+                vcp_result,
+                entry_result,
+                fund_info,
+                config,
+                tier_override="watchlist",
+            )
 
         stock_records.append(record)
         chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
@@ -149,7 +168,11 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     )
     build_site.update_breadth(today_str, len(codes), template_pass, watch_count, history)
 
-    print(f"Done. {template_pass}/{len(codes)} passed trend template, {len(stock_records)} actionable stocks.")
+    watchlist_count = len(stock_records) - actionable_count
+    print(
+        f"Done. {template_pass}/{len(codes)} passed trend template, "
+        f"{actionable_count} actionable, {watchlist_count} watchlist."
+    )
     return 0
 
 

@@ -18,8 +18,20 @@ CHARTS_DIR = DOCS_DATA_DIR / "charts"
 REPORT_PATH = DOCS_DATA_DIR / "report.json"
 BREADTH_PATH = DOCS_DATA_DIR / "breadth.json"
 
-STATUS_ORDER = {"BREAKOUT": 0, "WATCH_A": 1, "WATCH_B": 2, "EXTENDED": 3}
-TIER_ORDER = {"confirmed": 0, "pool": 1}
+STATUS_ORDER = {
+    "BREAKOUT": 0,
+    "BREAKOUT_WEAK": 1,
+    "WATCH_A": 2,
+    "WATCH_B": 3,
+    "EXTENDED": 4,
+    # Watchlist tier: trend template passed, but VCP hasn't produced an
+    # actionable setup yet. Ordered roughly by "how close to a real base".
+    "REJECTED": 5,
+    "IMMATURE": 6,
+    "TOO_RECENT": 7,
+    "NO_BASE": 8,
+}
+TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -35,15 +47,28 @@ def assemble_stock_record(
     entry_result: dict,
     fund_info: dict,
     config: dict | None = None,
+    tier_override: str | None = None,
 ) -> dict:
     """Combine the outputs of trend_template/vcp/entry/fundamentals into one
-    report.json stock record."""
+    report.json stock record.
+
+    `tier_override` lets the caller place a stock in the "watchlist" tier
+    (trend template passed, but no actionable VCP/entry setup yet) instead
+    of the fundamentals-coverage-derived confirmed/pool tier.
+    """
     config = config or load_config()
 
-    tier = fund_info["tier"]
+    tier = tier_override or fund_info["tier"]
     phase1_score = fund_info.get("full_score") if tier == "confirmed" and fund_info.get("full_score") is not None else fund_info.get("tech_score")
     vcp_score = vcp_result.get("vcp_score")
-    total_score = combined_score(phase1_score, vcp_score, config) if (phase1_score is not None and vcp_score is not None) else None
+    if phase1_score is not None and vcp_score is not None:
+        total_score = combined_score(phase1_score, vcp_score, config)
+    elif phase1_score is not None:
+        # Watchlist stocks (no VCP setup yet): rank by the trend-template
+        # score alone rather than leaving total_score empty.
+        total_score = round(phase1_score, 1)
+    else:
+        total_score = None
 
     return {
         "code": code,
