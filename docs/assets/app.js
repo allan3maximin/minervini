@@ -24,6 +24,7 @@ const STATUS_ORDER = [
 const COLUMNS = [
   { key: "code", label: "コード" },
   { key: "name", label: "銘柄名" },
+  { key: "close", label: "終値" },
   { key: "total_score", label: "総合スコア" },
   { key: "rs", label: "RS" },
   { key: "footprint", label: "フットプリント" },
@@ -338,7 +339,12 @@ function renderTable(stocks, tier) {
       });
       for (const col of COLUMNS) {
         const td = document.createElement("td");
-        td.textContent = col.key === "fund_status" ? fundStatusLabel(s) : s[col.key] ?? "-";
+        td.textContent =
+          col.key === "fund_status"
+            ? fundStatusLabel(s)
+            : col.key === "close"
+              ? formatClose(s.close)
+              : s[col.key] ?? "-";
         row.appendChild(td);
       }
       const actionTd = document.createElement("td");
@@ -368,6 +374,10 @@ function renderTable(stocks, tier) {
 
   draw();
   return wrapper;
+}
+
+function formatClose(v) {
+  return v == null ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: 1 });
 }
 
 function fundStatusLabel(s) {
@@ -423,9 +433,13 @@ function sectorSummary(s) {
   return `${s.sector33}${strength}`;
 }
 
+// 基本列(コード〜RS)は候補テーブル(COLUMNS)と共通の並び。その後ろに
+// プライオリティ専用列が続く。
 const PRIORITY_COLUMNS = [
   { key: "code", label: "コード", value: (s) => s.code },
   { key: "name", label: "銘柄名", value: (s) => s.name },
+  { key: "close", label: "終値", value: (s) => formatClose(s.close) },
+  { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
   { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
   { key: "sector", label: "セクター(強度)", value: sectorSummary },
   { key: "unmet", label: "未達条件(距離)", value: unmetSummary },
@@ -436,6 +450,11 @@ const PRIORITY_COLUMNS = [
     value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
   },
 ];
+
+// 表示足切り: バッチ側は全データを保持したまま、画面には各グループの
+// RS>=80 かつ RS降順上位30件だけを出す(多すぎて見きれない対策)。
+const PRIORITY_DISPLAY_MIN_RS = 80;
+const PRIORITY_DISPLAY_MAX_ROWS = 30;
 
 function renderPriorityTier(report, containerId) {
   const container = document.getElementById(containerId);
@@ -449,12 +468,31 @@ function renderPriorityTier(report, containerId) {
   for (const prio of [1, 2, 3, 4]) {
     const group = stocks.filter((s) => s.priority === prio);
     if (!group.length) continue;
+    const shown = group
+      .filter((s) => (s.rs ?? 0) >= PRIORITY_DISPLAY_MIN_RS)
+      .sort((a, b) => (b.rs ?? 0) - (a.rs ?? 0))
+      .slice(0, PRIORITY_DISPLAY_MAX_ROWS);
     const section = document.createElement("div");
     section.className = `status-section priority-${prio}`;
     const h3 = document.createElement("h3");
-    h3.innerHTML = `<span class="prio-badge prio-${prio}">P${prio}</span> ${PRIORITY_LABELS[prio] || ""} (${group.length})`;
+    h3.innerHTML = `<span class="prio-badge prio-${prio}">P${prio}</span> ${PRIORITY_LABELS[prio] || ""} (表示${shown.length} / 全${group.length})`;
     section.appendChild(h3);
-    section.appendChild(renderPriorityTable(group));
+    if (!shown.length) {
+      const note = document.createElement("p");
+      note.className = "tier-note";
+      note.textContent = `RS${PRIORITY_DISPLAY_MIN_RS}以上の銘柄なし(全${group.length}件はJSONに保持)`;
+      section.appendChild(note);
+      container.appendChild(section);
+      continue;
+    }
+    section.appendChild(renderPriorityTable(shown));
+    const hidden = group.length - shown.length;
+    if (hidden > 0) {
+      const note = document.createElement("p");
+      note.className = "tier-note";
+      note.textContent = `他${hidden}件は非表示 (RS${PRIORITY_DISPLAY_MIN_RS}未満または上位${PRIORITY_DISPLAY_MAX_ROWS}件圏外。データはreport.jsonに保持)`;
+      section.appendChild(note);
+    }
     container.appendChild(section);
   }
   // priority未設定の旧データへのフォールバック(移行期の1回だけあり得る)

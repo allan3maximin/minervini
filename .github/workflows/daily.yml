@@ -2,7 +2,7 @@ name: Daily screener run
 
 on:
   schedule:
-    - cron: "30 10 * * 1-5" # 19:30 JST, Mon-Fri
+    - cron: "30 7 * * 1-5" # 16:30 JST, Mon-Fri (実際の起動は数分〜数十分遅れることがある)
   workflow_dispatch:
 
 concurrency:
