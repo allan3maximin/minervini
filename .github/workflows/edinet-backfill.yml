@@ -1,21 +1,26 @@
-name: Daily screener run
+name: EDINET fundamentals backfill
 
+# 手動実行専用。過去N日分の提出書類を遡ってファンダを取得する。
+# 初回は days=730 程度を推奨 (2024年4月以前の四半期報告書を拾うため)。
 on:
-  schedule:
-    - cron: "30 7 * * 1-5" # 16:30 JST, Mon-Fri (実際の起動は数分〜数十分遅れることがある)
   workflow_dispatch:
+    inputs:
+      days:
+        description: "遡って取得する日数"
+        required: true
+        default: "730"
 
 concurrency:
-  group: minervini-daily
+  group: minervini-edinet-backfill
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  run:
+  backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -26,29 +31,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run daily pipeline
+      - name: Run backfill
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
-        run: python -m src.pipeline
+        run: python -m src.data.edinet --backfill-days "${{ github.event.inputs.days }}"
 
       - name: Commit results
         id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ docs/
+          git add data/
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "chore: daily screener run $(date -u +%Y-%m-%d)"
+            git commit -m "chore: EDINET fundamentals backfill $(date -u +%Y-%m-%d)"
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Committing locally *before* pulling means the working tree is clean
-      # here, so `pull --rebase` can cleanly replay our new commit on top of
-      # any commit that landed in the meantime (e.g. a manual CSV edit via
-      # the dashboard) instead of failing outright on local changes.
       - name: Pull latest and push
         if: steps.commit.outputs.has_changes == 'true'
         run: |

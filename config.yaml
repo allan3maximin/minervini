@@ -88,6 +88,15 @@ fundamentals:
   recommended_quarters: 8
   stale_days: 120
 
+# EDINET API v2 ファンダ自動取得 (要 GitHub Secret: EDINET_API_KEY)
+edinet:
+  enabled: true
+  api_url: "https://api.edinet-fsa.go.jp/api/v2"
+  lookback_days: 7          # 日次実行時の提出書類リスト遡り日数
+  sleep_sec: 0.3            # APIリクエスト間スリープ
+  doc_type_codes: ["120", "140", "160"]  # 有報 / 四半期報告書(2024年4月廃止) / 半期報告書
+  max_quarters_keep: 12     # 銘柄あたり保持する四半期数
+
 scoring:
   phase1_weight: 0.5
   vcp_weight: 0.5

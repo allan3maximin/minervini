@@ -16,7 +16,8 @@ import jpholiday
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
 from src.data import prices as prices_mod
-from src.data.fundamentals import build_fundamentals_by_code, load_fundamentals_csv, score_stock
+from src.data import edinet as edinet_mod
+from src.data.fundamentals import build_fundamentals_by_code, load_fundamentals_csv, merge_fundamentals, score_stock
 from src.indicators import compute_all, rs_percentile_rank
 from src.report import build_site
 from src.report import heatmap as heatmap_mod
@@ -102,7 +103,15 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     p1_scarce = pr_counts["p1"] < config.get("priority", {}).get("p1_warn_threshold", 3)
 
     csv_df, csv_warnings = load_fundamentals_csv()
-    fundamentals_by_code = build_fundamentals_by_code(csv_df)
+
+    # EDINET自動ファンダ取得(キー未設定なら既存キャッシュのみ)。失敗しても本体は止めない。
+    auto_by_code = {}
+    try:
+        auto_by_code = edinet_mod.update_fundamentals_auto(codes, config)
+    except Exception as e:
+        print(f"EDINET fundamentals update failed (ignored): {e}")
+
+    fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))
 
     history = entry_mod.load_status_history()
     previous_status_by_code = {code: entry_mod.previous_status(history, code) for code in codes}

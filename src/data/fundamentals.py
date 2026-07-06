@@ -1,10 +1,10 @@
 """Manual-CSV fundamentals loader, validation, tier determination, and staleness
 guard (design doc section 1.3).
 
-Fundamentals are never fetched automatically in v1 -- the only source is a
-human-maintained manual/fundamentals.csv. Coverage is intentionally partial:
-only stocks a human found interesting in the candidate pool get a row, and
-absence of a row is not an error, just "pool" tier.
+Sources: EDINET API auto-fetch (src/data/edinet.py, data/fundamentals_auto.json)
+merged with the human-maintained manual/fundamentals.csv via merge_fundamentals
+(manual rows win per quarter). Absence of any row is not an error, just "pool"
+tier.
 """
 from __future__ import annotations
 
@@ -85,6 +85,33 @@ def build_fundamentals_by_code(df: pd.DataFrame) -> dict[str, dict]:
             "quarters": quarters,
             "monthly_yoy": latest.get("monthly_yoy"),
             "checked_date": latest.get("checked_date"),
+        }
+    return result
+
+
+def merge_fundamentals(auto_by_code: dict, manual_by_code: dict) -> dict:
+    """EDINET自動取得と手動CSVを統合する。同一(code, fiscal_quarter)は手動が勝ち、
+    monthly_yoy / checked_date も手動があれば手動を採用する。"""
+    result: dict[str, dict] = {}
+    for code in set(auto_by_code) | set(manual_by_code):
+        auto = auto_by_code.get(code) or {}
+        manual = manual_by_code.get(code) or {}
+
+        by_label: dict[str, dict] = {}
+        for q in auto.get("quarters", []):
+            fq = q.get("fiscal_quarter")
+            if fq:
+                by_label[fq] = {"fiscal_quarter": fq, "eps": q.get("eps"), "revenue": q.get("revenue")}
+        for q in manual.get("quarters", []):
+            fq = q.get("fiscal_quarter")
+            if fq:
+                by_label[fq] = dict(q)  # manual wins
+
+        quarters = sorted(by_label.values(), key=lambda q: quarter_sort_key(q["fiscal_quarter"]))
+        result[code] = {
+            "quarters": quarters,
+            "monthly_yoy": manual.get("monthly_yoy") if manual else None,
+            "checked_date": manual.get("checked_date") or auto.get("checked_date"),
         }
     return result
 

@@ -237,13 +237,10 @@ function renderBreadth(breadth, report) {
   const passRate = latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-";
   const successRate =
     latest.breakout_success_rate != null ? (latest.breakout_success_rate * 100).toFixed(0) + "%" : "-";
-  // 機能A: P1〜P4件数(地合い指標)。breadth履歴優先、なければreport.jsonから。
+  // 地合い指標: 8条件完全一致(候補)の件数。breadth履歴優先、なければreport.jsonから。
   const pc = (report && report.priority_counts) || null;
   const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
-  const prioLine =
-    p1 != null
-      ? `<span>P1: ${p1} / P2: ${latest.p2_count ?? (pc ? pc.p2 : "-")} / P3: ${latest.p3_count ?? (pc ? pc.p3 : "-")} / P4: ${latest.p4_count ?? (pc ? pc.p4 : "-")}</span>`
-      : "";
+  const prioLine = p1 != null ? `<span>候補(8条件合格): ${p1}件</span>` : "";
   el.innerHTML = `
     <span>テンプレート通過率: ${passRate}</span>
     <span>セットアップ数: ${latest.watch_count ?? "-"}</span>
@@ -252,13 +249,13 @@ function renderBreadth(breadth, report) {
   `;
 }
 
-// 機能A: P1銘柄が極端に少ない場合の弱地合い警告バナー。
+// 8条件完全一致の候補銘柄が極端に少ない場合の弱地合い警告バナー。
 function renderP1Warning(report) {
   const el = document.getElementById("p1-warning");
   if (!el) return;
   if (report.p1_scarce) {
     const p1 = report.priority_counts ? report.priority_counts.p1 : 0;
-    el.textContent = `⚠ P1(8条件完全一致)銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
+    el.textContent = `⚠ 8条件完全一致の候補銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
     el.hidden = false;
   } else {
     el.hidden = true;
@@ -388,37 +385,9 @@ function fundStatusLabel(s) {
 }
 
 // ---------------------------------------------------------------------------
-// 機能A: プライオリティ(P1〜P4)ティア -- 旧ウォッチリスト置き換え。
-// report.json側で priority昇順 -> セクター強度 -> RS降順 に複合ソート済み。
+// 〔候補〕トレンドテンプレート8条件合格(旧P1)一覧。P2〜P4はUI廃止(データは
+// report.jsonに残るがダッシュボードには出さない)。全件をRS降順で表示する。
 // ---------------------------------------------------------------------------
-
-const PRIORITY_LABELS = {
-  1: "P1 — 8条件完全一致(セットアップ待ち)",
-  2: "P2 — ペナルティ1",
-  3: "P3 — ペナルティ2〜3",
-  4: "P4 — ペナルティ4以上",
-};
-
-const PRIORITY_COND_LABELS = {
-  close_above_ma50: "終値≦50日線",
-  near_high52w: "52週高値から遠い",
-  ma50_above_ma150: "50≦150日線(並び崩れ)",
-  rs_above_min: "RS70未満",
-};
-
-function unmetSummary(s) {
-  if (!s.priority_unmet || !s.priority_unmet.length) return "なし";
-  return s.priority_unmet
-    .map((u) => {
-      const label = PRIORITY_COND_LABELS[u.condition] || u.condition;
-      let dist = "";
-      if (u.distance_pct != null) {
-        dist = u.condition === "rs_above_min" ? ` (差${u.distance_pct})` : ` (${u.distance_pct}%)`;
-      }
-      return `${label}${dist} [+${u.penalty}]`;
-    })
-    .join(" / ");
-}
 
 function maDeviationSummary(s) {
   const d = s.ma_deviation_pct;
@@ -433,8 +402,8 @@ function sectorSummary(s) {
   return `${s.sector33}${strength}`;
 }
 
-// 基本列(コード〜RS)は候補テーブル(COLUMNS)と共通の並び。その後ろに
-// プライオリティ専用列が続く。
+// 基本列(コード〜RS)は本命/候補プールのテーブル(COLUMNS)と共通の並び。
+// その後ろに候補専用列(セクター/MA乖離/52週高値距離)が続く。
 const PRIORITY_COLUMNS = [
   { key: "code", label: "コード", value: (s) => s.code },
   { key: "name", label: "銘柄名", value: (s) => s.name },
@@ -442,7 +411,6 @@ const PRIORITY_COLUMNS = [
   { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
   { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
   { key: "sector", label: "セクター(強度)", value: sectorSummary },
-  { key: "unmet", label: "未達条件(距離)", value: unmetSummary },
   { key: "ma_dev", label: "MA乖離", value: maDeviationSummary },
   {
     key: "high_dist",
@@ -451,61 +419,23 @@ const PRIORITY_COLUMNS = [
   },
 ];
 
-// 表示足切り: バッチ側は全データを保持したまま、画面には各グループの
-// RS>=80 かつ RS降順上位30件だけを出す(多すぎて見きれない対策)。
-const PRIORITY_DISPLAY_MIN_RS = 80;
-const PRIORITY_DISPLAY_MAX_ROWS = 30;
-
 function renderPriorityTier(report, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = "";
-  const stocks = report.stocks.filter((s) => s.tier === "watchlist");
+  // 8条件合格(旧P1)のみ。priority未設定の旧データも合格扱いで拾う。
+  const stocks = report.stocks
+    .filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null))
+    .sort((a, b) => (b.rs ?? 0) - (a.rs ?? 0));
   if (!stocks.length) {
     container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
     return;
   }
-  for (const prio of [1, 2, 3, 4]) {
-    const group = stocks.filter((s) => s.priority === prio);
-    if (!group.length) continue;
-    const shown = group
-      .filter((s) => (s.rs ?? 0) >= PRIORITY_DISPLAY_MIN_RS)
-      .sort((a, b) => (b.rs ?? 0) - (a.rs ?? 0))
-      .slice(0, PRIORITY_DISPLAY_MAX_ROWS);
-    const section = document.createElement("div");
-    section.className = `status-section priority-${prio}`;
-    const h3 = document.createElement("h3");
-    h3.innerHTML = `<span class="prio-badge prio-${prio}">P${prio}</span> ${PRIORITY_LABELS[prio] || ""} (表示${shown.length} / 全${group.length})`;
-    section.appendChild(h3);
-    if (!shown.length) {
-      const note = document.createElement("p");
-      note.className = "tier-note";
-      note.textContent = `RS${PRIORITY_DISPLAY_MIN_RS}以上の銘柄なし(全${group.length}件はJSONに保持)`;
-      section.appendChild(note);
-      container.appendChild(section);
-      continue;
-    }
-    section.appendChild(renderPriorityTable(shown));
-    const hidden = group.length - shown.length;
-    if (hidden > 0) {
-      const note = document.createElement("p");
-      note.className = "tier-note";
-      note.textContent = `他${hidden}件は非表示 (RS${PRIORITY_DISPLAY_MIN_RS}未満または上位${PRIORITY_DISPLAY_MAX_ROWS}件圏外。データはreport.jsonに保持)`;
-      section.appendChild(note);
-    }
-    container.appendChild(section);
-  }
-  // priority未設定の旧データへのフォールバック(移行期の1回だけあり得る)
-  const legacy = stocks.filter((s) => s.priority == null);
-  if (legacy.length) {
-    const section = document.createElement("div");
-    section.className = "status-section";
-    const h3 = document.createElement("h3");
-    h3.textContent = `未分類 (${legacy.length})`;
-    section.appendChild(h3);
-    section.appendChild(renderPriorityTable(legacy));
-    container.appendChild(section);
-  }
+  const note = document.createElement("p");
+  note.className = "tier-note";
+  note.textContent = `全${stocks.length}件 (RS降順)`;
+  container.appendChild(note);
+  container.appendChild(renderPriorityTable(stocks));
 }
 
 function renderPriorityTable(stocks) {
@@ -678,9 +608,35 @@ function makeChart(el, { showTimeAxis }) {
     // Fixed-width right axis keeps all panes horizontally aligned.
     rightPriceScale: { minimumWidth: 72, borderColor: CHART_COLORS.grid },
     localization: CHART_LOCALIZATION,
-    timeScale: { ...CHART_TIME_SCALE, visible: showTimeAxis, borderColor: CHART_COLORS.grid },
+    // fixRightEdge: the latest bar stays pinned to the right edge, so the
+    // axis dates always count back from the newest date.
+    timeScale: { ...CHART_TIME_SCALE, visible: showTimeAxis, borderColor: CHART_COLORS.grid, fixRightEdge: true, rightOffset: 0 },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    // 価格軸ドラッグでの縮尺変更を無効化(オートスケール固定)。時間軸は可。
+    handleScale: {
+      axisPressedMouseMove: { time: true, price: false },
+      mouseWheel: true,
+      pinch: true,
+    },
+    // スマホ: 縦スワイプはページスクロールに渡す(チャートは横のみ掴む)。
+    handleScroll: {
+      vertTouchDrag: false,
+      horzTouchDrag: true,
+      pressedMouseMove: true,
+      mouseWheel: true,
+    },
   });
+}
+
+// Pins a small "latest date" label onto the time axis (bottom-right of the
+// pane, just left of the price axis) -- Lightweight Charts' auto ticks don't
+// guarantee the newest date gets a label, so we draw our own.
+function addLatestDateLabel(el, dateStr) {
+  const label = document.createElement("span");
+  label.className = "latest-date-label";
+  label.textContent = dateStr;
+  el.appendChild(label);
+  return label;
 }
 
 // Two-way pan/zoom sync so dragging any pane moves the others in lockstep.
@@ -698,8 +654,8 @@ function syncTimeScales(charts) {
   }
 }
 
-// Number of most-recent daily bars shown on first paint (~1 month of trading).
-const INITIAL_DAILY_BARS = 22;
+// 期間ボタン(1週〜2年)の営業日換算。初期表示は1ヶ月。
+const DEFAULT_DAILY_BARS = 22;
 
 function renderCharts(chart) {
   const monthly = aggregateMonthly(chart);
@@ -845,9 +801,10 @@ function renderCharts(chart) {
     });
   }
 
+  // tf: "M" (月足・全期間) or 表示する日足本数 (数値文字列)。
   function setTimeframe(tf) {
     const isMonthly = tf === "M";
-    currentTf = tf;
+    currentTf = isMonthly ? "M" : "D";
     candleSeries.setData(isMonthly ? monthly.candles : chart.candles);
     volSeries.setData(isMonthly ? monthly.volume : dailyVolume);
     if (rsSeries) rsSeries.setData(isMonthly ? monthly.rs_line : chart.rs_line);
@@ -858,15 +815,22 @@ function renderCharts(chart) {
     if (isMonthly) {
       for (const c of charts) c.timeScale().fitContent();
     } else {
-      // Daily opens on roughly the last month of bars; pan/zoom for more.
+      // 最新バーを右端に固定し、そこから指定本数だけ遡って表示。
+      const bars = parseInt(tf, 10) || DEFAULT_DAILY_BARS;
       const n = chart.candles.length;
-      const range = { from: Math.max(0, n - INITIAL_DAILY_BARS), to: n + 1 };
+      const range = { from: Math.max(0, n - bars), to: n };
       for (const c of charts) c.timeScale().setVisibleLogicalRange(range);
     }
     updateLegend(latestBar());
   }
 
-  setTimeframe("D");
+  setTimeframe(String(DEFAULT_DAILY_BARS));
+
+  // 最新日付を各ペインの日付軸上に常時表示(オートticksは最新日を保証しないため)。
+  const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
+  if (lastDate) {
+    for (const el of [priceEl, volEl, ...(rsChart ? [rsEl] : [])]) addLatestDateLabel(el, lastDate);
+  }
 
   const toggle = document.getElementById("timeframe-toggle");
   if (toggle) {

@@ -97,6 +97,8 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.heatmap_mod, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
+    # EDINET自動取得はネットワークに触れないようモック(キー無しでもストアread/writeを避ける)。
+    monkeypatch.setattr(pipeline.edinet_mod, "update_fundamentals_auto", lambda codes, config: {})
 
     return tmp_path, codes
 
