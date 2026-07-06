@@ -33,11 +33,12 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "load_universe", lambda: {"stocks": [{"code": c, "name": f"Stock{c}"} for c in codes]})
     monkeypatch.setattr(pipeline.jpholiday, "is_holiday", lambda d: False)
 
-    # "3333" gets a distinctly higher price scale so the vcp mock below can
-    # tell it apart from "1111" without needing the code itself.
+    # Distinct price scales let the vcp/priority mocks below tell the codes
+    # apart from the frame alone without needing the code itself:
+    # "1111" ~1000, "2222" ~100, "3333" ~5000.
     frames = {
         "1111": _make_df(seed=0, price_start=1000.0),
-        "2222": _make_df(seed=1, price_start=1000.0),
+        "2222": _make_df(seed=1, price_start=100.0),
         "3333": _make_df(seed=2, price_start=5000.0),
     }
     fake_result = PriceUpdateResult(frames=frames, failed_tickers=[], stale_tickers=[], job_failed=False)
@@ -54,6 +55,23 @@ def wired(tmp_path, monkeypatch):
         return [{"code": c, "passed": c in ("1111", "3333"), "must_flags": {"cond1": True}} for c in latest_by_code]
 
     monkeypatch.setattr(pipeline.trend_template, "screen_universe", fake_screen_universe)
+
+    def fake_evaluate_priority(latest, config):
+        # Mirrors fake_screen_universe: "2222" (close ~100) fails the hard
+        # filters -> None; "1111" and "3333" are both P1 so they flow through
+        # the VCP/entry path exactly like the pre-priority pipeline did.
+        if latest["close"] < 500:
+            return None
+        return {
+            "penalty": 0,
+            "priority": 1,
+            "unmet": [],
+            "ma_deviation_pct": {"ma50": 1.0, "ma150": 2.0, "ma200": 3.0},
+            "high52w_distance_pct": 5.0,
+            "rs": latest["rs"],
+        }
+
+    monkeypatch.setattr(pipeline.priority_mod, "evaluate_priority", fake_evaluate_priority)
 
     def fake_evaluate_vcp(df, config):
         if df["close"].iloc[0] > 3000:  # "3333": passed trend template, base still forming
@@ -76,6 +94,9 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "REPORT_PATH", tmp_path / "report.json")
     monkeypatch.setattr(build_site, "BREADTH_PATH", tmp_path / "breadth.json")
     monkeypatch.setattr(build_site, "CHARTS_DIR", tmp_path / "charts")
+    monkeypatch.setattr(pipeline.heatmap_mod, "HEATMAP_PATH", tmp_path / "heatmap.json")
+    monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
+    monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
 
     return tmp_path, codes
 
@@ -112,6 +133,21 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
 
     breadth = json.loads((tmp_path / "breadth.json").read_text(encoding="utf-8"))
     assert breadth["history"][-1]["template_pass"] == 2
+
+    # 機能A: priority counts + scarcity flag flow into report and breadth
+    assert report["priority_counts"] == {"p1": 2, "p2": 0, "p3": 0, "p4": 0}
+    assert report["p1_scarce"] is True  # 2 < p1_warn_threshold(3)
+    assert report["stocks"][0]["priority"] == 1
+    assert report["stocks"][0]["has_chart"] is True
+    assert breadth["history"][-1]["p1_count"] == 2
+
+    # 機能B: heatmap json written and sector attributes attached
+    heatmap = json.loads((tmp_path / "heatmap.json").read_text(encoding="utf-8"))
+    assert heatmap["sectors"]  # at least the fallback sector
+    codes_in_hm = {s["code"] for sec in heatmap["sectors"] for s in sec["stocks"]}
+    assert codes_in_hm == {"1111", "2222", "3333"}
+    assert "sector33" in report["stocks"][0]
+    assert (tmp_path / "sector_history.json").exists()
 
 
 def test_run_daily_skips_on_holiday(wired, monkeypatch):

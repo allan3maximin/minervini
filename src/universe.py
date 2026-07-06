@@ -21,6 +21,7 @@ from src.config import REPO_ROOT, load_config
 from src.data.prices import fetch_yfinance_chunk
 
 UNIVERSE_PATH = REPO_ROOT / "data" / "universe.json"
+SECTOR_MAP_PATH = REPO_ROOT / "data" / "sector_map.json"
 
 DOMESTIC_STOCK_SEGMENTS = {
     "プライム（内国株式）",
@@ -105,24 +106,88 @@ def compute_liquidity_ranking(codes: list[str], config: dict | None = None) -> p
     )
 
 
+def write_sector_map(candidates: pd.DataFrame) -> dict:
+    """機能B: JPX月次Excel由来のTSE33業種 静的マッピング (data/sector_map.json)。
+
+    ユニバース再構築(月次)のたびに再生成される。ヒートマップ生成バッチが参照。
+    """
+    sectors = {}
+    if "sector33" in candidates.columns:
+        for row in candidates.itertuples(index=False):
+            sector = getattr(row, "sector33", None)
+            if sector is not None and not pd.isna(sector) and str(sector) != "-":
+                sectors[row.code] = str(sector)
+    payload = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "sectors": sectors,
+    }
+    SECTOR_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(SECTOR_MAP_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return payload
+
+
+def fetch_shares_outstanding(codes: list[str], config: dict | None = None) -> dict[str, int | None]:
+    """機能B: 発行済株式数を月次ユニバース再構築時にまとめて取得。
+
+    日次の時価総額は「株式数 × 最新終値」でバッチが算出する。
+    取得失敗は None 許容(ヒートマップ側で最小面積フォールバック)。
+    """
+    import yfinance as yf
+
+    config = config or load_config()
+    sleep_sec = config["universe"].get("shares_sleep_sec", 0.5)
+    shares: dict[str, int | None] = {}
+    for i, code in enumerate(codes):
+        n = None
+        try:
+            fi = yf.Ticker(f"{code}.T").fast_info
+            raw = None
+            try:
+                raw = fi["shares"]
+            except Exception:
+                raw = getattr(fi, "shares", None)
+            if raw:
+                n = int(raw)
+        except Exception:
+            n = None
+        shares[code] = n
+        if i + 1 < len(codes):
+            time.sleep(sleep_sec)
+    return shares
+
+
 def build_universe(config: dict | None = None) -> dict:
     config = config or load_config()
     size = config["universe"]["size"]
 
     listed = fetch_jpx_listed_stocks(config)
     candidates = filter_domestic_common_stock(listed, config)
+    write_sector_map(candidates)
     ranking = compute_liquidity_ranking(candidates["code"].tolist(), config)
 
     top = ranking.head(size)
     name_by_code = dict(zip(candidates["code"], candidates["name"]))
-    stocks = [
-        {
-            "code": row.code,
-            "name": name_by_code.get(row.code, ""),
-            "avg_trading_value": row.avg_trading_value,
-        }
-        for row in top.itertuples(index=False)
-    ]
+    sector_by_code = (
+        dict(zip(candidates["code"], candidates["sector33"])) if "sector33" in candidates.columns else {}
+    )
+    top_codes = [row.code for row in top.itertuples(index=False)]
+    shares_by_code = fetch_shares_outstanding(top_codes, config)
+
+    stocks = []
+    for row in top.itertuples(index=False):
+        sector = sector_by_code.get(row.code)
+        if sector is None or pd.isna(sector) or str(sector) == "-":
+            sector = None
+        stocks.append(
+            {
+                "code": row.code,
+                "name": name_by_code.get(row.code, ""),
+                "avg_trading_value": row.avg_trading_value,
+                "sector33": sector,
+                "shares_outstanding": shares_by_code.get(row.code),
+            }
+        )
 
     universe = {
         "generated_at": datetime.now().astimezone().isoformat(),
@@ -139,3 +204,28 @@ def build_universe(config: dict | None = None) -> dict:
 def load_universe() -> dict:
     with open(UNIVERSE_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Universe / sector map builder")
+    parser.add_argument(
+        "--sector-map-only",
+        action="store_true",
+        help="JPX一覧からdata/sector_map.jsonのみ再生成(株価取得なし)",
+    )
+    args = parser.parse_args()
+    config = load_config()
+    if args.sector_map_only:
+        listed = fetch_jpx_listed_stocks(config)
+        candidates = filter_domestic_common_stock(listed, config)
+        payload = write_sector_map(candidates)
+        print(f"sector_map.json written: {len(payload['sectors'])} codes")
+    else:
+        universe = build_universe(config)
+        print(f"universe.json written: {universe['size']} stocks")
+
+
+if __name__ == "__main__":
+    main()

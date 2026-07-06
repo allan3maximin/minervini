@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>セクターヒートマップ | ミネルヴィニ式スクリーナー</title>
+<link rel="stylesheet" href="assets/style.css?v=4">
+</head>
+<body>
+<a class="back-link" href="index.html">&larr; ダッシュボードに戻る</a>
+<header class="page-header">
+  <div class="page-header-top">
+    <h1>セクターヒートマップ（東証33業種）</h1>
+  </div>
+  <div id="hm-meta" class="meta-line"></div>
+</header>
+
+<div class="hm-toolbar">
+  <div class="segmented" id="hm-period-toggle">
+    <button type="button" data-period="d1" class="active">1日</button>
+    <button type="button" data-period="d5">5日</button>
+    <button type="button" data-period="d20">20日</button>
+    <button type="button" data-period="d60">60日</button>
+  </div>
+  <div class="hm-legend">
+    <span id="hm-legend-min"></span>
+    <span class="hm-legend-bar"></span>
+    <span id="hm-legend-max"></span>
+    <span class="hm-legend-note">★=P1 / ☆=P2　面積=時価総額</span>
+  </div>
+</div>
+
+<div id="hm-container" class="hm-container">
+  <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+</div>
+
+<footer class="page-footer">
+  <p>タイル面積は時価総額（取得不可の銘柄は最小面積）、色は選択期間の騰落率です。タイルタップで銘柄詳細（プライオリティ・未達条件・MA乖離）を表示します。セクターRSは対TOPIX相対（強/中/弱＋方向）。データは日次バッチで事前算出された静的JSONです。</p>
+</footer>
+
+<script src="assets/heatmap.js?v=4"></script>
+</body>
+</html>

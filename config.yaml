@@ -3,6 +3,7 @@ universe:
   liquidity_window: 20
   jpx_list_url: "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
   manual_exclude_codes: []  # 監理・整理銘柄等、手動除外コード(JPXの当該リストを別途確認して追記)
+  shares_sleep_sec: 0.5  # 発行済株式数の月次取得時スリープ(機能B)
 
 data:
   history_days: 520
@@ -15,10 +16,30 @@ data:
 
 trend_template:
   ma200_up_days_min: 21
-  low52w_margin: 1.30
+  low52w_margin: 1.25
   high52w_margin: 0.75
   rs_min: 70
   score_weights: {rs: 30, ma200_days: 10, near_high: 15, eps_accel: 25, rev_accel: 10, monthly: 10}
+
+# 機能A: トレンドテンプレート距離ベースのプライオリティ(P1〜P4)
+priority:
+  # 52週高値からの距離ペナルティ帯 (%)
+  high_dist_mid_pct: 25    # これ超〜bad以下: +1
+  high_dist_bad_pct: 35    # これ超: +2
+  rs_soft_min: 60          # RS<70 かつ RS>=この値: +1 / 未満: +3
+  # 地合い警告: 直近実行のP1銘柄数がこの値未満なら弱地合いフラグ
+  p1_warn_threshold: 3
+
+# 機能B: セクターヒートマップ
+heatmap:
+  periods: [1, 5, 20, 60]        # フロント期間切替(営業日)
+  strength_window: 20            # セクターRS強弱の判定窓
+  direction_window: 5            # 方向(↑/→/↓)の判定窓
+  sector_strong_rel_pct: 2.0     # 対TOPIX相対リターンがこれ以上で「強」
+  sector_weak_rel_pct: -2.0      # これ以下で「弱」
+  direction_up_rel_pct: 0.5
+  direction_down_rel_pct: -0.5
+  history_keep_days: 400         # data/sector_history.json 保持日数
 
 vcp:
   scan_days: 130

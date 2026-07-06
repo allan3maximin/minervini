@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=3">
+<link rel="stylesheet" href="assets/style.css?v=4">
 </head>
 <body>
 <header class="page-header">
@@ -14,10 +14,12 @@
       <button type="button" id="vault-unlock-btn" class="secondary write-btn">🔓 解錠</button>
       <button type="button" id="rerun-btn" class="secondary write-btn" disabled>今すぐ再スクリーニング</button>
       <button type="button" id="settings-btn" class="secondary">設定</button>
+      <a href="heatmap.html" class="secondary nav-btn">セクターヒートマップ</a>
     </div>
   </div>
   <div id="generated-at" class="meta-line"></div>
   <div id="breadth-meter" class="breadth-meter"></div>
+  <div id="p1-warning" class="p1-warning" hidden></div>
 </header>
 
 <main>
@@ -38,8 +40,8 @@
   </section>
 
   <section class="tier-section">
-    <h2>〔ウォッチリスト〕トレンドテンプレート通過のみ</h2>
-    <p class="tier-note">8条件は満たすが、VCPセットアップがまだ形成中/未検出/崩れている銘柄。ピボット等は未確定のため参考情報です。ベースが整えば〔候補プール〕に上がってきます。</p>
+    <h2>〔プライオリティ〕トレンドテンプレート距離ランキング</h2>
+    <p class="tier-note">ハードフィルタ(150日線&gt;200日線・200日線上向き1ヶ月・52週安値+25%)通過銘柄を、8条件との距離(ペナルティ)でP1〜P4に分類。P1=完全一致、P2〜P4は未達条件と距離を表示。プライオリティ→セクター強度→RSの複合ソート。</p>
     <div id="watchlist-tier-body"></div>
   </section>
 </main>
@@ -48,10 +50,10 @@
   <p>既知の制約: EODデータのためザラ場中のブレイクは当日実行まで検知されません(逆指値の事前設定が前提)。RSパーセンタイルの母集団はユニバース内銘柄です。発注前のチャート確認は必須です。</p>
 </footer>
 
-<script src="assets/config.js?v=3"></script>
-<script src="assets/github-api.js?v=3"></script>
-<script src="assets/webauthn-vault.js?v=3"></script>
-<script src="assets/fundamentals-modal.js?v=3"></script>
-<script src="assets/app.js?v=3"></script>
+<script src="assets/config.js?v=4"></script>
+<script src="assets/github-api.js?v=4"></script>
+<script src="assets/webauthn-vault.js?v=4"></script>
+<script src="assets/fundamentals-modal.js?v=4"></script>
+<script src="assets/app.js?v=4"></script>
 </body>
 </html>

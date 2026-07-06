@@ -67,10 +67,11 @@ async function initDashboard() {
 
   renderHeader(report);
   renderMarketOverview(indices);
-  renderBreadth(breadth);
+  renderBreadth(breadth, report);
+  renderP1Warning(report);
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
-  renderTier(report, "watchlist", "watchlist-tier-body");
+  renderPriorityTier(report, "watchlist-tier-body");
 }
 
 // Kill switch: hides every passkey/write-related control so the dashboard
@@ -225,7 +226,7 @@ function renderMarketOverview(indices) {
   section.hidden = false;
 }
 
-function renderBreadth(breadth) {
+function renderBreadth(breadth, report) {
   const el = document.getElementById("breadth-meter");
   if (!breadth.history || !breadth.history.length) {
     el.textContent = "地合いデータなし";
@@ -235,11 +236,32 @@ function renderBreadth(breadth) {
   const passRate = latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-";
   const successRate =
     latest.breakout_success_rate != null ? (latest.breakout_success_rate * 100).toFixed(0) + "%" : "-";
+  // 機能A: P1〜P4件数(地合い指標)。breadth履歴優先、なければreport.jsonから。
+  const pc = (report && report.priority_counts) || null;
+  const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
+  const prioLine =
+    p1 != null
+      ? `<span>P1: ${p1} / P2: ${latest.p2_count ?? (pc ? pc.p2 : "-")} / P3: ${latest.p3_count ?? (pc ? pc.p3 : "-")} / P4: ${latest.p4_count ?? (pc ? pc.p4 : "-")}</span>`
+      : "";
   el.innerHTML = `
     <span>テンプレート通過率: ${passRate}</span>
     <span>セットアップ数: ${latest.watch_count ?? "-"}</span>
     <span>直近ブレイク成功率: ${successRate}</span>
+    ${prioLine}
   `;
+}
+
+// 機能A: P1銘柄が極端に少ない場合の弱地合い警告バナー。
+function renderP1Warning(report) {
+  const el = document.getElementById("p1-warning");
+  if (!el) return;
+  if (report.p1_scarce) {
+    const p1 = report.priority_counts ? report.priority_counts.p1 : 0;
+    el.textContent = `⚠ P1(8条件完全一致)銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
 }
 
 function renderTier(report, tier, containerId) {
@@ -353,6 +375,137 @@ function fundStatusLabel(s) {
   if (s.fund_coverage === "full") return "full";
   if (s.fund_coverage === "partial") return "partial";
   return "-";
+}
+
+// ---------------------------------------------------------------------------
+// 機能A: プライオリティ(P1〜P4)ティア -- 旧ウォッチリスト置き換え。
+// report.json側で priority昇順 -> セクター強度 -> RS降順 に複合ソート済み。
+// ---------------------------------------------------------------------------
+
+const PRIORITY_LABELS = {
+  1: "P1 — 8条件完全一致(セットアップ待ち)",
+  2: "P2 — ペナルティ1",
+  3: "P3 — ペナルティ2〜3",
+  4: "P4 — ペナルティ4以上",
+};
+
+const PRIORITY_COND_LABELS = {
+  close_above_ma50: "終値≦50日線",
+  near_high52w: "52週高値から遠い",
+  ma50_above_ma150: "50≦150日線(並び崩れ)",
+  rs_above_min: "RS70未満",
+};
+
+function unmetSummary(s) {
+  if (!s.priority_unmet || !s.priority_unmet.length) return "なし";
+  return s.priority_unmet
+    .map((u) => {
+      const label = PRIORITY_COND_LABELS[u.condition] || u.condition;
+      let dist = "";
+      if (u.distance_pct != null) {
+        dist = u.condition === "rs_above_min" ? ` (差${u.distance_pct})` : ` (${u.distance_pct}%)`;
+      }
+      return `${label}${dist} [+${u.penalty}]`;
+    })
+    .join(" / ");
+}
+
+function maDeviationSummary(s) {
+  const d = s.ma_deviation_pct;
+  if (!d) return "-";
+  const fmt = (v) => (v == null ? "-" : (v > 0 ? "+" : "") + v.toFixed(1) + "%");
+  return `50: ${fmt(d.ma50)} / 150: ${fmt(d.ma150)} / 200: ${fmt(d.ma200)}`;
+}
+
+function sectorSummary(s) {
+  if (!s.sector33) return "-";
+  const strength = s.sector_strength ? ` ${s.sector_strength}${s.sector_direction || ""}` : "";
+  return `${s.sector33}${strength}`;
+}
+
+const PRIORITY_COLUMNS = [
+  { key: "code", label: "コード", value: (s) => s.code },
+  { key: "name", label: "銘柄名", value: (s) => s.name },
+  { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
+  { key: "sector", label: "セクター(強度)", value: sectorSummary },
+  { key: "unmet", label: "未達条件(距離)", value: unmetSummary },
+  { key: "ma_dev", label: "MA乖離", value: maDeviationSummary },
+  {
+    key: "high_dist",
+    label: "52週高値距離",
+    value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
+  },
+];
+
+function renderPriorityTier(report, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = "";
+  const stocks = report.stocks.filter((s) => s.tier === "watchlist");
+  if (!stocks.length) {
+    container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
+    return;
+  }
+  for (const prio of [1, 2, 3, 4]) {
+    const group = stocks.filter((s) => s.priority === prio);
+    if (!group.length) continue;
+    const section = document.createElement("div");
+    section.className = `status-section priority-${prio}`;
+    const h3 = document.createElement("h3");
+    h3.innerHTML = `<span class="prio-badge prio-${prio}">P${prio}</span> ${PRIORITY_LABELS[prio] || ""} (${group.length})`;
+    section.appendChild(h3);
+    section.appendChild(renderPriorityTable(group));
+    container.appendChild(section);
+  }
+  // priority未設定の旧データへのフォールバック(移行期の1回だけあり得る)
+  const legacy = stocks.filter((s) => s.priority == null);
+  if (legacy.length) {
+    const section = document.createElement("div");
+    section.className = "status-section";
+    const h3 = document.createElement("h3");
+    h3.textContent = `未分類 (${legacy.length})`;
+    section.appendChild(h3);
+    section.appendChild(renderPriorityTable(legacy));
+    container.appendChild(section);
+  }
+}
+
+function renderPriorityTable(stocks) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "table-scroll";
+  const table = document.createElement("table");
+  table.className = "priority-table";
+  wrapper.appendChild(table);
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const col of PRIORITY_COLUMNS) {
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const s of stocks) {
+    const row = document.createElement("tr");
+    // P1(旧ウォッチリスト相当)のみチャートJSONあり -> 詳細ページへ遷移可能
+    if (s.has_chart) {
+      row.classList.add("clickable");
+      row.addEventListener("click", () => {
+        window.location.href = `stock.html?code=${encodeURIComponent(s.code)}`;
+      });
+    }
+    for (const col of PRIORITY_COLUMNS) {
+      const td = document.createElement("td");
+      td.textContent = col.value(s);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  return wrapper;
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +856,7 @@ const MUST_FLAG_LABELS = {
     ma200_uptrend_1m: "200日線が1ヶ月以上上向き",
     ma_stack_50_150_200: "50日線 > 150日線 > 200日線",
     close_above_ma50: "終値が50日線より上",
-    above_low52w_margin: "52週安値から+30%以上",
+    above_low52w_margin: "52週安値から+25%以上",
     within_high52w_margin: "52週高値から-25%以内",
     rs_above_min: "RSレーティング70以上",
   },

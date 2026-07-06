@@ -33,6 +33,9 @@ STATUS_ORDER = {
 }
 TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2}
 
+# セクター強度(機能B)の複合ソート順: 強 -> 中 -> 弱 -> 不明
+SECTOR_STRENGTH_ORDER = {"強": 0, "中": 1, "弱": 2}
+
 
 # ---------------------------------------------------------------------------
 # 7.2 report.json assembly
@@ -95,11 +98,57 @@ def assemble_stock_record(
     }
 
 
+def attach_priority(record: dict, priority_eval: dict | None) -> dict:
+    """機能A: プライオリティ評価結果をレコードにマージする。"""
+    if priority_eval is None:
+        return record
+    record["priority"] = priority_eval["priority"]
+    record["priority_penalty"] = priority_eval["penalty"]
+    record["priority_unmet"] = priority_eval["unmet"]
+    record["ma_deviation_pct"] = priority_eval["ma_deviation_pct"]
+    record["high52w_distance_pct"] = priority_eval["high52w_distance_pct"]
+    return record
+
+
+def assemble_priority_record(
+    code: str,
+    name: str,
+    latest_row: dict,
+    priority_eval: dict,
+    tt_flags: dict | None = None,
+    has_chart: bool = False,
+) -> dict:
+    """機能A: P2〜P4銘柄(旧ウォッチリスト置き換え)の軽量レコード。
+
+    VCP/エントリー評価は行わないため、ピボット等は持たない。
+    """
+    record = {
+        "code": code,
+        "name": name,
+        "tier": "watchlist",
+        "status": None,
+        "close": latest_row.get("close"),
+        "rs": latest_row.get("rs"),
+        "total_score": None,
+        "has_chart": has_chart,
+        "must_flags": {"tt": tt_flags, "vcp": None},
+    }
+    return attach_priority(record, priority_eval)
+
+
 def _sort_key(stock: dict) -> tuple:
     tier_rank = TIER_ORDER.get(stock["tier"], 99)
+    if stock["tier"] == "watchlist":
+        # 機能A/B複合ソート: プライオリティ昇順 -> セクター強度 -> RS降順
+        return (
+            tier_rank,
+            stock.get("priority") or 99,
+            SECTOR_STRENGTH_ORDER.get(stock.get("sector_strength"), 9),
+            -(stock.get("rs") or 0.0),
+        )
     status_rank = STATUS_ORDER.get(stock["status"], 99)
     score = stock.get("total_score") or 0.0
-    return (tier_rank, status_rank, -score)
+    return (tier_rank, status_rank, -score, 0)
 
 
 def build_report(
@@ -108,12 +157,16 @@ def build_report(
     template_pass: int,
     data_warnings: dict | None = None,
     generated_at: str | None = None,
+    priority_counts: dict | None = None,
+    p1_scarce: bool | None = None,
 ) -> dict:
     ordered = sorted(stocks, key=_sort_key)
     report = {
         "generated_at": generated_at or datetime.now().astimezone().isoformat(),
         "universe_size": universe_size,
         "template_pass": template_pass,
+        "priority_counts": priority_counts,
+        "p1_scarce": p1_scarce,
         "data_warnings": data_warnings or {"failed_tickers": [], "stale_tickers": [], "csv_errors": []},
         "stocks": ordered,
     }
@@ -166,18 +219,28 @@ def update_breadth(
     watch_count: int,
     status_history: dict,
     keep_days: int = 60,
+    priority_counts: dict | None = None,
 ) -> dict:
     breadth = load_breadth()
-    breadth["history"].append(
-        {
-            "date": date_str,
-            "universe_size": universe_size,
-            "template_pass": template_pass,
-            "template_pass_rate": round(template_pass / universe_size, 4) if universe_size else None,
-            "watch_count": watch_count,
-            "breakout_success_rate": compute_breakout_success_rate(status_history),
-        }
-    )
+    entry = {
+        "date": date_str,
+        "universe_size": universe_size,
+        "template_pass": template_pass,
+        "template_pass_rate": round(template_pass / universe_size, 4) if universe_size else None,
+        "watch_count": watch_count,
+        "breakout_success_rate": compute_breakout_success_rate(status_history),
+    }
+    if priority_counts is not None:
+        # 機能A: P1〜P4件数を地合い指標として毎回記録
+        entry.update(
+            {
+                "p1_count": priority_counts.get("p1", 0),
+                "p2_count": priority_counts.get("p2", 0),
+                "p3_count": priority_counts.get("p3", 0),
+                "p4_count": priority_counts.get("p4", 0),
+            }
+        )
+    breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]
     DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(BREADTH_PATH, "w", encoding="utf-8") as f:
