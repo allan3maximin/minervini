@@ -4,12 +4,236 @@
       "date": "2026-07-06",
       "topix_d1": 0.86,
       "sectors": {
-        "その他": {
-          "d1": 0.69,
-          "rel_strength_pct": 0.07,
+        "電気機器": {
+          "d1": -0.92,
+          "rel_strength_pct": 5.94,
+          "strength": "強",
+          "mcap_total": 300780198495429,
+          "p1_count": 46
+        },
+        "銀行業": {
+          "d1": 1.45,
+          "rel_strength_pct": 2.41,
+          "strength": "強",
+          "mcap_total": 134375399359578,
+          "p1_count": 54
+        },
+        "情報・通信業": {
+          "d1": -0.19,
+          "rel_strength_pct": -9.64,
+          "strength": "弱",
+          "mcap_total": 103899476182095,
+          "p1_count": 2
+        },
+        "卸売業": {
+          "d1": 1.18,
+          "rel_strength_pct": -7.15,
+          "strength": "弱",
+          "mcap_total": 78505586444998,
+          "p1_count": 6
+        },
+        "機械": {
+          "d1": 2.84,
+          "rel_strength_pct": 6.14,
+          "strength": "強",
+          "mcap_total": 75229068060623,
+          "p1_count": 31
+        },
+        "輸送用機器": {
+          "d1": 2.96,
+          "rel_strength_pct": -0.94,
           "strength": "中",
-          "mcap_total": null,
-          "p1_count": 215
+          "mcap_total": 67720278197043,
+          "p1_count": 4
+        },
+        "小売業": {
+          "d1": 2.3,
+          "rel_strength_pct": 0.61,
+          "strength": "中",
+          "mcap_total": 65185481641492,
+          "p1_count": 2
+        },
+        "化学": {
+          "d1": 1.57,
+          "rel_strength_pct": 2.45,
+          "strength": "強",
+          "mcap_total": 61329040243836,
+          "p1_count": 19
+        },
+        "医薬品": {
+          "d1": 1.66,
+          "rel_strength_pct": 0.1,
+          "strength": "中",
+          "mcap_total": 46571348158294,
+          "p1_count": 1
+        },
+        "サービス業": {
+          "d1": 1.01,
+          "rel_strength_pct": 3.54,
+          "strength": "強",
+          "mcap_total": 44745149469777,
+          "p1_count": 7
+        },
+        "保険業": {
+          "d1": 2.4,
+          "rel_strength_pct": 2.96,
+          "strength": "強",
+          "mcap_total": 38626359957609,
+          "p1_count": 1
+        },
+        "食料品": {
+          "d1": 1.32,
+          "rel_strength_pct": 3.25,
+          "strength": "強",
+          "mcap_total": 37293785425562,
+          "p1_count": 2
+        },
+        "非鉄金属": {
+          "d1": -1.3,
+          "rel_strength_pct": -4.82,
+          "strength": "弱",
+          "mcap_total": 30380046791751,
+          "p1_count": 0
+        },
+        "建設業": {
+          "d1": 2.05,
+          "rel_strength_pct": 4.11,
+          "strength": "強",
+          "mcap_total": 29228989483131,
+          "p1_count": 6
+        },
+        "陸運業": {
+          "d1": 1.79,
+          "rel_strength_pct": -0.73,
+          "strength": "中",
+          "mcap_total": 23069655846014,
+          "p1_count": 1
+        },
+        "不動産業": {
+          "d1": 0.99,
+          "rel_strength_pct": 1.76,
+          "strength": "中",
+          "mcap_total": 21995358519907,
+          "p1_count": 2
+        },
+        "精密機器": {
+          "d1": -0.68,
+          "rel_strength_pct": -3.0,
+          "strength": "弱",
+          "mcap_total": 21214760076115,
+          "p1_count": 7
+        },
+        "その他製品": {
+          "d1": 0.54,
+          "rel_strength_pct": -1.7,
+          "strength": "中",
+          "mcap_total": 20639698445989,
+          "p1_count": 2
+        },
+        "その他金融業": {
+          "d1": 1.07,
+          "rel_strength_pct": -0.23,
+          "strength": "中",
+          "mcap_total": 16303830802435,
+          "p1_count": 2
+        },
+        "電気・ガス業": {
+          "d1": 1.36,
+          "rel_strength_pct": -3.46,
+          "strength": "弱",
+          "mcap_total": 13622011790766,
+          "p1_count": 0
+        },
+        "ガラス・土石製品": {
+          "d1": -1.84,
+          "rel_strength_pct": 1.04,
+          "strength": "中",
+          "mcap_total": 11549961600757,
+          "p1_count": 9
+        },
+        "証券、商品先物取引業": {
+          "d1": 1.45,
+          "rel_strength_pct": 1.01,
+          "strength": "中",
+          "mcap_total": 9721122880617,
+          "p1_count": 0
+        },
+        "鉄鋼": {
+          "d1": 1.4,
+          "rel_strength_pct": 0.88,
+          "strength": "中",
+          "mcap_total": 7199329687460,
+          "p1_count": 2
+        },
+        "ゴム製品": {
+          "d1": 2.34,
+          "rel_strength_pct": 3.36,
+          "strength": "強",
+          "mcap_total": 6974924491551,
+          "p1_count": 1
+        },
+        "金属製品": {
+          "d1": 0.21,
+          "rel_strength_pct": 13.44,
+          "strength": "強",
+          "mcap_total": 5885013609533,
+          "p1_count": 5
+        },
+        "海運業": {
+          "d1": 3.16,
+          "rel_strength_pct": -11.52,
+          "strength": "弱",
+          "mcap_total": 5831980924795,
+          "p1_count": 0
+        },
+        "石油・石炭製品": {
+          "d1": 2.83,
+          "rel_strength_pct": -6.93,
+          "strength": "弱",
+          "mcap_total": 5512042699555,
+          "p1_count": 0
+        },
+        "鉱業": {
+          "d1": 2.25,
+          "rel_strength_pct": -12.75,
+          "strength": "弱",
+          "mcap_total": 4575696355518,
+          "p1_count": 0
+        },
+        "繊維製品": {
+          "d1": 0.3,
+          "rel_strength_pct": 0.4,
+          "strength": "中",
+          "mcap_total": 3337427957828,
+          "p1_count": 1
+        },
+        "空運業": {
+          "d1": 1.68,
+          "rel_strength_pct": 9.56,
+          "strength": "強",
+          "mcap_total": 2740289454486,
+          "p1_count": 0
+        },
+        "倉庫・運輸関連業": {
+          "d1": 1.67,
+          "rel_strength_pct": -2.3,
+          "strength": "弱",
+          "mcap_total": 1640451658734,
+          "p1_count": 0
+        },
+        "パルプ・紙": {
+          "d1": 1.11,
+          "rel_strength_pct": -1.64,
+          "strength": "中",
+          "mcap_total": 1302137279328,
+          "p1_count": 1
+        },
+        "水産・農林業": {
+          "d1": 0.92,
+          "rel_strength_pct": -3.65,
+          "strength": "弱",
+          "mcap_total": 773001855037,
+          "p1_count": 0
         }
       }
     }
