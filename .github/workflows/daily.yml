@@ -27,8 +27,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run daily pipeline
-        env:
-          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
         run: python -m src.pipeline
 
       - name: Commit results

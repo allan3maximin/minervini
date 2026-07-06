@@ -40,8 +40,6 @@ jobs:
 
       - name: Rebuild universe and run pipeline
         if: steps.check.outputs.run == 'true'
-        env:
-          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
         run: python -m src.pipeline --universe-rebuild
 
       - name: Commit results

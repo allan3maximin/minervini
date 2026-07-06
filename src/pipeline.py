@@ -16,8 +16,13 @@ import jpholiday
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
 from src.data import prices as prices_mod
-from src.data import edinet as edinet_mod
-from src.data.fundamentals import build_fundamentals_by_code, load_fundamentals_csv, merge_fundamentals, score_stock
+from src.data.fundamentals import (
+    build_fundamentals_by_code,
+    load_auto_store,
+    load_fundamentals_csv,
+    merge_fundamentals,
+    score_stock,
+)
 from src.indicators import compute_all, rs_percentile_rank
 from src.report import build_site
 from src.report import heatmap as heatmap_mod
@@ -104,12 +109,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
     csv_df, csv_warnings = load_fundamentals_csv()
 
-    # EDINET自動ファンダ取得(キー未設定なら既存キャッシュのみ)。失敗しても本体は止めない。
-    auto_by_code = {}
+    # 自動取得ストア(data/fundamentals_auto.json)があれば手動CSVとマージ。
+    # フェッチャー未接続なら空dictで手動CSVのみ。読めなくても本体は止めない。
     try:
-        auto_by_code = edinet_mod.update_fundamentals_auto(codes, config)
+        auto_by_code = load_auto_store()
     except Exception as e:
-        print(f"EDINET fundamentals update failed (ignored): {e}")
+        print(f"fundamentals auto store load failed (ignored): {e}")
+        auto_by_code = {}
 
     fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))
 

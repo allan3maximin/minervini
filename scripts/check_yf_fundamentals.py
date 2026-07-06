@@ -3,7 +3,7 @@
 ユニバースからランダムに N 銘柄サンプリングし、quarterly_income_stmt から
 Basic EPS / 売上が何四半期分取れるか・直近四半期がいつかを集計する。
 
-実行:  python -m scripts.check_yf_fundamentals [銘柄数(省略時30)]
+実行:  python3 scripts/check_yf_fundamentals.py [銘柄数(省略時30)]
 """
 from __future__ import annotations
 
@@ -12,8 +12,11 @@ import random
 import sys
 import time
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 import yfinance as yf

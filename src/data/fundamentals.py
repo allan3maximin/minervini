@@ -1,13 +1,14 @@
 """Manual-CSV fundamentals loader, validation, tier determination, and staleness
 guard (design doc section 1.3).
 
-Sources: EDINET API auto-fetch (src/data/edinet.py, data/fundamentals_auto.json)
-merged with the human-maintained manual/fundamentals.csv via merge_fundamentals
-(manual rows win per quarter). Absence of any row is not an error, just "pool"
-tier.
+Sources: the auto-fetch store (data/fundamentals_auto.json — populated by an
+external fetcher when one is wired up) merged with the human-maintained
+manual/fundamentals.csv via merge_fundamentals (manual rows win per quarter).
+Absence of any row is not an error, just "pool" tier.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 
@@ -17,8 +18,18 @@ from src.config import REPO_ROOT, load_config
 from src.screener.trend_template import compute_accel_slope, compute_full_score, quarter_sort_key, technical_score
 
 DEFAULT_CSV_PATH = REPO_ROOT / "manual" / "fundamentals.csv"
+AUTO_PATH = REPO_ROOT / "data" / "fundamentals_auto.json"
 CSV_COLUMNS = ["code", "fiscal_quarter", "eps", "revenue", "monthly_yoy", "checked_date"]
 _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
+
+
+def load_auto_store(path=None) -> dict:
+    """data/fundamentals_auto.json を読む。無ければ空dict(=手動CSVのみで動作)。"""
+    path = path or AUTO_PATH
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def load_fundamentals_csv(path=None) -> tuple[pd.DataFrame, list[str]]:
@@ -90,7 +101,7 @@ def build_fundamentals_by_code(df: pd.DataFrame) -> dict[str, dict]:
 
 
 def merge_fundamentals(auto_by_code: dict, manual_by_code: dict) -> dict:
-    """EDINET自動取得と手動CSVを統合する。同一(code, fiscal_quarter)は手動が勝ち、
+    """自動取得ストアと手動CSVを統合する。同一(code, fiscal_quarter)は手動が勝ち、
     monthly_yoy / checked_date も手動があれば手動を採用する。"""
     result: dict[str, dict] = {}
     for code in set(auto_by_code) | set(manual_by_code):
