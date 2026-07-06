@@ -203,6 +203,14 @@ function sparklineSvg(series, isUp) {
   return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
 }
 
+// "YYYY-MM-DD" -> "M/D" (年なし)。不正値はそのまま返す。
+function shortDate(dateStr) {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length !== 3) return dateStr;
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+}
+
 function renderMarketOverview(indices) {
   const section = document.getElementById("market-overview");
   const cards = document.getElementById("market-cards");
@@ -220,7 +228,7 @@ function renderMarketOverview(indices) {
           <div class="market-card-value">${formatIndexValue(entry)}</div>
           <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
           ${sparklineSvg(entry.series, isUp)}
-          <div class="market-card-date">${entry.last_date || ""}</div>
+          <div class="market-card-date">${shortDate(entry.last_date)}</div>
         </div>`;
     })
     .join("");
@@ -654,7 +662,7 @@ function syncTimeScales(charts) {
   }
 }
 
-// 期間ボタン(1週〜2年)の営業日換算。初期表示は1ヶ月。
+// 期間ボタン(1ヶ月〜2年)の営業日換算。初期表示は日足1ヶ月。
 const DEFAULT_DAILY_BARS = 22;
 
 function renderCharts(chart) {
@@ -827,9 +835,12 @@ function renderCharts(chart) {
   setTimeframe(String(DEFAULT_DAILY_BARS));
 
   // 最新日付を各ペインの日付軸上に常時表示(オートticksは最新日を保証しないため)。
+  // 表示は年なしの「月/日」形式。
   const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
   if (lastDate) {
-    for (const el of [priceEl, volEl, ...(rsChart ? [rsEl] : [])]) addLatestDateLabel(el, lastDate);
+    const [, m, d] = lastDate.split("-");
+    const shortDate = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+    for (const el of [priceEl, volEl, ...(rsChart ? [rsEl] : [])]) addLatestDateLabel(el, shortDate);
   }
 
   const toggle = document.getElementById("timeframe-toggle");

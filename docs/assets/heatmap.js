@@ -162,7 +162,8 @@ function render() {
   container.innerHTML = "";
 
   const W = container.clientWidth;
-  const H = Math.max(480, Math.round(window.innerHeight * 0.72));
+  // 画面高さの約90%を使う(スマホでも可能な限り大きく)。
+  const H = Math.max(480, Math.round(window.innerHeight * 0.9));
   container.style.height = H + "px";
 
   updateLegend();
@@ -193,12 +194,14 @@ function render() {
       const head = document.createElement("div");
       head.className = "hm-sector-head";
       head.style.height = SECTOR_HEADER_H + "px";
-      const rsTxt = sec.rs && sec.rs.strength ? `${sec.rs.strength}${sec.rs.direction || ""}` : "";
-      const badges =
-        (sec.p1_count ? `<span class="hm-badge hm-badge-p1">P1×${sec.p1_count}</span>` : "") +
-        (sec.p2_count ? `<span class="hm-badge hm-badge-p2">P2×${sec.p2_count}</span>` : "");
-      head.innerHTML = `<span class="hm-sector-name">${sec.sector}</span><span class="hm-sector-info">${rsTxt} ${fmtPct(sec.returns[currentPeriod])}</span>${badges}`;
-      head.title = `${sec.sector} ${fmtPct(sec.returns[currentPeriod])} / セクターRS: ${rsTxt || "-"} / P1:${sec.p1_count} P2:${sec.p2_count}`;
+      // セクター相対強度は矢印ではなく数値(対TOPIX 20日相対リターン%)+色で表現。
+      const rsVal = sec.rs ? sec.rs.rel_strength_pct : null;
+      const rsTxt =
+        rsVal != null
+          ? `<span class="${rsVal >= 0 ? "hm-rs-pos" : "hm-rs-neg"}">RS${rsVal > 0 ? "+" : ""}${rsVal.toFixed(1)}</span>`
+          : "";
+      head.innerHTML = `<span class="hm-sector-name">${sec.sector}</span><span class="hm-sector-info">${rsTxt} ${fmtPct(sec.returns[currentPeriod])}</span>`;
+      head.title = `${sec.sector} ${fmtPct(sec.returns[currentPeriod])} / 対TOPIX相対強度: ${rsVal != null ? rsVal + "%" : "-"}`;
       box.appendChild(head);
     }
 
@@ -211,8 +214,6 @@ function render() {
       const tile = document.createElement("div");
       const ret = s.returns ? s.returns[currentPeriod] : null;
       tile.className = "hm-tile";
-      if (s.priority === 1) tile.classList.add("hm-p1");
-      else if (s.priority === 2) tile.classList.add("hm-p2");
       Object.assign(tile.style, {
         left: tx + "px",
         top: innerY + ty + "px",
@@ -223,11 +224,10 @@ function render() {
 
       // ラベル段階表示: 広→コード+騰落率 / 中→コードのみ / 極小→なし
       const iw = tw - GAP, ih = th - GAP;
-      const star = s.priority === 1 ? "★" : s.priority === 2 ? "☆" : "";
       if (iw >= 56 && ih >= 30) {
-        tile.innerHTML = `<span class="hm-tile-code">${star}${s.code}</span><span class="hm-tile-ret">${fmtPct(ret)}</span>`;
+        tile.innerHTML = `<span class="hm-tile-code">${s.code}</span><span class="hm-tile-ret">${fmtPct(ret)}</span>`;
       } else if (iw >= 34 && ih >= 14) {
-        tile.innerHTML = `<span class="hm-tile-code hm-tile-code-sm">${star}${s.code}</span>`;
+        tile.innerHTML = `<span class="hm-tile-code hm-tile-code-sm">${s.code}</span>`;
       }
       tile.title = `${s.code} ${s.name} ${fmtPct(ret)}`;
       tile.addEventListener("click", () => openTilePopup(s, sec));
@@ -258,7 +258,7 @@ function openTilePopup(s, sec) {
   });
 
   const d = s.detail || {};
-  const prio = s.priority != null ? `P${s.priority}` : "対象外(ハードフィルタ未達)";
+  const cond8 = s.priority === 1 ? "合格" : s.priority != null ? "未達あり" : "対象外(ハードフィルタ未達)";
   const returnRows = (HM.periods || [1, 5, 20, 60])
     .map((p) => `<span class="chip"><span class="chip-label">${PERIOD_LABELS["d" + p] || p + "日"}</span><span class="chip-value">${fmtPctRaw(s.returns ? s.returns["d" + p] : null)}</span></span>`)
     .join("");
@@ -286,7 +286,8 @@ function openTilePopup(s, sec) {
     devHtml = `<h4>移動平均線乖離</h4><p class='hm-none'>50日: ${f(dev.ma50)} / 150日: ${f(dev.ma150)} / 200日: ${f(dev.ma200)}${d.high52w_distance_pct != null ? ` / 52週高値まで -${d.high52w_distance_pct}%` : ""}</p>`;
   }
 
-  const rsTxt = sec.rs && sec.rs.strength ? `${sec.rs.strength}${sec.rs.direction || ""}` : "-";
+  const rsVal = sec.rs ? sec.rs.rel_strength_pct : null;
+  const rsTxt = rsVal != null ? `RS${rsVal > 0 ? "+" : ""}${rsVal.toFixed(1)}` : "-";
   const chartLink = d.has_chart
     ? `<a href="stock.html?code=${encodeURIComponent(s.code)}" class="nav-btn hm-detail-link">チャート・詳細ページへ →</a>`
     : "";
@@ -298,7 +299,7 @@ function openTilePopup(s, sec) {
         <button type="button" class="secondary" id="hm-popup-close">閉じる</button>
       </div>
       <div class="meta-chips">
-        <span class="chip"><span class="chip-label">プライオリティ</span><span class="chip-value">${prio}</span></span>
+        <span class="chip"><span class="chip-label">8条件</span><span class="chip-value">${cond8}</span></span>
         <span class="chip"><span class="chip-label">RS</span><span class="chip-value">${s.rs ?? "-"}</span></span>
         <span class="chip"><span class="chip-label">終値</span><span class="chip-value">${s.close != null ? s.close.toLocaleString("ja-JP") : "-"}</span></span>
         <span class="chip"><span class="chip-label">セクター</span><span class="chip-value">${sec.sector} ${rsTxt}</span></span>
