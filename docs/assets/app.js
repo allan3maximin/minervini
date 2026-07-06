@@ -237,10 +237,10 @@ function renderBreadth(breadth, report) {
   const passRate = latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-";
   const successRate =
     latest.breakout_success_rate != null ? (latest.breakout_success_rate * 100).toFixed(0) + "%" : "-";
-  // 地合い指標: 8条件完全一致(候補)の件数。breadth履歴優先、なければreport.jsonから。
+  // 地合い指標: 8条件完全一致の件数。breadth履歴優先、なければreport.jsonから。
   const pc = (report && report.priority_counts) || null;
   const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
-  const prioLine = p1 != null ? `<span>候補(8条件合格): ${p1}件</span>` : "";
+  const prioLine = p1 != null ? `<span>8条件合格: ${p1}件</span>` : "";
   el.innerHTML = `
     <span>テンプレート通過率: ${passRate}</span>
     <span>セットアップ数: ${latest.watch_count ?? "-"}</span>
@@ -249,13 +249,13 @@ function renderBreadth(breadth, report) {
   `;
 }
 
-// 8条件完全一致の候補銘柄が極端に少ない場合の弱地合い警告バナー。
+// 8条件完全一致の銘柄が極端に少ない場合の弱地合い警告バナー。
 function renderP1Warning(report) {
   const el = document.getElementById("p1-warning");
   if (!el) return;
   if (report.p1_scarce) {
     const p1 = report.priority_counts ? report.priority_counts.p1 : 0;
-    el.textContent = `⚠ 8条件完全一致の候補銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
+    el.textContent = `⚠ 8条件完全一致の銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
     el.hidden = false;
   } else {
     el.hidden = true;
@@ -385,7 +385,7 @@ function fundStatusLabel(s) {
 }
 
 // ---------------------------------------------------------------------------
-// 〔候補〕トレンドテンプレート8条件合格(旧P1)一覧。P2〜P4はUI廃止(データは
+// 〔監視〕8条件合格・セットアップ形成待ち(旧P1)一覧。P2〜P4はUI廃止(データは
 // report.jsonに残るがダッシュボードには出さない)。全件をRS降順で表示する。
 // ---------------------------------------------------------------------------
 
@@ -402,8 +402,8 @@ function sectorSummary(s) {
   return `${s.sector33}${strength}`;
 }
 
-// 基本列(コード〜RS)は本命/候補プールのテーブル(COLUMNS)と共通の並び。
-// その後ろに候補専用列(セクター/MA乖離/52週高値距離)が続く。
+// 基本列(コード〜RS)は本命/候補のテーブル(COLUMNS)と共通の並び。
+// その後ろに監視専用列(セクター/MA乖離/52週高値距離)が続く。
 const PRIORITY_COLUMNS = [
   { key: "code", label: "コード", value: (s) => s.code },
   { key: "name", label: "銘柄名", value: (s) => s.name },
