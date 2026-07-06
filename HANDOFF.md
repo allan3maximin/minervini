@@ -1,0 +1,257 @@
+# ミネルヴィニ式スクリーナー 実装ハンドオフドキュメント
+
+最終更新: 2026-07-07 / 対象コミット: b99d17b (feat: P1-only candidate view, chart UX fixes, EDINET auto fundamentals)
+このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
+
+---
+
+## 1. プロジェクト概要
+
+日本株を対象にしたマーク・ミネルヴィニ SEPA 手法のスクリーナー。
+- **バックエンド**: Python (pandas/yfinance)。GitHub Actions で日次実行し、結果 JSON を `docs/data/` にコミット。
+- **フロントエンド**: GitHub Pages (`docs/`)。ビルド無しの素の HTML/CSS/JS。チャートは Lightweight Charts 4.1.3 (unpkg CDN)。
+- **リポジトリ**: https://github.com/allan3maximin/minervini (ブランチ: `master`)
+- データは EOD(日足終値ベース)。ザラ場中のブレイク検知はしない設計(逆指値の事前設定が前提)。
+
+## 2. リポジトリ構成
+
+```
+config.yaml                 全パラメータ(セクション別、後述)
+requirements.txt
+.github/workflows/
+  daily.yml                 日次バッチ (cron 30 7 * * 1-5 = 16:30 JST 平日)
+  universe.yml              月次ユニバース再構築 (毎週土曜起動→月初土曜のみ実行、手動可)
+  edinet-backfill.yml       EDINET過去分取得 (workflow_dispatch専用, days入力 default 730)
+src/
+  config.py                 load_config() = config.yaml のロード, REPO_ROOT
+  pipeline.py               日次パイプライン本体 (python -m src.pipeline [--universe-rebuild])
+  universe.py               ユニバース構築 (JPX上場一覧→流動性上位1000→セクターmap/発行済株式数)
+  indicators.py             MA50/150/200, MA200勾配日数, 52w高安, ATR, RS raw/percentile, RSライン
+  data/
+    prices.py               株価取得 (yfinanceチャンク→stooqフォールバック, parquetキャッシュ data/prices/)
+    indices.py              市場指標7種 (日経/TOPIX/グロース250/JGB10y/USDJPY/NASDAQ/SOX) → docs/data/indices.json
+    fundamentals.py         手動CSVロード + EDINET自動データとのマージ + tier判定 + スコア
+    edinet.py               EDINET API v2 自動ファンダ取得 (→ data/fundamentals_auto.json)
+  screener/
+    trend_template.py       トレンドテンプレート8条件(MUST) + テクニカル/フルスコア + EPS加速slope
+    priority.py             ハードフィルタ + P1〜P4評価 (※UIからP1-P4は廃止済み。バックエンドは残存)
+    vcp.py                  VCPベース検出 (zigzag→収縮列→MUST→品質スコア→フットプリント)
+    entry.py                エントリー状態機械 (WATCH_A/B, BREAKOUT等) + ピボット/損切り/ティック丸め
+    scoring.py              線形スコア/正規化/合成のユーティリティ
+  report/
+    build_site.py           report.json / breadth.json / charts/*.json の生成
+    heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
+docs/                       GitHub Pages ルート
+  index.html                ダッシュボード (3ティア表示)
+  stock.html                個別株詳細 (チャート3ペイン + チェックリスト + スコア内訳)
+  heatmap.html              セクターヒートマップ(ツリーマップ)
+  assets/
+    app.js                  ダッシュボード+個別株の全ロジック (~900行, 唯一の大物JS)
+    heatmap.js              ヒートマップ描画
+    config.js               window.MINERVINI_CONFIG (owner/repo/branch, passkeyAuthEnabled キルスイッチ)
+    github-api.js           GitHub Contents/Actions API ラッパ (PATはメモリのみ)
+    webauthn-vault.js       WebAuthn PRF でPATを暗号化保管 (docs/auth/vault.json)
+    fundamentals-modal.js   ファンダ手動入力モーダル (CSVをGitHub API経由でコミット)
+    style.css               全スタイル (ダークテーマ, CSS変数 --bg/--text/--accent/--danger等)
+  data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json)
+data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
+                            status_history.json, sector_history.json, sector_map.json,
+                            trend_template_debug.json, ※EDINET実行後: fundamentals_auto.json, edinet_state.json)
+manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
+tests/                      pytest 126件 (test_edinet.py 含む)
+```
+
+## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
+
+1. `jpholiday` で祝日ならスキップ (return 0)
+2. 市場指標更新 `indices_mod.update_indices` — 失敗してもスクリーナーは止めない (try/except)
+3. `load_universe()` → codes (~1000銘柄)
+4. `prices_mod.update_prices(codes)` — yfinanceを50銘柄チャンク+sleep 2-4s、失敗銘柄はstooqへ。失敗率>10%でジョブ失敗
+5. `compute_all` で指標付与 → `rs_percentile_rank` でRS(1-99パーセンタイル、母集団はユニバース)
+6. `trend_template.screen_universe` → 8条件フラグ (debug: data/trend_template_debug.json)
+7. `priority_mod.evaluate_priority` — ハードフィルタ通過銘柄にP1〜P4付与。`p1_scarce` = P1数 < priority.p1_warn_threshold(3)
+8. **ファンダ**: `load_fundamentals_csv()` (手動CSV) + `edinet_mod.update_fundamentals_auto(codes, config)` (自動取得、try/exceptで失敗無視) → `merge_fundamentals(auto, manual)` (手動が勝ち)
+9. P1銘柄のみ: VCP評価 → エントリー評価 → `score_stock` → レコード組立 + チャートJSON出力
+   - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B/EXTENDED + pivotあり) → confirmed/pool ティア
+   - それ以外 → `tier_override="watchlist"` (=フロントの〔候補〕)
+   - P2〜P4: `assemble_priority_record` の軽量レコード (VCP評価なし, tier="watchlist", has_chart無し)
+10. ヒートマップ生成 (try/except) → 各レコードに sector33/sector_strength/sector_direction 付与
+11. `build_report` (docs/data/report.json) + `update_breadth` (docs/data/breadth.json)
+
+### ティアとフロント表示の対応
+- `tier: "confirmed"` → 〔本命〕ファンダ確認済み (ファンダquartersが1件でもあれば confirmed)
+- `tier: "pool"` → 〔候補プール〕テクニカルのみ (VCPセットアップあり、ファンダなし)
+- `tier: "watchlist"` → 〔候補〕トレンドテンプレート8条件合格 (セットアップ形成待ち)
+
+### P1〜P4について(重要な経緯)
+- バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
+- **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。P2〜P4レコードは受信するが表示しない。
+- 弱地合い警告バナー(renderP1Warning)は残存。文言は「8条件完全一致の候補銘柄が◯件と極端に少ない…」(P1という語は使わない)。
+- 地合いメーターに「候補(8条件合格): N件」を表示 (renderBreadth)。
+- style.css の .prio-badge / .prio-1〜4 は未使用のまま残存(削除しても良い)。
+
+## 4. EDINET 自動ファンダ取得 (src/data/edinet.py) — 今回実装
+
+### 仕組み
+- **API**: EDINET API v2。`GET {api_url}/documents.json?date=YYYY-MM-DD&type=2` で日別提出一覧、
+  `GET {api_url}/documents/{docID}?type=5` でCSVバンドル(zip)。認証はヘッダ `Subscription-Key: <EDINET_API_KEY>`。
+- **APIキー**: 環境変数 `EDINET_API_KEY`。GitHub Secret に登録済み想定(ユーザーに依頼済み)。
+  **キーが無い場合はネットワークに一切触れず既存ストアを返すだけ**(テスト/ローカルが壊れない設計)。
+- **対象書類**: docTypeCode 120(有報) / 140(四半期報告書※2024年4月廃止) / 160(半期報告書)、csvFlag=="1"、
+  secCode(5桁) の先頭4桁がユニバースcodeに一致するもの。
+- **CSVパース**: zip内の *.csv は UTF-16 のタブ区切り。列: 要素ID/項目名/コンテキストID/相対年度/連結・個別/期間・時点/ユニットID/単位/値。
+  - EPS: 要素IDに `BasicEarningsLossPerShare` or `BasicEarningsPerShare` を含む行
+  - 売上: `NetSales`, `RevenueIFRS`, `Revenue`, `OperatingRevenue`, `GrossOperatingRevenue`, `OperatingIncomeINS` (優先順)
+  - コンテキスト: `CurrentYTDDuration` / `CurrentYearDuration` / `InterimDuration` (連結優先、`_NonConsolidatedMember` フォールバック)
+- **四半期ラベル**: `quarter_label(period_start, period_end)` — fy = 期首の年、n = round(期間月数/3) → `"{fy}Q{n}"`。
+  periodStart/periodEnd は一覧APIのフィールドを使う(XBRLは見ない)。
+- **YTD差分導出**: `derive_quarters` — 会計年度内でYTD点を昇順に並べ `値(Qn) = ytd(n) − ytd(直前の点)`。
+  - 2024年4月以降は四半期報告書廃止→Q1/Q3のYTD点が無い。その場合 Q2ラベル=上期合計、Q4ラベル=通期−上期 のスパン値になる。
+    **前年も同じ体制なので compute_accel_slope のYoY比較は整合する**(これが設計意図。1四半期換算に按分しない)。
+  - 同一ラベル重複(訂正報告書等)は先勝ち。年度をまたぐ差分はしない。
+- **永続化**:
+  - `data/fundamentals_auto.json`: `{code: {"quarters":[{fiscal_quarter,eps,revenue}], "checked_date":"YYYY-MM-DD", "source":"edinet"}}`
+    (checked_date = 最新提出日。銘柄あたり max_quarters_keep=12 四半期に切り詰め)
+  - `data/edinet_state.json`: `{"last_list_date":"YYYY-MM-DD", "processed_doc_ids":[...直近5000]}`
+- **インクリメンタル**: 日次実行は state.last_list_date+1〜今日 (上限 lookback_days=7)。
+  `--backfill-days N` 指定時は state を無視して N 日遡る。
+- **CLI**: `python -m src.data.edinet --backfill-days 730` (edinet-backfill.yml が呼ぶ)
+
+### マージ (src/data/fundamentals.py :: merge_fundamentals)
+- `merge_fundamentals(auto_by_code, manual_by_code)` — 同一 (code, fiscal_quarter) は**手動CSVが勝ち**。
+  monthly_yoy は手動のみ(自動には無い)。checked_date は手動優先、無ければ自動。
+- pipeline.py での呼び出し: `fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))`
+- 効果: EDINETデータが入った銘柄は quarters が存在する → `fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格。
+
+### 制約(ユーザー了解済み)
+- 2024年4月以降のQ1/Q3単体値はEDINETに存在しない(決算短信はTDnetでAPIキー方式なし)。
+- EPSのYTD差分は株式数変動時に厳密でない(許容)。
+- 年度途中からの取得だと最初の点がYTDそのままになる → **バックフィル(2年分)実行が前提**。
+
+## 5. config.yaml の要点
+
+- `universe`: size 1000, jpx_list_url (東証上場一覧xls), shares_sleep_sec 0.5
+- `data`: history_days 520, chunk_size 50, sleep_range [2,4], max_fail_ratio 0.10, topix_proxy_ticker "1306.T"
+- `trend_template`: rs_min 70, score_weights {rs:30, ma200_days:10, near_high:15, eps_accel:25, rev_accel:10, monthly:10}
+- `priority`: high_dist_mid_pct 25, high_dist_bad_pct 35, rs_soft_min 60, p1_warn_threshold 3
+- `heatmap`: periods [1,5,20,60], strength/direction窓と閾値
+- `vcp`: zigzag/収縮/スコアの全パラメータ
+- `entry`: breakout_vol_mult 1.4, stop_loss_pct 0.05, tick_table (JPX呼値簡易版)
+- `fundamentals`: min_quarters_for_full 7, stale_days 120
+- `edinet`: enabled true, api_url, lookback_days 7, sleep_sec 0.3, doc_type_codes ["120","140","160"], max_quarters_keep 12
+- `scoring`: phase1_weight 0.5, vcp_weight 0.5
+
+## 6. フロントエンド詳細 (docs/assets/app.js)
+
+同一ファイルで index.html と stock.html の両方を担当 (bodyの要素有無で分岐、末尾で initDashboard / initStockPage を起動)。
+
+### ダッシュボード (index.html)
+- `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
+- `COLUMNS` (本命/候補プール共通): code, name, close(終値), total_score, rs, footprint, pivot, buy_stop, stop_loss, risk_pct, fund_status
+  - 終値は `formatClose` (ja-JP ロケール, 小数1桁まで)
+- `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件。
+  `PRIORITY_COLUMNS`: code, name, close, total_score, rs, セクター(sectorSummary), MA乖離(maDeviationSummary), 高値距離
+- `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
+- `renderBreadth`: テンプレ通過率 / セットアップ数 / ブレイク成功率 / 候補(8条件合格)件数
+- `renderMarketOverview`: indices.json → カード + SVGスパークライン
+- WebAuthn/書き込み系: `passkeyAuthEnabled: false` (config.js) のキルスイッチで現在**全部非表示** (hidePasskeyAuthUi)。
+  有効化すると: 解錠ボタン(WebAuthn PRF→PAT復号)→ファンダ入力モーダル/再実行ボタンが活性化。
+
+### 個別株 (stock.html)
+- 3ペイン: 価格+MA(50/150/200) / 出来高 / RSライン(対TOPIX)。`makeChart` で共通生成、時間軸は最下段のみ表示、
+  `timeScale.fixRightEdge: true`, `handleScale.axisPressedMouseMove.price: false` (価格軸ドラッグで縮尺変更しない),
+  `handleScroll.vertTouchDrag: false` (スマホ縦スワイプはページスクロール)
+- ペイン間で `subscribeVisibleLogicalRangeChange` により表示範囲を同期
+- 期間切替 (#timeframe-toggle): data-tf = "5"(1週)/"22"(1ヶ月・初期)/"66"(3ヶ月)/"130"(半年)/"250"(1年)/"500"(2年)/"M"(月足)。
+  `setTimeframe(tf)`: 日足はバー数で `setVisibleLogicalRange({from: n-bars, to: n})`、"M" は月足集計データに切替
+- 最新日付ラベル: Lightweight Charts は最新日の目盛りを保証しないため、`addLatestDateLabel` で
+  `.latest-date-label` (absolute配置, style.css参照) を各ペイン右下にオーバーレイ
+- ピボット/損切りの水平線トグル (#toggle-pivot / #toggle-stop)
+- データは docs/data/charts/{code}.json (candles, volumes, rs_line, ma各種, pivot, stop_loss, 収縮マーカー)
+
+### キャッシュバスター
+**docs のJS/CSSを変更したら index.html / stock.html / heatmap.html の `?v=N` を必ず全箇所インクリメントする。現在 v=5。**
+
+## 7. GitHub Actions
+
+| workflow | トリガ | 内容 | 所要時間 |
+|---|---|---|---|
+| daily.yml | 平日 16:30 JST + 手動 | `python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分 |
+| universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` | **40-60分** (timeout 120分) |
+| edinet-backfill.yml | 手動のみ (days入力) | `python -m src.data.edinet --backfill-days N` → data/ コミット | days=730で数時間可 (timeout 300分) |
+
+- 3つとも `EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}` を env に設定済み。
+- コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
+- concurrency グループでワークフロー多重起動を防止。
+
+## 8. 出力JSONスキーマ(要点)
+
+### docs/data/report.json
+```
+{ generated_at, universe_size, template_pass,
+  priority_counts: {p1,p2,p3,p4}, p1_scarce: bool,
+  data_warnings: {failed_tickers, stale_tickers, csv_errors},
+  stocks: [ { code, name, close, tier("confirmed"|"pool"|"watchlist"),
+    rs, total_score, tech_score, full_score, footprint,
+    pivot, buy_stop, stop_loss, risk_pct, entry_status,
+    fund_coverage("full"|"partial"|"none"), fund_stale, fund_checked_date,
+    priority(1-4), unmet_conditions, high_dist, ma_dev系, sector33, sector_strength, sector_direction,
+    has_chart, new_breakout_today?, market_guard_warning? } ] }
+```
+### docs/data/breadth.json
+`{history: [{date, template_pass_rate, watch_count, breakout_success_rate, p1_count..p4_count}]}`
+
+### data/status_history.json
+エントリー状態の履歴 (ピボットのロック、EXTENDEDクールダウン、ブレイク成功率算出に使用)
+
+## 9. テスト・検証
+
+```bash
+python -m pytest tests/ -q        # 126件 (2026-07-07時点全パス)
+node --check docs/assets/app.js   # JS構文チェック
+```
+- tests/test_pipeline.py の `wired` fixture は全外部I/Oをmonkeypatchでモック。
+  **pipelineに新モジュールを足したら必ずここにもモックを追加**
+  (例: `monkeypatch.setattr(pipeline.edinet_mod, "update_fundamentals_auto", lambda codes, config: {})`)。
+- tests/test_edinet.py: quarter_label / extract(UTF-16 TSV zip合成) / derive_quarters / ストア / merge_fundamentals をカバー。
+- フロントは自動テスト無し。手動確認 or node で DOM stub を書いて smoke。
+
+## 10. 開発環境の注意 (Cowork/Claudeサンドボックス固有)
+
+- **マウントフォルダ上で git はファイルを書き換えられない** (unlink が Operation not permitted)。
+  - `git commit` 等は `.git/index.lock` / `.git/HEAD.lock` / `.git/objects/maintenance.lock` が残留しやすい。
+    対処: `mv .git/index.lock .git/index.lock.stale_$(date +%s)` のように**mvで退避**(rmは効かない)。
+  - `git checkout` / `git reset --hard` / `git rebase` は**働かない**(ワークツリー書き換えが unlink 依存)。
+    ファイル復元は `git show <commit>:<path> > <path>` のシェルリダイレクトで行う(truncate+writeは可能)。
+    コミット作成は plumbing (`git read-tree` + `git update-index --cacheinfo` + `git write-tree` + `git commit-tree` + `git update-ref`) が確実。
+  - サンドボックスから `git push` は不可(認証なし)。**pushは必ずユーザーがローカルで実行**。
+  - ユーザーのローカル(macOS)では `.git/*.lock` や `lockdump_*`, `*.stale_*` が残ることがある →
+    `rm -f .git/index.lock .git/HEAD.lock .git/objects/maintenance.lock .git/lockdump_*` してから pull/push。
+- daily.yml が平日毎日 docs/data/ と data/ にコミットする → **作業前に必ず `git fetch` して origin/master との乖離を確認**。
+  乖離時は生成データ(data/, docs/data/)はリモート(bot)側を正、ソースはローカル側を正として統合する。
+- 現在の状態 (2026-07-07): ローカル master = b99d17b が origin/master (b505046) より 1 コミット先行。
+  **ユーザーが `git push` すれば同期完了** (fast-forward)。
+
+## 11. 未対応・次のタスク候補
+
+1. **EDINETキー登録+バックフィル実行の確認**(ユーザー作業): Secret `EDINET_API_KEY` 登録 →
+   Actions「EDINET fundamentals backfill」を days=730 で手動実行 → data/fundamentals_auto.json ができ、
+   翌日次実行から〔本命〕に自動昇格銘柄が出るはず。動かなければ edinet.py のログ(printのみ)をActionsログで確認。
+2. EDINETの要素ID候補 (_EPS_CANDIDATES/_REVENUE_CANDIDATES) は実データ検証がまだ。
+   バックフィル後に fundamentals_auto.json の値を数銘柄、決算短信と突き合わせて検証するのが望ましい。
+   銀行・保険等の特殊業種は revenue が取れない/変な要素を拾う可能性 → 候補リストの調整で対応。
+3. style.css の未使用 .prio-badge / .prio-1〜4 の削除(任意)。
+4. passkeyAuth (書き込み系UI) はキルスイッチOFFのまま。再有効化するなら config.js の passkeyAuthEnabled を true に。
+5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
+   ※やる場合 breadth の p2-p4 カウント履歴と priority.py テストへの影響に注意。
+6. RSパーセンタイルの母集団はユニバース内銘柄(全市場ではない)— 既知の仕様。
+
+## 12. 変更時のチェックリスト (Sonnet向け)
+
+- [ ] docs/ の JS/CSS を触ったら 3つの html の `?v=N` を全部上げたか
+- [ ] pipeline に外部I/Oを足したら test_pipeline.py の wired fixture にモックを足したか
+- [ ] `python -m pytest tests/ -q` 全パス + `node --check docs/assets/app.js`
+- [ ] コミット前に `.git/*.lock` を mv で退避したか (サンドボックスの場合)
+- [ ] `git fetch` して origin との乖離を確認したか (botが毎日コミットする)
+- [ ] push はユーザーに依頼したか
+- [ ] UI文言に P1/P2/P3/P4 という語を新たに出していないか (概念はUI廃止済み)
