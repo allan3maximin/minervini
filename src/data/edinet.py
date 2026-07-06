@@ -100,7 +100,12 @@ def save_state(state: dict, path=None) -> None:
 # ---------------------------------------------------------------------------
 
 def _get(url: str, api_key: str, params: dict | None = None, timeout: int = 60) -> requests.Response:
-    headers = {"Subscription-Key": api_key}
+    # EDINET API v2 (Azure APIM) はクエリ "Subscription-Key" または
+    # ヘッダー "Ocp-Apim-Subscription-Key" でキーを受け付ける。
+    # 素の "Subscription-Key" ヘッダーは認識されず401になるので注意。
+    params = dict(params or {})
+    params["Subscription-Key"] = api_key
+    headers = {"Ocp-Apim-Subscription-Key": api_key}
     resp = requests.get(url, params=params, headers=headers, timeout=timeout)
     resp.raise_for_status()
     return resp
@@ -267,13 +272,17 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None, backf
     ytd_by_code: dict[str, list[dict]] = {}
     checked_by_code: dict[str, str] = {}
     n_docs = 0
+    list_ok = 0
+    list_fail = 0
 
     day = start
     while day <= today:
         try:
             docs = list_documents(day, api_key, config)
+            list_ok += 1
         except Exception as e:
             print(f"EDINET list {day} failed (skipped): {e}")
+            list_fail += 1
             day += timedelta(days=1)
             continue
         for doc in docs:
@@ -324,6 +333,14 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None, backf
         _merge_into_store(store, code, quarters, checked_by_code.get(code, today.isoformat()), max_keep)
 
     save_auto_store(store)
+    if list_fail > 0 and list_ok == 0:
+        # 全日failed(APIキー不正など)なら state を進めない。進めると
+        # 次回実行がその期間を永久にスキップしてしまうため。
+        print(
+            f"EDINET: all {list_fail} list requests failed; "
+            "state not advanced (check EDINET_API_KEY)."
+        )
+        return store
     state["last_list_date"] = today.isoformat()
     state["processed_doc_ids"] = sorted(processed)
     save_state(state)
