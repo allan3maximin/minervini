@@ -4,44 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>セクターヒートマップ | ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=7">
+<!-- index.htmlのSPA化(view-sectormap)に伴い、このページは旧URLからの
+     リダイレクトスタブのみを残す。実体はindex.html#sectormapに統合済み。 -->
+<meta http-equiv="refresh" content="0; url=index.html#sectormap">
+<link rel="canonical" href="index.html#sectormap">
 </head>
 <body>
-<a class="back-link" href="index.html">&larr; ダッシュボードに戻る</a>
-<header class="page-header">
-  <div class="page-header-top">
-    <h1>セクターヒートマップ（東証33業種）</h1>
-  </div>
-  <div id="hm-meta" class="meta-line"></div>
-</header>
-
-<div class="hm-toolbar">
-  <div class="segmented" id="hm-view-toggle">
-    <button type="button" data-view="detail" class="active">詳細</button>
-    <button type="button" data-view="simple">簡易</button>
-  </div>
-  <div class="segmented" id="hm-period-toggle">
-    <button type="button" data-period="d1" class="active">1日</button>
-    <button type="button" data-period="d5">5日</button>
-    <button type="button" data-period="d20">20日</button>
-    <button type="button" data-period="d60">60日</button>
-  </div>
-  <div class="hm-legend">
-    <span id="hm-legend-min"></span>
-    <span class="hm-legend-bar"></span>
-    <span id="hm-legend-max"></span>
-    <span class="hm-legend-note">面積=時価総額</span>
-  </div>
-</div>
-
-<div id="hm-container" class="hm-container">
-  <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
-</div>
-
-<footer class="page-footer">
-  <p>タイル面積は時価総額（取得不可の銘柄は最小面積）、色は選択期間の騰落率です。タイルタップで銘柄詳細（8条件・未達条件・MA乖離）を表示します。セクター名横のRS数値は対TOPIX20日相対リターン(%)。「簡易」表示は個別銘柄タイルを省き、セクターごとの騰落率のみを表示します。データは日次バッチで事前算出された静的JSONです。</p>
-</footer>
-
-<script src="assets/heatmap.js?v=7"></script>
+<p>セクターヒートマップは<a href="index.html#sectormap">ダッシュボード</a>に統合されました。自動的に移動しない場合はリンクをクリックしてください。</p>
 </body>
 </html>

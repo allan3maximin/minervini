@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-07-08 (3): フロントエンドをSPA化 + 列統一 + 投資法/バッチ実行ページ追加 (Sonnet)
+
+### やったこと
+- **列統一**: `docs/assets/app.js` の `renderTable`/`renderPriorityTier` をCOLUMNS配列一本化で書き換え、
+  本命/候補プール/監視の3ティアが同じレンダリング・ソート実装を共有するように統一(旧
+  `PRIORITY_COLUMNS`/`renderPriorityTable`/`maDeviationSummary`/`sectorSummary` は削除)。
+  各列に任意の `sortValue(s)` を持たせ、フォーマット済み文字列ではなく元の値でソートするよう修正
+  (セクター/高値距離/ファンダ状況などの列で従来ソートが効いていなかったバグの修正も兼ねる)。
+  セクター強度列を `.sector-strength-strong/-mid/-weak` で文字色分け、銘柄名は10文字トリム。
+  チャート未生成行(`has_chart===false`)は `.row-static` でクリック不可に。
+- **投資法ページ追加**: `view-invest` セクションにSEPAサイクル/トレンドテンプレート8条件/VCP(V1〜V7)/
+  エントリー/損切り・サイズ管理/利益確定の要点を静的HTMLで追加(ユーザーが手法を見返せるように)。
+- **バッチ実行ページ追加**: `config.js` にワークフロー一覧(daily/universe/jquants-backfill/
+  intraday-indices)を定義、`github-api.js` に汎用 `dispatchWorkflow(file)`/未認証 `listWorkflowRuns(file,n)`
+  を追加(旧 `dispatchDailyWorkflow` はラッパとして存置)、`fundamentals-modal.js` に汎用
+  `triggerWorkflow(btn, file)` を追加、新規 `docs/assets/batch.js` で `view-batch` にワークフローカード+
+  直近実行履歴(`.run-status-badge` 色分け)を描画。実行履歴表示自体は未認証で閲覧可、実行トリガーのみ
+  🔓解錠(書き込みPAT)必須で `.passkey-gated` により非表示。
+- **SPA化**: `index.html` を4セクション(`view-dashboard`/`view-sectormap`/`view-invest`/`view-batch`)+
+  下部Dock風ナビ(`#dock-nav`)の1ページに統合。`app.js` に `showView`/`initRouter` を追加し
+  `location.hash` ベースで切替(sectormap/batchタブは開くたびに `initHeatmap()`/`initBatchView()` を再実行)。
+  `heatmap.js` は `hmWired` フラグで一度きりのイベント登録だけガードし `initHeatmap()` を安全に再呼び出し
+  可能にした(非表示中の `clientWidth` 0によるツリーマップ崩壊を回避)。旧 `heatmap.html` は
+  `index.html#sectormap` へのリダイレクトスタブに変更(旧URL互換)。
+  書き込み系UI非表示は `hidePasskeyAuthUi` の固定idリストから `.passkey-gated` クラス方式に変更
+  (ヘッダーボタン+バッチページのカードを同じクラスで一括制御するため)。
+- 未使用だった `.prio-badge`/`.priority-*` CSSを削除。
+- キャッシュバスター全更新: app.js/style.css v=8(index.html/stock.html両方)、heatmap.js v=8、
+  config.js/github-api.js v=6、fundamentals-modal.js v=7、batch.js v=1(新規)、webauthn-vault.js v=5(変更なし)。
+- 検証: `node --check` を全JSファイルに実行、全パス。`python -m pytest tests/ -q` は
+  サンドボックスに `pyarrow`/`jpholiday` が入っておらず一部収集エラー・1件失敗
+  (`test_indices.py::test_update_indices_writes_json_and_survives_failures`、pyarrow欠如が原因)が出たが、
+  今回touchしたのはフロントのみでPythonロジックは無変更のため無関係と判断(148/149パス)。
+  ユーザーのローカル環境で改めて `python -m pytest tests/ -q` を実行して確認を推奨。
+- HANDOFF.md §2/§3/§7/§13を更新(EDINET DB §5節は無変更のまま保持)。
+
+### 次にやること
+- ユーザーにローカルでの目視確認(SPA切替・ダッシュボード列表示・バッチ実行ページの見た目)と
+  `python -m pytest tests/ -q` の実行を依頼。
+- 問題なければコミット→push(サンドボックスからはpush不可、ユーザーのローカルで実行)。
+
+---
+
 ## 2026-07-08 (2): edinetdb.enabled を true に切替 (Sonnet, ユーザー指示)
 
 - ユーザー指示により `config.yaml: edinetdb.enabled` を `false` → `true` に変更。

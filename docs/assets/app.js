@@ -21,18 +21,61 @@ const STATUS_ORDER = [
   "NO_BASE",
 ];
 
+// 本命/候補プール/監視(旧P1)の3ティア共通の列定義。以前はCOLUMNS(本命/候補プール)
+// とPRIORITY_COLUMNS(監視)が別々だったが、表示列を統一するために1本化した。
+// value()が表示文字列(またはhtml:trueならHTML)を返し、sortValue()があれば
+// それをソートキーとして使う(無ければ s[key] を直接参照)。
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// 銘柄名は横幅を取りすぎるため10文字でトリムする。フルネームはtitle属性(ホバー)で確認可能。
+function trimName(name) {
+  const s = String(name ?? "");
+  return s.length > 10 ? s.slice(0, 10) + "…" : s;
+}
+
+const SECTOR_STRENGTH_CLASS = { 強: "sector-strength-strong", 中: "sector-strength-mid", 弱: "sector-strength-weak" };
+
+// セクター(強度)列: 強度の文字だけ色付けする(緑=強/グレー=中/赤=弱)。
+function sectorStrengthHtml(s) {
+  if (!s.sector33) return "-";
+  const strength = s.sector_strength;
+  const cls = SECTOR_STRENGTH_CLASS[strength] || "";
+  const badge = strength ? `<span class="${cls}">${escapeHtml(strength)}${escapeHtml(s.sector_direction || "")}</span>` : "";
+  return `${escapeHtml(s.sector33)} ${badge}`;
+}
+
 const COLUMNS = [
-  { key: "code", label: "コード" },
-  { key: "name", label: "銘柄名" },
-  { key: "close", label: "終値" },
-  { key: "total_score", label: "総合スコア" },
-  { key: "rs", label: "RS" },
-  { key: "footprint", label: "フットプリント" },
-  { key: "pivot", label: "ピボット" },
-  { key: "buy_stop", label: "推奨逆指値" },
-  { key: "stop_loss", label: "推奨損切り" },
-  { key: "risk_pct", label: "リスク%" },
-  { key: "fund_status", label: "ファンダ状態" },
+  { key: "code", label: "コード", value: (s) => s.code },
+  { key: "name", label: "銘柄名", value: (s) => trimName(s.name), title: (s) => s.name },
+  { key: "close", label: "終値", value: (s) => formatClose(s.close) },
+  { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
+  { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
+  {
+    key: "sector",
+    label: "セクター(強度)",
+    value: sectorStrengthHtml,
+    html: true,
+    sortValue: (s) => ({ 強: 2, 中: 1, 弱: 0 }[s.sector_strength] ?? -1),
+  },
+  {
+    key: "high_dist",
+    label: "52週高値距離",
+    value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
+    sortValue: (s) => (s.high52w_distance_pct != null ? -s.high52w_distance_pct : -Infinity),
+  },
+  { key: "footprint", label: "フットプリント", value: (s) => s.footprint ?? "-" },
+  { key: "pivot", label: "ピボット", value: (s) => s.pivot ?? "-" },
+  { key: "buy_stop", label: "推奨逆指値", value: (s) => s.buy_stop ?? "-" },
+  { key: "stop_loss", label: "推奨損切り", value: (s) => s.stop_loss ?? "-" },
+  { key: "risk_pct", label: "リスク%", value: (s) => s.risk_pct ?? "-" },
+  {
+    key: "fund_status",
+    label: "ファンダ状態",
+    value: fundStatusLabel,
+    sortValue: (s) => (s.fund_stale ? -1 : s.fund_coverage === "full" ? 2 : s.fund_coverage === "partial" ? 1 : 0),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -77,11 +120,12 @@ async function initDashboard() {
 }
 
 // Kill switch: hides every passkey/write-related control so the dashboard
-// reads as plain read-only while the feature is still being tuned.
+// reads as plain read-only while the feature is still being tuned. Uses a
+// class (".passkey-gated") rather than a fixed id list, since write-gated
+// buttons are now spread across the dashboard header AND the batch view.
 function hidePasskeyAuthUi() {
-  ["vault-unlock-btn", "rerun-btn", "settings-btn"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = "none";
+  document.querySelectorAll(".passkey-gated").forEach((el) => {
+    el.style.display = "none";
   });
 }
 
@@ -90,14 +134,6 @@ function wireHeaderButtons() {
   if (settingsBtn && !settingsBtn.dataset.wired) {
     settingsBtn.dataset.wired = "1";
     settingsBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: true }));
-  }
-  const rerunBtn = document.getElementById("rerun-btn");
-  if (rerunBtn && !rerunBtn.dataset.wired) {
-    rerunBtn.dataset.wired = "1";
-    rerunBtn.addEventListener("click", () => {
-      if (!window.MinerviniGitHub.hasToken()) return; // guarded by disabled state; safety net
-      window.MinerviniFundamentalsUI.triggerManualRerun(rerunBtn);
-    });
   }
 }
 
@@ -331,19 +367,25 @@ function renderStatusSection(status, stocks, tier) {
   return section;
 }
 
-function renderTable(stocks, tier) {
-  let sortKey = "total_score";
-  let sortDesc = true;
+function renderTable(stocks, tier, options = {}) {
+  let sortKey = options.initialSortKey || "total_score";
+  let sortDesc = options.initialSortDesc ?? true;
 
   const wrapper = document.createElement("div");
   wrapper.className = "table-scroll";
   const table = document.createElement("table");
   wrapper.appendChild(table);
 
+  function sortValueFor(s, col) {
+    if (col.sortValue) return col.sortValue(s);
+    return s[col.key] ?? -Infinity;
+  }
+
   function draw() {
+    const activeCol = COLUMNS.find((c) => c.key === sortKey) || COLUMNS[0];
     const sorted = [...stocks].sort((a, b) => {
-      const av = a[sortKey] ?? -Infinity;
-      const bv = b[sortKey] ?? -Infinity;
+      const av = sortValueFor(a, activeCol);
+      const bv = sortValueFor(b, activeCol);
       if (av === bv) return 0;
       const cmp = av > bv ? 1 : -1;
       return sortDesc ? -cmp : cmp;
@@ -374,18 +416,22 @@ function renderTable(stocks, tier) {
     for (const s of sorted) {
       const row = document.createElement("tr");
       if (s.fund_stale) row.classList.add("fund-stale");
-      row.addEventListener("click", (e) => {
-        if (e.target.tagName === "BUTTON") return;
-        window.location.href = `stock.html?code=${encodeURIComponent(s.code)}`;
-      });
+      // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
+      const navigable = s.has_chart !== false;
+      if (navigable) {
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "BUTTON") return;
+          window.location.href = `stock.html?code=${encodeURIComponent(s.code)}`;
+        });
+      } else {
+        row.classList.add("row-static");
+      }
       for (const col of COLUMNS) {
         const td = document.createElement("td");
-        td.textContent =
-          col.key === "fund_status"
-            ? fundStatusLabel(s)
-            : col.key === "close"
-              ? formatClose(s.close)
-              : s[col.key] ?? "-";
+        const val = col.value(s);
+        if (col.html) td.innerHTML = val;
+        else td.textContent = val;
+        if (col.title) td.title = col.title(s);
         row.appendChild(td);
       }
       const actionTd = document.createElement("td");
@@ -431,37 +477,8 @@ function fundStatusLabel(s) {
 // ---------------------------------------------------------------------------
 // 〔監視〕8条件合格・セットアップ形成待ち(旧P1)一覧。P2〜P4はUI廃止(データは
 // report.jsonに残るがダッシュボードには出さない)。全件をRS降順で表示する。
+// 列は本命/候補プールと共通のCOLUMNSを使い、renderTableのみ初期ソートをRS降順に上書きする。
 // ---------------------------------------------------------------------------
-
-function maDeviationSummary(s) {
-  const d = s.ma_deviation_pct;
-  if (!d) return "-";
-  const fmt = (v) => (v == null ? "-" : (v > 0 ? "+" : "") + v.toFixed(1) + "%");
-  return `50: ${fmt(d.ma50)} / 150: ${fmt(d.ma150)} / 200: ${fmt(d.ma200)}`;
-}
-
-function sectorSummary(s) {
-  if (!s.sector33) return "-";
-  const strength = s.sector_strength ? ` ${s.sector_strength}${s.sector_direction || ""}` : "";
-  return `${s.sector33}${strength}`;
-}
-
-// 基本列(コード〜RS)は本命/候補のテーブル(COLUMNS)と共通の並び。
-// その後ろに監視専用列(セクター/MA乖離/52週高値距離)が続く。
-const PRIORITY_COLUMNS = [
-  { key: "code", label: "コード", value: (s) => s.code },
-  { key: "name", label: "銘柄名", value: (s) => s.name },
-  { key: "close", label: "終値", value: (s) => formatClose(s.close) },
-  { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
-  { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
-  { key: "sector", label: "セクター(強度)", value: sectorSummary },
-  { key: "ma_dev", label: "MA乖離", value: maDeviationSummary },
-  {
-    key: "high_dist",
-    label: "52週高値距離",
-    value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
-  },
-];
 
 function renderPriorityTier(report, containerId) {
   const container = document.getElementById(containerId);
@@ -479,45 +496,7 @@ function renderPriorityTier(report, containerId) {
   note.className = "tier-note";
   note.textContent = `全${stocks.length}件 (RS降順)`;
   container.appendChild(note);
-  container.appendChild(renderPriorityTable(stocks));
-}
-
-function renderPriorityTable(stocks) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "table-scroll";
-  const table = document.createElement("table");
-  table.className = "priority-table";
-  wrapper.appendChild(table);
-
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  for (const col of PRIORITY_COLUMNS) {
-    const th = document.createElement("th");
-    th.textContent = col.label;
-    headRow.appendChild(th);
-  }
-  thead.appendChild(headRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-  for (const s of stocks) {
-    const row = document.createElement("tr");
-    // P1(旧ウォッチリスト相当)のみチャートJSONあり -> 詳細ページへ遷移可能
-    if (s.has_chart) {
-      row.classList.add("clickable");
-      row.addEventListener("click", () => {
-        window.location.href = `stock.html?code=${encodeURIComponent(s.code)}`;
-      });
-    }
-    for (const col of PRIORITY_COLUMNS) {
-      const td = document.createElement("td");
-      td.textContent = col.value(s);
-      row.appendChild(td);
-    }
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  return wrapper;
+  container.appendChild(renderTable(stocks, "watchlist", { initialSortKey: "rs", initialSortDesc: true }));
 }
 
 // ---------------------------------------------------------------------------
@@ -986,10 +965,53 @@ function renderScoreBreakdown(stock) {
 }
 
 // ---------------------------------------------------------------------------
+// SPA router (Dockナビ): index.htmlの4ビューをlocation.hashで切り替える。
+// セクターマップ/バッチ実行は表示のたびに再init(ヒートマップはコンテナが
+// 見えて初めてclientWidthが正しく取れるため、バッチ実行は履歴を毎回最新化
+// するため)。
+// ---------------------------------------------------------------------------
+
+const VIEWS = ["dashboard", "sectormap", "invest", "batch"];
+
+function showView(name) {
+  if (!VIEWS.includes(name)) name = "dashboard";
+  for (const v of VIEWS) {
+    const section = document.getElementById(`view-${v}`);
+    if (section) section.hidden = v !== name;
+  }
+  document.querySelectorAll(".dock-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === name);
+  });
+  if (name === "sectormap" && typeof initHeatmap === "function") {
+    initHeatmap();
+  }
+  if (name === "batch" && window.MinerviniBatch) {
+    window.MinerviniBatch.initBatchView();
+  }
+}
+
+function initRouter() {
+  const dock = document.getElementById("dock-nav");
+  if (!dock) return;
+  dock.querySelectorAll(".dock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.location.hash = btn.dataset.view;
+    });
+  });
+  window.addEventListener("hashchange", () => {
+    showView(window.location.hash.replace("#", "") || "dashboard");
+  });
+  showView(window.location.hash.replace("#", "") || "dashboard");
+}
+
+// ---------------------------------------------------------------------------
 
 if (document.getElementById("confirmed-tier-body")) {
   initDashboard();
 }
 if (document.getElementById("chart-container")) {
   initStockPage();
+}
+if (document.getElementById("dock-nav")) {
+  initRouter();
 }

@@ -5,6 +5,10 @@
 let HM = null;
 let currentPeriod = "d1";
 let currentView = "detail"; // "detail" (既存treemap) | "simple" (セクター騰落率のみ)
+// SPA化に伴い、initHeatmap()はセクターマップタブに切り替えるたび毎回呼ばれる
+// (非表示中はcontainerの幅が0でtreemapが描けないため、表示時に再計算・再描画
+// する必要がある)。イベントリスナーの重複登録だけは防ぐためのフラグ。
+let hmWired = false;
 
 // 期間ごとの色クランプ(±%): これを超える騰落率は最濃色で飽和
 const COLOR_CLAMP = { d1: 3, d5: 6, d20: 12, d60: 25 };
@@ -38,33 +42,37 @@ async function initHeatmap() {
     meta.textContent = `最終更新: ${when} / ${HM.sectors.length}セクター ${nStocks}銘柄`;
   }
 
-  const toggle = document.getElementById("hm-period-toggle");
-  if (toggle) {
-    toggle.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-period]");
-      if (!btn) return;
-      toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      currentPeriod = btn.dataset.period;
-      render();
-    });
-  }
+  if (!hmWired) {
+    const toggle = document.getElementById("hm-period-toggle");
+    if (toggle) {
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-period]");
+        if (!btn) return;
+        toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+        currentPeriod = btn.dataset.period;
+        render();
+      });
+    }
 
-  const viewToggle = document.getElementById("hm-view-toggle");
-  if (viewToggle) {
-    viewToggle.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-view]");
-      if (!btn) return;
-      viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      currentView = btn.dataset.view;
-      render();
-    });
-  }
+    const viewToggle = document.getElementById("hm-view-toggle");
+    if (viewToggle) {
+      viewToggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-view]");
+        if (!btn) return;
+        viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+        currentView = btn.dataset.view;
+        render();
+      });
+    }
 
-  let resizeTimer = null;
-  window.addEventListener("resize", () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(render, 150);
-  });
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(render, 150);
+    });
+
+    hmWired = true;
+  }
 
   render();
 }
@@ -372,4 +380,5 @@ function closeTilePopup() {
   if (el) el.remove();
 }
 
-initHeatmap();
+// SPAルーター(app.js)がセクターマップタブ表示時に呼び出す。単独ページ
+// (heatmap.html経由の旧URL)では存在しないため、末尾の自動起動は行わない。

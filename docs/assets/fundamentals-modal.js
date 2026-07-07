@@ -507,6 +507,29 @@
     }
   }
 
+  // 汎用版: バッチ実行ページの各カードから任意のワークフローをトリガーする。
+  async function triggerWorkflow(buttonEl, workflowFile) {
+    buttonEl.disabled = true;
+    const original = buttonEl.textContent;
+    buttonEl.textContent = "実行をリクエスト中...";
+    try {
+      await GH.dispatchWorkflow(workflowFile);
+      alert("実行をリクエストしました。GitHub Actionsの実行状況をご確認ください。");
+      buttonEl.textContent = original;
+      buttonEl.disabled = false;
+    } catch (e) {
+      buttonEl.textContent = original;
+      if (e instanceof GH.GitHubApiError && e.status === 403) {
+        buttonEl.disabled = true;
+        buttonEl.title = "PATにActions: Read and write権限がありません";
+        alert("手動実行には権限が不足しています。設定のPATにActions: Read and writeを追加してください。");
+      } else {
+        buttonEl.disabled = false;
+        alert(`実行のリクエストに失敗しました: ${e.message || e}`);
+      }
+    }
+  }
+
   window.MinerviniFundamentalsUI = {
     openVaultSetupModal,
     openFundamentalsModal,
@@ -514,6 +537,7 @@
     reconcilePending,
     isPending,
     triggerManualRerun,
+    triggerWorkflow,
     generateQuarterLabels,
     validateForm,
     onSaved: null, // app.js sets this to re-render the dashboard after a save

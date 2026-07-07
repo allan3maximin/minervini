@@ -4,17 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=7">
+<link rel="stylesheet" href="assets/style.css?v=8">
 </head>
 <body>
 <header class="page-header">
   <div class="page-header-top">
     <h1>ミネルヴィニ式スクリーナー</h1>
     <div class="page-header-actions">
-      <button type="button" id="vault-unlock-btn" class="secondary write-btn">🔓 解錠</button>
-      <button type="button" id="rerun-btn" class="secondary write-btn" disabled>今すぐ再スクリーニング</button>
-      <button type="button" id="settings-btn" class="secondary">設定</button>
-      <a href="heatmap.html" class="secondary nav-btn">セクターヒートマップ</a>
+      <button type="button" id="vault-unlock-btn" class="secondary write-btn passkey-gated">🔓 解錠</button>
+      <button type="button" id="settings-btn" class="secondary passkey-gated">設定</button>
     </div>
   </div>
   <div id="generated-at" class="meta-line"></div>
@@ -23,6 +21,8 @@
 </header>
 
 <main>
+
+<section id="view-dashboard" class="view-section">
   <section class="market-overview" id="market-overview" hidden>
     <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
     <div id="market-cards" class="market-cards"></div>
@@ -45,16 +45,119 @@
     <p class="tier-note">トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだエントリーできない銘柄。ベースが検出されると上の〔候補〕/〔本命〕に昇格します。全件RS降順。</p>
     <div id="watchlist-tier-body"></div>
   </section>
+</section>
+
+<section id="view-sectormap" class="view-section" hidden>
+  <div id="hm-meta" class="meta-line"></div>
+  <div class="hm-toolbar">
+    <div class="segmented" id="hm-view-toggle">
+      <button type="button" data-view="detail" class="active">詳細</button>
+      <button type="button" data-view="simple">簡易</button>
+    </div>
+    <div class="segmented" id="hm-period-toggle">
+      <button type="button" data-period="d1" class="active">1日</button>
+      <button type="button" data-period="d5">5日</button>
+      <button type="button" data-period="d20">20日</button>
+      <button type="button" data-period="d60">60日</button>
+    </div>
+    <div class="hm-legend">
+      <span id="hm-legend-min"></span>
+      <span class="hm-legend-bar"></span>
+      <span id="hm-legend-max"></span>
+      <span class="hm-legend-note">面積=時価総額</span>
+    </div>
+  </div>
+
+  <div id="hm-container" class="hm-container">
+    <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+  </div>
+  <p class="tier-note">タイル面積は時価総額(取得不可の銘柄は最小面積)、色は選択期間の騰落率。タイルタップで銘柄詳細(8条件・未達条件・MA乖離)を表示。「簡易」表示はセクターごとの騰落率のみ。</p>
+</section>
+
+<section id="view-invest" class="view-section" hidden>
+  <h2>Minervini投資法(SEPA)の要点</h2>
+  <div class="invest-content">
+
+    <h3>SEPAの基本サイクル</h3>
+    <p>Mark MinervinìのSEPA(Specific Entry Point Analysis)は、機関投資家の資金が入り始めた「成長株」を、ベースを抜けた瞬間に低リスクで拾いに行く手法。銘柄は無限にあるステージ(停滞→上昇→天井圏→下降)を巡っており、狙うのはステージ2(上昇局面)の初期だけ。ステージ1(底固め)からステージ2への転換をトレンドテンプレートで判定し、ステージ2の中でのVCP(出来高・値幅の収縮)完成をエントリーの引き金にする。</p>
+
+    <h3>トレンドテンプレート(8条件)</h3>
+    <p>ステージ2にあることを機械的に確認するための8つのMUST条件。1つでも欠ければステージ2とは認めない。</p>
+    <ol>
+      <li>終値が150日線・200日線より上</li>
+      <li>150日線が200日線より上</li>
+      <li>200日線が1ヶ月以上上向き</li>
+      <li>50日線 &gt; 150日線 &gt; 200日線 の並び</li>
+      <li>終値が50日線より上</li>
+      <li>52週安値から+25%以上離れている</li>
+      <li>52週高値から-25%以内(高値圏に近い)</li>
+      <li>RSレーティング(相対的強さ)が70以上、理想は80〜90以上</li>
+    </ol>
+
+    <h3>VCP(ボラティリティ収縮パターン, V1〜V7)</h3>
+    <p>強い銘柄でも上昇前には必ず「収縮」する。売り圧力が減衰し、供給が枯れたことを値幅・出来高の両面から確認するのがVCP。</p>
+    <ol>
+      <li><b>V1</b> 収縮(押し)の回数が2〜6回</li>
+      <li><b>V2</b> 収縮の深さが段階的に浅くなっていく(例: 25%→15%→8%)</li>
+      <li><b>V3</b> 最初の収縮が35%以内</li>
+      <li><b>V4</b> 最後の収縮が10%以内(タイトであるほど良い)</li>
+      <li><b>V5</b> 出来高がドライアップしている(直近10日平均が50日平均の0.8倍以下)</li>
+      <li><b>V6</b> ベース全体の期間が15〜200日</li>
+      <li><b>V7</b> 収縮のたびに安値が切り上がっている</li>
+    </ol>
+    <p class="invest-note">VCPが完成しただけではまだ買わない。ピボット(直近の抵抗ライン)を出来高を伴って上抜けた瞬間が本来のエントリーポイント。</p>
+
+    <h3>エントリー</h3>
+    <ul>
+      <li>ピボットを平時より多い出来高で上抜けたら買い(逆指値/成行のブレイクアウト買い)。</li>
+      <li>ピボットから大きく離れて(目安+5%超)追いかけない。過熱(EXTENDED)状態からの新規は避ける。</li>
+      <li>地合い(市場全体のトレンド)が弱い時は新規エントリーの点数・サイズを絞る。</li>
+    </ul>
+
+    <h3>損切りとポジションサイズ</h3>
+    <ul>
+      <li>1銘柄あたりの損切り許容は口座資金の1.25〜2%程度に収める。</li>
+      <li>損切りラインは買値から-7〜8%を機械的な上限とする(それ以上待たない)。</li>
+      <li>ポジションサイズ = 許容損失額 ÷ (エントリー価格 - 損切り価格)で逆算する。損切り幅が広い銘柄ほど枚数を減らす。</li>
+    </ul>
+
+    <h3>利益確定と管理</h3>
+    <ul>
+      <li>含み益が乗ったら損切りラインを建値まで引き上げ、無リスク化する。</li>
+      <li>急騰(クライマックス的な値動き・出来高急増)は利益確定のサイン。</li>
+      <li>勝ちトレードは伸ばし、負けトレードは素早く切る非対称性が最重要(勝率50%未満でも損益比で勝てる)。</li>
+    </ul>
+
+    <p class="invest-note">このダッシュボードの〔本命〕〔候補〕〔監視〕はSEPAのステップに対応: 監視=8条件合格(ステージ2入り)、候補=VCP完成(テクニカルの引き金あり)、本命=ファンダメンタルズ裏付けまで確認済み。</p>
+  </div>
+</section>
+
+<section id="view-batch" class="view-section" hidden>
+  <h2>バッチ実行</h2>
+  <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
+  <div id="batch-cards" class="batch-cards passkey-gated"></div>
+  <div id="batch-history"></div>
+</section>
+
 </main>
 
 <footer class="page-footer">
   <p>既知の制約: EODデータのためザラ場中のブレイクは当日実行まで検知されません(逆指値の事前設定が前提)。RSパーセンタイルの母集団はユニバース内銘柄です。発注前のチャート確認は必須です。</p>
 </footer>
 
-<script src="assets/config.js?v=5"></script>
-<script src="assets/github-api.js?v=5"></script>
+<nav class="dock-nav" id="dock-nav">
+  <button type="button" class="dock-btn" data-view="dashboard"><span class="dock-icon">📊</span>ダッシュボード</button>
+  <button type="button" class="dock-btn" data-view="sectormap"><span class="dock-icon">🗺️</span>セクターマップ</button>
+  <button type="button" class="dock-btn" data-view="invest"><span class="dock-icon">📖</span>投資法</button>
+  <button type="button" class="dock-btn" data-view="batch"><span class="dock-icon">⚙️</span>バッチ実行</button>
+</nav>
+
+<script src="assets/config.js?v=6"></script>
+<script src="assets/github-api.js?v=6"></script>
 <script src="assets/webauthn-vault.js?v=5"></script>
-<script src="assets/fundamentals-modal.js?v=6"></script>
-<script src="assets/app.js?v=7"></script>
+<script src="assets/fundamentals-modal.js?v=7"></script>
+<script src="assets/heatmap.js?v=8"></script>
+<script src="assets/batch.js?v=1"></script>
+<script src="assets/app.js?v=8"></script>
 </body>
 </html>

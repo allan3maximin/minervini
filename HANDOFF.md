@@ -1,9 +1,10 @@
 # ミネルヴィニ式スクリーナー 実装ハンドオフドキュメント
 
-最終更新: 2026-07-08 / 対象コミット: (未コミット — EDINET DB決算短信補完の追加)
+最終更新: 2026-07-08 / 対象コミット: (未コミット — EDINET DB決算短信補完の追加 + フロントSPA化)
 ※ かつてのEDINET API v2連携(四半期報告書ベース)は撤去済み(a5c76fc)。自動ファンダ取得のメインは
   J-Quants API(72ffe1a)。2026-07-08、その12週遅延窓を補うEDINET DB(決算短信ベース、別サービス)
-  連携を追加(下記5章)。
+  連携を追加(下記5章)。同日、フロントエンドを1ページSPA化(ダッシュボード/セクターマップ/投資法/
+  バッチ実行をDockナビで切替、下記7章)。
 このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
 
 ---
@@ -47,17 +48,26 @@ src/
     build_site.py           report.json / breadth.json / charts/*.json の生成
     heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
 docs/                       GitHub Pages ルート
-  index.html                ダッシュボード (3ティア表示)
-  stock.html                個別株詳細 (チャート3ペイン + チェックリスト + スコア内訳)
-  heatmap.html              セクターヒートマップ(ツリーマップ)
+  index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-batch の
+                            4セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
+  stock.html                個別株詳細 (チャート3ペイン + チェックリスト + スコア内訳、Dockナビの対象外の独立ページ)
+  heatmap.html              旧URL用リダイレクトスタブ (meta refresh → index.html#sectormap。実体はSPAに統合済み)
   assets/
-    app.js                  ダッシュボード+個別株の全ロジック (~900行, 唯一の大物JS)
-    heatmap.js              ヒートマップ描画 (詳細=既存treemap / 簡易=セクター騰落率のみ、#hm-view-toggleで切替)
-    config.js               window.MINERVINI_CONFIG (owner/repo/branch, passkeyAuthEnabled キルスイッチ)
-    github-api.js           GitHub Contents/Actions API ラッパ (PATはメモリのみ)
+    app.js                  ダッシュボード+個別株+SPAルーターの全ロジック (~1080行, 唯一の大物JS)
+    heatmap.js              ヒートマップ描画 (詳細=既存treemap / 簡易=セクター騰落率のみ、#hm-view-toggleで切替)。
+                            SPA化に伴い `hmWired` フラグで一度きりのイベント登録をガードし、
+                            initHeatmap() をタブ切替のたびに安全に再呼び出しできるようにした(ファイル末尾の自動起動は削除、呼び出しはapp.jsのrouterが担当)。
+    batch.js                バッチ実行ページ(view-batch)の描画。config.jsのworkflows一覧からカード生成+
+                            listWorkflowRuns で直近実行履歴を表示。initBatchView() をrouterが呼ぶ。
+    config.js               window.MINERVINI_CONFIG (owner/repo/branch, passkeyAuthEnabled キルスイッチ,
+                            workflows: バッチ実行ページに出す手動トリガー可能なワークフロー一覧)
+    github-api.js           GitHub Contents/Actions API ラッパ (PATはメモリのみ)。dispatchWorkflow(workflowFile)で
+                            任意ワークフローをトリガー、listWorkflowRunsは未認証fetchで直近実行履歴を取得(バッチページ用)。
     webauthn-vault.js       WebAuthn PRF でPATを暗号化保管 (docs/auth/vault.json)
-    fundamentals-modal.js   ファンダ手動入力モーダル (CSVをGitHub API経由でコミット)
-    style.css               全スタイル (ダークテーマ, CSS変数 --bg/--text/--accent/--danger等)
+    fundamentals-modal.js   ファンダ手動入力モーダル (CSVをGitHub API経由でコミット) + triggerWorkflow(バッチページの汎用実行トリガー)
+    style.css               全スタイル (ダークテーマ, CSS変数 --bg/--text/--accent/--danger等)。Dockナビ/
+                            view-section/invest-content/batch-cards等のSPA関連スタイルを追加、未使用だった
+                            .prio-badge/.priority-* は削除済み。
   data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json)
 data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
                             status_history.json, sector_history.json, sector_map.json,
@@ -94,7 +104,7 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 - **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。P2〜P4レコードは受信するが表示しない。
 - 弱地合い警告バナー(renderP1Warning)は残存。文言は「8条件完全一致の候補銘柄が◯件と極端に少ない…」(P1という語は使わない)。
 - 地合いメーターに「候補(8条件合格): N件」を表示 (renderBreadth)。
-- style.css の .prio-badge / .prio-1〜4 は未使用のまま残存(削除しても良い)。
+- style.css の .prio-badge / .prio-1〜4 / .priority-table は2026-07-08に削除済み(対応するJSがCOLUMNS一本化で消えたため)。
 
 ## 4. J-Quants 自動ファンダ取得 (src/data/jquants.py) — EDINETから移行済み
 
@@ -252,22 +262,61 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 
 ## 7. フロントエンド詳細 (docs/assets/app.js)
 
-同一ファイルで index.html と stock.html の両方を担当 (bodyの要素有無で分岐、末尾で initDashboard / initStockPage を起動)。
+同一ファイルで index.html と stock.html の両方を担当 (bodyの要素有無で分岐、末尾で initDashboard / initStockPage / initRouter を起動)。
 
-### ダッシュボード (index.html)
+### SPA構造 (2026-07-08〜)
+- index.html は4つの `<section class="view-section" id="view-{dashboard|sectormap|invest|batch}">` を持つ1ページ。
+  初期状態は view-dashboard のみ表示、他は `hidden`。
+- 下部固定 `<nav class="dock-nav" id="dock-nav">` にmacOS Dock風の4ボタン(`.dock-btn[data-view=...]`)。
+- ルーター (app.js): `showView(name)` が対象セクションの `hidden` を切り替え、`.dock-btn.active` を付け替える。
+  `initRouter()` が dock ボタンの click → `location.hash` 変更、`hashchange` → `showView` の配線と、
+  初期表示(hashが無ければ "dashboard")を行う。
+  - `view-sectormap` を開くたび `initHeatmap()` を再実行(非表示中は `clientWidth` が0でツリーマップが
+    壊れるため、表示された瞬間に再計測させる設計。heatmap.js側は `hmWired` フラグで一度きりの
+    イベント登録だけガードし、render自体は毎回実行)。
+  - `view-batch` を開くたび `window.MinerviniBatch.initBatchView()` を実行(カード自体は初回のみ生成、
+    実行履歴は毎回再取得して最新化)。
+- `stock.html` はDockナビの対象外の独立ページ(旧来通り)。
+- 旧 `heatmap.html` は `index.html#sectormap` への meta-refresh リダイレクトスタブのみ残存(旧URL互換)。
+
+### ダッシュボード (view-dashboard)
 - `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
-- `COLUMNS` (本命/候補プール共通): code, name, close(終値), total_score, rs, footprint, pivot, buy_stop, stop_loss, risk_pct, fund_status
+- `COLUMNS` (本命/候補プール/監視の3ティア共通、1本化済み): code, name(10文字トリム), close(終値), total_score, rs,
+  footprint, pivot, buy_stop, stop_loss, risk_pct, fund_status, sector(セクター強度で文字色分け)
   - 終値は `formatClose` (ja-JP ロケール, 小数1桁まで)
-- `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件。
-  `PRIORITY_COLUMNS`: code, name, close, total_score, rs, セクター(sectorSummary), MA乖離(maDeviationSummary), 高値距離
+  - `renderTable(stocks, tier, options)` が3ティア共通の描画/ソート実装。`options.initialSortKey`/
+    `initialSortDesc` で初期ソート列を指定(confirmed/poolはtotal_score降順、watchlistはrs降順)。
+    各列は `sortValue(s)` を任意で持てる(フォーマット済み文字列ではなく元の数値でソートするため)。
+  - セクター強度の文字色: `.sector-strength-strong`(accent) / `-mid`(text-dim) / `-weak`(danger)。
+  - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(stock.htmlへ遷移させない)。
+- `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
+  上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
 - `renderBreadth`: テンプレ通過率 / セットアップ数 / ブレイク成功率 / 候補(8条件合格)件数
 - `renderMarketOverview`: indices.json → カード + SVGスパークライン
 - `startLiveIndices`: 指数カードの擬似リアルタイム更新。60秒間隔で indices.json を再fetch (`cache: "no-store"`) して
   `renderMarketOverview` を再実行するだけ(ページリロード不要)。バックグラウンドタブ (`document.hidden`) では止める。
   データ自体の更新頻度は intraday-indices.yml 側の15分間隔が上限 (静的サイトなのでティック単位の真のリアルタイムではない)。
-- WebAuthn/書き込み系: `passkeyAuthEnabled: false` (config.js) のキルスイッチで現在**全部非表示** (hidePasskeyAuthUi)。
-  有効化すると: 解錠ボタン(WebAuthn PRF→PAT復号)→ファンダ入力モーダル/再実行ボタンが活性化。
+- WebAuthn/書き込み系: `passkeyAuthEnabled: false` (config.js) のキルスイッチで現在**全部非表示**。
+  対象は `.passkey-gated` クラスを持つ全要素(旧: id固定リストの `hidePasskeyAuthUi`。ヘッダーのボタンに加え
+  view-batch の実行カードも同クラスで一括隠蔽できるよう、2026-07-08にクラスベースへ変更)。
+  有効化すると: 解錠ボタン(WebAuthn PRF→PAT復号)→ファンダ入力モーダル/バッチ実行ボタンが活性化。
+
+### 投資法ページ (view-invest)
+- 静的コンテンツ(fetch無し)。SEPAの基本サイクル、トレンドテンプレート8条件、VCP(V1〜V7)、
+  エントリー/損切り・ポジションサイズ/利益確定の要点をプレーンなHTMLで記載(ユーザーが手法を
+  ダッシュボードから離れずに見返せるようにする目的)。他ロジックとの依存関係は無し。
+
+### バッチ実行ページ (view-batch, docs/assets/batch.js)
+- `window.MINERVINI_CONFIG.workflows` (config.js): daily.yml/universe.yml/jquants-backfill.yml/
+  intraday-indices.yml の4件を `{file, label, desc}` で定義。GitHub Actionsの実ワークフローファイル名と
+  一致させる必要あり(ワークフロー追加時はここに追記)。
+- `initBatchView()`: `#batch-cards` にワークフローごとの `.batch-card` を生成(初回のみ、`wired` フラグでガード)、
+  実行ボタンは `window.MinerviniFundamentalsUI.triggerWorkflow(btn, wf.file)` → `github-api.js::dispatchWorkflow`。
+  `#batch-history` は毎回 `GH.listWorkflowRuns(wf.file, 5)` で直近5件を再取得し `.run-status-badge` で色分け表示
+  (success=accent, failure=danger, in_progress/queued=warn)。実行トリガーには🔓解錠(書き込み権限PAT)が必要
+  (`.passkey-gated` でボタンごと非表示)だが、履歴閲覧自体は認証不要(公開リポジトリのActions実行履歴は
+  未認証でも読めるため `listWorkflowRuns` はプレーン `fetch` を使用、60req/hr制限はこの用途では十分)。
 
 ### 個別株 (stock.html)
 - 3ペイン: 価格+MA(50/150/200) / 出来高 / RSライン(対TOPIX)。`makeChart` で共通生成、時間軸は最下段のみ表示、
@@ -284,8 +333,10 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 - データは docs/data/charts/{code}.json (candles, volumes, rs_line, ma各種, pivot, stop_loss, 収縮マーカー)
 
 ### キャッシュバスター
-**docs のJS/CSSを変更したら index.html / stock.html / heatmap.html の `?v=N` を必ず全箇所インクリメントする。現在 app.js/style.css/heatmap.js は v=7。
-(config.js/github-api.js/webauthn-vault.js/fundamentals-modal.js は今回未変更のため v=5 のまま。)**
+**docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-08時点:
+app.js v=8 (index.html/stock.html両方), style.css v=8 (index.html/stock.html両方), heatmap.js v=8,
+config.js v=6, github-api.js v=6, fundamentals-modal.js v=7, batch.js v=1(新規), webauthn-vault.js v=5(今回未変更)。
+heatmap.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
 
 ## 8. GitHub Actions
 
@@ -371,7 +422,7 @@ node --check docs/assets/app.js   # JS構文チェック
 2. J-Quantsの `EPS`/`Sales` 列は実データ検証がまだ。
    バックフィル後に fundamentals_auto.json の値を数銘柄、決算短信と突き合わせて検証するのが望ましい。
    銀行・保険等の特殊業種は Sales が取れず NCSales にもフォールバックしない可能性 → 必要ならフィールド追加で対応。
-3. style.css の未使用 .prio-badge / .prio-1〜4 の削除(任意)。
+3. ~~style.css の未使用 .prio-badge / .prio-1〜4 の削除~~ → 2026-07-08、COLUMNS一本化に伴い削除済み。
 4. passkeyAuth (書き込み系UI) はキルスイッチOFFのまま。再有効化するなら config.js の passkeyAuthEnabled を true に。
 5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
    ※やる場合 breadth の p2-p4 カウント履歴と priority.py テストへの影響に注意。

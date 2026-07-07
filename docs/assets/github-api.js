@@ -210,17 +210,37 @@
   }
 
   // ---------------------------------------------------------------------
-  // Actions API (optional manual re-run button)
+  // Actions API (manual re-run button / バッチ実行ページ)
   // ---------------------------------------------------------------------
 
-  async function dispatchDailyWorkflow() {
-    const { owner, repo, workflowFile, branch } = window.MINERVINI_CONFIG;
+  // 任意のワークフローファイルをworkflow_dispatchでトリガーする汎用版。
+  async function dispatchWorkflow(workflowFile) {
+    const { owner, repo, branch } = window.MINERVINI_CONFIG;
     const resp = await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${workflowFile}/dispatches`, {
       method: "POST",
       body: JSON.stringify({ ref: branch }),
     });
     if (resp.status === 204) return true;
     throw await toApiError(resp);
+  }
+
+  // 後方互換: 既存の「今すぐ再スクリーニング」相当の呼び出し元向け薄いラッパ。
+  async function dispatchDailyWorkflow() {
+    return dispatchWorkflow(window.MINERVINI_CONFIG.workflowFile);
+  }
+
+  // 直近の実行履歴一覧。公開リポジトリのActions実行履歴は認証不要で読める
+  // ため(60req/hr制限はあるが本用途では十分)、ghFetchではなく素のfetchを使う
+  // -- 未解錠(PATなし)でもバッチ実行ページの履歴表示自体は見られるようにするため。
+  async function listWorkflowRuns(workflowFile, perPage = 5) {
+    const { owner, repo } = window.MINERVINI_CONFIG;
+    const resp = await fetch(
+      `${GH_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=${perPage}`,
+      { headers: { Accept: "application/vnd.github+json" } }
+    );
+    if (!resp.ok) throw await toApiError(resp);
+    const data = await resp.json();
+    return data.workflow_runs || [];
   }
 
   window.MinerviniGitHub = {
@@ -239,6 +259,8 @@
     saveFundamentalsRows,
     getExistingRowsForCode,
     dispatchDailyWorkflow,
+    dispatchWorkflow,
+    listWorkflowRuns,
     toApiError,
     CSV_HEADER,
   };
