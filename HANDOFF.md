@@ -364,7 +364,7 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
 
 | workflow | トリガ | 内容 | 所要時間 |
 |---|---|---|---|
-| daily.yml | 平日 16:30 JST + 手動 | `python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分 |
+| daily.yml | 平日 07:00-11:00 UTC(16:00-20:00 JST)毎時 + 手動 | 当日実行済みチェック→未実行なら`python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分(スキップ時は数秒) |
 | universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` | **40-60分** (timeout 120分) |
 | jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
 | intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → data/indices/ docs/data/indices.json をコミット→ pull --rebase → push | 数分 |
@@ -376,6 +376,16 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
   jquants-backfill.yml は `JQUANTS_API_KEY` のみ(EDINET DBにバックフィルCLIは無い)。
 - コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
 - concurrency グループでワークフロー多重起動を防止。
+- **daily.ymlのcron hourly化 (2026-07-08)**: 単発cron(`30 7 * * 1-5`)だと、GitHub Actions側の
+  「schedule イベントは高負荷時に遅延・まれにドロップされる」既知の仕様に引っかかり、実際に
+  2026-07-06分は発火せず、2026-07-07分も07:30予定が10:38まで3時間超遅延して発火したことが実測で
+  確認された(ユーザー指摘により調査・対処)。対策として `07:00-11:00 UTC` 毎時に変更し、
+  jobの先頭(checkout直後・pip installより前)に「当日実行済みチェック」ステップを追加。
+  `git log --format=%s -20` に当日日付の `chore: daily screener run YYYY-MM-DD` があれば
+  `skip=true` を出力し、以降の setup-python/依存インストール/pipeline実行/commit の各ステップを
+  `if: steps.check.outputs.skip != 'true'` でスキップする(スキップ時は数秒でジョブ終了、
+  Actions分の浪費を抑える)。当日分コミットの有無を判定するため checkout は `fetch-depth: 0` に変更
+  (従来のデフォルトshallow cloneだとgit logで参照できる履歴が足りない)。
 
 ## 9. 出力JSONスキーマ(要点)
 

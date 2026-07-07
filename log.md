@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-07-08 (6): daily.ymlのcronドロップ調査 → hourly window + 当日実行済みスキップに変更 (Sonnet, ユーザー指摘)
+
+### 経緯
+- ユーザーから「daily.yml(Daily screener run)が定期的に実行されない」と指摘。GitHub Actionsの
+  実行履歴(公開リポジトリのActionsページをfetch)を確認したところ、直近6件中Scheduledトリガーは
+  1件のみ(2026-07-07 10:38 UTC)。cron指定は`30 7 * * 1-5`(07:30 UTC)なのに実際は3時間超遅延し、
+  さらに前営業日2026-07-06分はScheduled実行が履歴に1件も存在せず(発火せずドロップされたと推定)。
+  YAML構文・Secrets(実行時は成功しているので無関係と判断)・リポジトリ非アクティブ化(60日ルール、
+  Public+直近も活発なため非該当)は問題なしと確認。GitHub公式が「scheduleイベントは高負荷時に
+  遅延・ドロップされ得る」と明言している既知の仕様に起因すると判断。
+
+### やったこと
+- `.github/workflows/daily.yml`: cronを単発`30 7 * * 1-5`から`0 7-11 * * 1-5`
+  (07:00-11:00 UTC = 16:00-20:00 JST、平日毎時)に変更。1回ドロップ/遅延しても後続の時間帯で
+  リトライできるようにした。
+- 二重実行防止のため、checkout直後(pip installより前)に「当日実行済みチェック」ステップを追加。
+  `git log --format=%s -20`に当日日付の`chore: daily screener run YYYY-MM-DD`があれば
+  `skip=true`を出力し、setup-python/依存インストール/pipeline実行/commitの各ステップを
+  `if: steps.check.outputs.skip != 'true'`でスキップ(スキップ時は数秒でジョブ終了)。
+  この判定にはcheckout時の履歴が必要なため`fetch-depth: 0`に変更(従来のデフォルトshallow cloneでは
+  不足)。
+- `python3 -c "import yaml; yaml.safe_load(...)"`でYAML構文確認済み。HANDOFF.md §8を更新。
+
+### 次にやること
+- ユーザーにコミット/プッシュを依頼(`git fetch`済み、origin/masterと1コミットずつ乖離あり
+  〔bot側`intraday index refresh`〕。通常どおりrebaseで解消可能)。
+- 次回平日の実際の発火状況(hourly retryが機能しているか、スキップ判定が正しく効くか)を
+  Actions実行履歴で確認するのが望ましい。
+
+---
+
 ## 2026-07-08 (5): 個別株ページをSPA統合 + ダッシュボード表のコード/銘柄名列をスティッキー化 (Sonnet, ユーザー指摘)
 
 ### やったこと
