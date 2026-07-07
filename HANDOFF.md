@@ -31,6 +31,7 @@ src/
   data/
     prices.py               株価取得 (yfinanceチャンク→stooqフォールバック, parquetキャッシュ data/prices/)
     indices.py              市場指標7種 (日経/TOPIX/グロース250/JGB10y/USDJPY/NASDAQ/SOX) → docs/data/indices.json
+                            (CLI: `python -m src.data.indices` で単独更新可。intraday-indices.yml が使用)
     fundamentals.py         手動CSVロード + J-Quants自動データとのマージ + tier判定 + スコア
     jquants.py              J-Quants API v2 自動ファンダ取得 (→ data/fundamentals_auto.json)
   screener/
@@ -48,7 +49,7 @@ docs/                       GitHub Pages ルート
   heatmap.html              セクターヒートマップ(ツリーマップ)
   assets/
     app.js                  ダッシュボード+個別株の全ロジック (~900行, 唯一の大物JS)
-    heatmap.js              ヒートマップ描画
+    heatmap.js              ヒートマップ描画 (詳細=既存treemap / 簡易=セクター騰落率のみ、#hm-view-toggleで切替)
     config.js               window.MINERVINI_CONFIG (owner/repo/branch, passkeyAuthEnabled キルスイッチ)
     github-api.js           GitHub Contents/Actions API ラッパ (PATはメモリのみ)
     webauthn-vault.js       WebAuthn PRF でPATを暗号化保管 (docs/auth/vault.json)
@@ -165,6 +166,9 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
 - `renderBreadth`: テンプレ通過率 / セットアップ数 / ブレイク成功率 / 候補(8条件合格)件数
 - `renderMarketOverview`: indices.json → カード + SVGスパークライン
+- `startLiveIndices`: 指数カードの擬似リアルタイム更新。60秒間隔で indices.json を再fetch (`cache: "no-store"`) して
+  `renderMarketOverview` を再実行するだけ(ページリロード不要)。バックグラウンドタブ (`document.hidden`) では止める。
+  データ自体の更新頻度は intraday-indices.yml 側の15分間隔が上限 (静的サイトなのでティック単位の真のリアルタイムではない)。
 - WebAuthn/書き込み系: `passkeyAuthEnabled: false` (config.js) のキルスイッチで現在**全部非表示** (hidePasskeyAuthUi)。
   有効化すると: 解錠ボタン(WebAuthn PRF→PAT復号)→ファンダ入力モーダル/再実行ボタンが活性化。
 
@@ -176,12 +180,15 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 - 期間切替 (#timeframe-toggle): data-tf = "5"(1週)/"22"(1ヶ月・初期)/"66"(3ヶ月)/"130"(半年)/"250"(1年)/"500"(2年)/"M"(月足)。
   `setTimeframe(tf)`: 日足はバー数で `setVisibleLogicalRange({from: n-bars, to: n})`、"M" は月足集計データに切替
 - 最新日付ラベル: Lightweight Charts は最新日の目盛りを保証しないため、`addLatestDateLabel` で
-  `.latest-date-label` (absolute配置, style.css参照) を各ペイン右下にオーバーレイ
+  `.latest-date-label` (absolute配置, style.css参照) を各ペイン右下にオーバーレイ。
+  縦位置は決め打ちpxではなく `alignLatestDateLabel` が各ペインの時間軸canvas(最後のcanvas要素)の
+  実測bottom/heightを取得して合わせている(以前は下にズレて見えていた不具合の修正。resize時も再計測)。
 - ピボット/損切りの水平線トグル (#toggle-pivot / #toggle-stop)
 - データは docs/data/charts/{code}.json (candles, volumes, rs_line, ma各種, pivot, stop_loss, 収縮マーカー)
 
 ### キャッシュバスター
-**docs のJS/CSSを変更したら index.html / stock.html / heatmap.html の `?v=N` を必ず全箇所インクリメントする。現在 v=5。**
+**docs のJS/CSSを変更したら index.html / stock.html / heatmap.html の `?v=N` を必ず全箇所インクリメントする。現在 app.js/style.css/heatmap.js は v=7。
+(config.js/github-api.js/webauthn-vault.js/fundamentals-modal.js は今回未変更のため v=5 のまま。)**
 
 ## 7. GitHub Actions
 
@@ -190,6 +197,7 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 | daily.yml | 平日 16:30 JST + 手動 | `python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分 |
 | universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` | **40-60分** (timeout 120分) |
 | jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
+| intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → data/indices/ docs/data/indices.json をコミット→ pull --rebase → push | 数分 |
 
 - daily.yml / jquants-backfill.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` を env に設定済み。
 - コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
@@ -240,11 +248,18 @@ node --check docs/assets/app.js   # JS構文チェック
     `rm -f .git/index.lock .git/HEAD.lock .git/objects/maintenance.lock .git/lockdump_*` してから pull/push。
 - daily.yml が平日毎日 docs/data/ と data/ にコミットする → **作業前に必ず `git fetch` して origin/master との乖離を確認**。
   乖離時は生成データ(data/, docs/data/)はリモート(bot)側を正、ソースはローカル側を正として統合する。
-- 現在の状態 (2026-07-07): ローカル master = dbc431e が origin/master (abb001c) より 1 コミット先行
-  (HANDOFF.md のJ-Quants反映のみ)。**ユーザーが `git push` すれば同期完了** (fast-forward)。
+- 現在の状態 (2026-07-07): ローカルmasterが origin/master (abb001c) より2コミット先行
+  (7e60ced: HANDOFF.mdのJ-Quants反映 / その次: 指数リアルタイム化・ヒートマップ簡易表示・日付ラベル修正)。
+  **ユーザーが `git push` すれば同期完了** (fast-forward)。`git log --oneline -3` で最新ハッシュを確認。
 
 ## 11. 未対応・次のタスク候補
 
+0. **市場概況カードの「リアルタイム」表示について**: 本サイトは静的GitHub Pagesでバックエンドが無いため、
+   ティック単位の真のリアルタイムは不可能。代わりに intraday-indices.yml が市場時間中15分間隔で
+   docs/data/indices.json を更新し、app.js の `startLiveIndices` がそれを60秒間隔でポーリング・再描画する
+   構成にした(ページ開きっぱなしでも手動リロード不要)。intraday-indices.yml と daily.yml は同じ
+   docs/data/indices.json・data/indices/ を触るため、稀に `git pull --rebase` がコンフリクトして
+   そのIntraday実行だけ失敗することがある(次回実行で復旧する想定・致命的ではない)。
 1. **J-Quantsキー登録+バックフィル実行の確認**(ユーザー作業): Secret `JQUANTS_API_KEY` 登録 →
    Actions「J-Quants fundamentals backfill」を手動実行 → data/fundamentals_auto.json ができ、
    翌日次実行から〔本命〕に自動昇格銘柄が出るはず。Freeプランは12週間遅延があるため直近四半期はすぐには反映されない点に注意。

@@ -4,6 +4,7 @@
 
 let HM = null;
 let currentPeriod = "d1";
+let currentView = "detail"; // "detail" (既存treemap) | "simple" (セクター騰落率のみ)
 
 // 期間ごとの色クランプ(±%): これを超える騰落率は最濃色で飽和
 const COLOR_CLAMP = { d1: 3, d5: 6, d20: 12, d60: 25 };
@@ -44,6 +45,17 @@ async function initHeatmap() {
       if (!btn) return;
       toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
       currentPeriod = btn.dataset.period;
+      render();
+    });
+  }
+
+  const viewToggle = document.getElementById("hm-view-toggle");
+  if (viewToggle) {
+    viewToggle.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-view]");
+      if (!btn) return;
+      viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      currentView = btn.dataset.view;
       render();
     });
   }
@@ -179,6 +191,15 @@ function render() {
 
   const sectorRects = squarify(sectors, 0, 0, W, H);
 
+  if (currentView === "simple") {
+    renderSimple(container, sectorRects);
+  } else {
+    renderDetail(container, sectorRects);
+  }
+}
+
+// 詳細表示: 既存のセクター×銘柄の二段squarifiedツリーマップ。
+function renderDetail(container, sectorRects) {
   for (const { item: sec, x, y, w, h } of sectorRects) {
     const box = document.createElement("div");
     box.className = "hm-sector";
@@ -233,6 +254,33 @@ function render() {
       tile.addEventListener("click", () => openTilePopup(s, sec));
       box.appendChild(tile);
     }
+    container.appendChild(box);
+  }
+}
+
+// 簡易表示: 個別銘柄タイルを省き、セクター全体を1枚の色付きボックスとして
+// 選択期間の騰落率のみを表示する(全体感をざっくり把握したい用途)。
+// 面積は詳細表示と同じくセクター内銘柄の時価総額合計(weight)を使う。
+function renderSimple(container, sectorRects) {
+  for (const { item: sec, x, y, w, h } of sectorRects) {
+    const box = document.createElement("div");
+    box.className = "hm-sector hm-sector-simple";
+    const ret = sec.returns ? sec.returns[currentPeriod] : null;
+    Object.assign(box.style, {
+      left: x + "px",
+      top: y + "px",
+      width: Math.max(0, w - GAP) + "px",
+      height: Math.max(0, h - GAP) + "px",
+      background: tileColor(ret),
+    });
+
+    const rsVal = sec.rs ? sec.rs.rel_strength_pct : null;
+    const showRs = rsVal != null && w >= 70 && h >= 48;
+    const rsHtml = showRs
+      ? `<span class="hm-simple-rs ${rsVal >= 0 ? "hm-rs-pos" : "hm-rs-neg"}">RS${rsVal > 0 ? "+" : ""}${rsVal.toFixed(1)}</span>`
+      : "";
+    box.innerHTML = `<span class="hm-simple-name">${sec.sector}</span><span class="hm-simple-ret">${fmtPct(ret)}</span>${rsHtml}`;
+    box.title = `${sec.sector} ${fmtPct(ret)}${rsVal != null ? ` / 対TOPIX相対強度: ${rsVal}%` : ""}`;
     container.appendChild(box);
   }
 }

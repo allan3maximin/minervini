@@ -1,0 +1,64 @@
+name: Intraday index refresh
+
+# ダッシュボードの「市場概況」カードを擬似リアルタイムに近づけるための
+# 補助ワークフロー。指数(日経225/TOPIX/グロース250/日本10年金利/ドル円/
+# NASDAQ/SOX)だけを高頻度で再取得し docs/data/indices.json を更新する。
+# 本体の日次パイプライン(daily.yml, スクリーニング等一式・16:30 JST 1回)
+# とは完全に独立しており、互いの実行を妨げない。
+#
+# 静的サイト(バックエンドサーバーなし)である以上これがティック単位の真の
+# リアルタイムにはならない点に注意。フロント(app.js)はここで更新される
+# indices.json を60秒間隔でポーリングして反映する。
+on:
+  schedule:
+    # 15分間隔・平日のみ。UTC基準で2区間に分けて東証+米国市場の時間帯を
+    # (時間外バッファ込みで)カバーする。実際の起動は数分〜十数分遅れることがある。
+    - cron: "*/15 0-8 * * 1-5"   # JST 9:00-17:45 (東証ザラ場+前後バッファ)
+    - cron: "*/15 13-23 * * 1-5" # JST 22:00-翌8:45 (米国市場+前後バッファ)
+  workflow_dispatch:
+
+concurrency:
+  group: minervini-intraday-indices
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh indices only
+        run: python -m src.data.indices
+
+      - name: Commit results
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/indices/ docs/data/indices.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore: intraday index refresh $(date -u +%Y-%m-%dT%H:%M)"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # daily.yml と同じパターン: ローカルで先にコミットしてから pull --rebase
+      # することで、他ワークフローの割り込みコミットとも安全に競合解消する。
+      - name: Pull latest and push
+        if: steps.commit.outputs.has_changes == 'true'
+        run: |
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}

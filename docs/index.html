@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=6">
+<link rel="stylesheet" href="assets/style.css?v=7">
 </head>
 <body>
 <header class="page-header">
@@ -24,8 +24,9 @@
 
 <main>
   <section class="market-overview" id="market-overview" hidden>
-    <h2>市場概況</h2>
+    <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
     <div id="market-cards" class="market-cards"></div>
+    <div id="market-live-meta" class="market-live-meta"></div>
   </section>
 
   <section class="tier-section">
@@ -54,6 +55,6 @@
 <script src="assets/github-api.js?v=5"></script>
 <script src="assets/webauthn-vault.js?v=5"></script>
 <script src="assets/fundamentals-modal.js?v=5"></script>
-<script src="assets/app.js?v=6"></script>
+<script src="assets/app.js?v=7"></script>
 </body>
 </html>

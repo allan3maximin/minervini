@@ -230,3 +230,18 @@ def update_indices(config: dict | None = None) -> dict:
         json.dump(payload, f, ensure_ascii=False, indent=1)
 
     return {"updated": updated, "failed": failed}
+
+
+def main() -> None:
+    """CLI entry point (``python -m src.data.indices``).
+
+    Standalone entry used by the intraday-indices workflow to refresh just
+    docs/data/indices.json during market hours, independent of the full
+    daily pipeline (which also runs the screener, fundamentals, etc.).
+    """
+    result = update_indices()
+    print(f"updated={result['updated']} failed={result['failed']}")
+
+
+if __name__ == "__main__":
+    main()

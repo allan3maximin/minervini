@@ -73,6 +73,7 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
+  startLiveIndices();
 }
 
 // Kill switch: hides every passkey/write-related control so the dashboard
@@ -233,6 +234,41 @@ function renderMarketOverview(indices) {
     })
     .join("");
   section.hidden = false;
+
+  const meta = document.getElementById("market-live-meta");
+  if (meta && indices.generated_at) {
+    const when = new Date(indices.generated_at).toLocaleTimeString("ja-JP");
+    meta.textContent = `指数データ取得: ${when} 時点`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 指数カードの擬似リアルタイム更新。
+// このサイトは静的GitHub Pages(バックエンドサーバーなし)のため、ティック
+// 単位の真のリアルタイム配信はできない。その代わり、市場時間中はGitHub
+// Actions側(intraday-indices.yml)が indices.json を15分間隔で更新する
+// 運用にし、フロント側はこの間隔でポーリングして再描画することで、ページを
+// 開きっぱなしでも手動リロードなしに追従できるようにする。
+// ---------------------------------------------------------------------------
+const LIVE_INDICES_POLL_MS = 60_000; // ポーリング自体は60秒毎(データの更新頻度自体は15分毎)
+
+function startLiveIndices() {
+  const section = document.getElementById("market-overview");
+  const badge = document.getElementById("market-live-badge");
+  if (!section) return;
+  if (badge) badge.hidden = false;
+
+  setInterval(async () => {
+    if (document.hidden) return; // バックグラウンドタブでは無駄にフェッチしない
+    try {
+      const res = await fetch("data/indices.json", { cache: "no-store" });
+      if (!res.ok) return;
+      const indices = await res.json();
+      renderMarketOverview(indices);
+    } catch (e) {
+      // 通信エラーは無視し、既存表示を維持したまま次回ポーリングに任せる。
+    }
+  }, LIVE_INDICES_POLL_MS);
 }
 
 function renderBreadth(breadth, report) {
@@ -644,7 +680,25 @@ function addLatestDateLabel(el, dateStr) {
   label.className = "latest-date-label";
   label.textContent = dateStr;
   el.appendChild(label);
+  alignLatestDateLabel(el, label);
   return label;
+}
+
+// Lightweight Chartsは日付目盛を専用の細いcanvas帯として最下部に描画する。
+// このオーバーレイは決め打ちのpx値(以前は bottom:2px 固定)ではなく、その
+// canvas帯の実際の高さ・位置を毎回計測して合わせる。これによりライブラリの
+// デフォルト(フォントサイズ/パディング)が変わっても他パネルの目盛と常に
+// 揃う(以前は下にズレて見えていた)。
+function alignLatestDateLabel(el, label) {
+  const canvases = el.querySelectorAll("canvas");
+  if (!canvases.length) return;
+  const axisCanvas = canvases[canvases.length - 1];
+  const axisRect = axisCanvas.getBoundingClientRect();
+  if (axisRect.height <= 0 || axisRect.height > 60) return; // 想定外のDOM構造ならCSSの既定値のまま
+  const containerRect = el.getBoundingClientRect();
+  const bottomOffset = Math.max(0, containerRect.bottom - axisRect.bottom);
+  label.style.bottom = `${bottomOffset}px`;
+  label.style.height = `${axisRect.height}px`;
 }
 
 // Two-way pan/zoom sync so dragging any pane moves the others in lockstep.
@@ -837,10 +891,11 @@ function renderCharts(chart) {
   // 最新日付を各ペインの日付軸上に常時表示(オートticksは最新日を保証しないため)。
   // 表示は年なしの「月/日」形式。
   const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
+  let dateLabels = [];
   if (lastDate) {
     const [, m, d] = lastDate.split("-");
     const shortDate = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
-    for (const el of [priceEl, volEl, ...(rsChart ? [rsEl] : [])]) addLatestDateLabel(el, shortDate);
+    dateLabels = [priceEl, volEl, ...(rsChart ? [rsEl] : [])].map((el) => ({ el, label: addLatestDateLabel(el, shortDate) }));
   }
 
   const toggle = document.getElementById("timeframe-toggle");
@@ -857,6 +912,7 @@ function renderCharts(chart) {
     for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
       c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     }
+    for (const { el, label } of dateLabels) alignLatestDateLabel(el, label);
   });
 }
 
