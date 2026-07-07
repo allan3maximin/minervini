@@ -97,8 +97,8 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.heatmap_mod, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
-    # 自動取得ストアはtmp側に向けて実データを読ませない。
-    monkeypatch.setattr(pipeline, "load_auto_store", lambda: {})
+    # J-Quants自動取得はネットワークに出さない。
+    monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})
 
     return tmp_path, codes
 

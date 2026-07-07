@@ -88,6 +88,14 @@ fundamentals:
   recommended_quarters: 8
   stale_days: 120
 
+# J-Quants API (ファンダメンタル自動取得。Lightプラン以上)
+jquants:
+  enabled: true
+  api_url: "https://api.jquants.com/v2"
+  lookback_days: 7        # 増分取得時、state未記録なら過去N日分の開示を拾う
+  sleep_sec: 1.1          # Light: 60req/分 → 1.1sで安全マージン
+  max_quarters_keep: 12   # 銘柄あたり保持四半期数
+
 scoring:
   phase1_weight: 0.5
   vcp_weight: 0.5

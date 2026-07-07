@@ -1,66 +1,52 @@
-name: Monthly universe rebuild
+name: J-Quants fundamentals backfill
 
+# 手動実行専用。全ユニバース銘柄の決算履歴をJ-Quantsから取得して
+# data/fundamentals_auto.json を構築する(約1000銘柄で20分前後)。
 on:
-  schedule:
-    - cron: "0 22 * * 6" # every Saturday 22:00 UTC; filtered to the 1st Saturday below
   workflow_dispatch:
 
 concurrency:
-  group: minervini-universe
+  group: minervini-jquants-backfill
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  rebuild:
+  backfill:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      - name: Only run on the first Saturday of the month
-        id: check
-        run: |
-          day=$(date -u +%d)
-          if [ "$day" -le 7 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: actions/setup-python@v5
-        if: steps.check.outputs.run == 'true'
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        if: steps.check.outputs.run == 'true'
         run: pip install -r requirements.txt
 
-      - name: Rebuild universe and run pipeline
-        if: steps.check.outputs.run == 'true'
+      - name: Run backfill
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
-        run: python -m src.pipeline --universe-rebuild
+        run: python -m src.data.jquants --backfill
 
       - name: Commit results
         id: commit
-        if: steps.check.outputs.run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ docs/
+          git add data/fundamentals_auto.json data/jquants_state.json
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "chore: monthly universe rebuild $(date -u +%Y-%m-%d)"
+            git commit -m "chore: J-Quants fundamentals backfill $(date -u +%Y-%m-%d)"
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Pull latest and push
-        if: steps.check.outputs.run == 'true' && steps.commit.outputs.has_changes == 'true'
+        if: steps.commit.outputs.has_changes == 'true'
         run: |
           git pull --rebase origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}

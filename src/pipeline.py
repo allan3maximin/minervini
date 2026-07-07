@@ -16,9 +16,9 @@ import jpholiday
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
 from src.data import prices as prices_mod
+from src.data import jquants as jquants_mod
 from src.data.fundamentals import (
     build_fundamentals_by_code,
-    load_auto_store,
     load_fundamentals_csv,
     merge_fundamentals,
     score_stock,
@@ -109,12 +109,12 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
     csv_df, csv_warnings = load_fundamentals_csv()
 
-    # 自動取得ストア(data/fundamentals_auto.json)があれば手動CSVとマージ。
-    # フェッチャー未接続なら空dictで手動CSVのみ。読めなくても本体は止めない。
+    # J-Quantsでファンダメンタル自動取得(増分)→手動CSVとマージ。
+    # APIキー未設定なら既存ストアを読むだけ。失敗しても本体は止めない。
     try:
-        auto_by_code = load_auto_store()
+        auto_by_code = jquants_mod.update_fundamentals_auto(codes, config)
     except Exception as e:
-        print(f"fundamentals auto store load failed (ignored): {e}")
+        print(f"J-Quants fundamentals update failed (ignored): {e}")
         auto_by_code = {}
 
     fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))
