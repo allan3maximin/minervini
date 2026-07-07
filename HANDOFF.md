@@ -1,6 +1,7 @@
 # ミネルヴィニ式スクリーナー 実装ハンドオフドキュメント
 
-最終更新: 2026-07-07 / 対象コミット: b99d17b (feat: P1-only candidate view, chart UX fixes, EDINET auto fundamentals)
+最終更新: 2026-07-07 / 対象コミット: abb001c (fix: J-Quants Freeプランの12週間データ遅延対応)
+※ EDINET連携は撤去済み(a5c76fc)。自動ファンダ取得は J-Quants API に一本化(72ffe1a)。
 このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
 
 ---
@@ -21,7 +22,7 @@ requirements.txt
 .github/workflows/
   daily.yml                 日次バッチ (cron 30 7 * * 1-5 = 16:30 JST 平日)
   universe.yml              月次ユニバース再構築 (毎週土曜起動→月初土曜のみ実行、手動可)
-  edinet-backfill.yml       EDINET過去分取得 (workflow_dispatch専用, days入力 default 730)
+  jquants-backfill.yml      J-Quants過去分取得 (workflow_dispatch専用、全銘柄をcode指定で取得)
 src/
   config.py                 load_config() = config.yaml のロード, REPO_ROOT
   pipeline.py               日次パイプライン本体 (python -m src.pipeline [--universe-rebuild])
@@ -30,8 +31,8 @@ src/
   data/
     prices.py               株価取得 (yfinanceチャンク→stooqフォールバック, parquetキャッシュ data/prices/)
     indices.py              市場指標7種 (日経/TOPIX/グロース250/JGB10y/USDJPY/NASDAQ/SOX) → docs/data/indices.json
-    fundamentals.py         手動CSVロード + EDINET自動データとのマージ + tier判定 + スコア
-    edinet.py               EDINET API v2 自動ファンダ取得 (→ data/fundamentals_auto.json)
+    fundamentals.py         手動CSVロード + J-Quants自動データとのマージ + tier判定 + スコア
+    jquants.py              J-Quants API v2 自動ファンダ取得 (→ data/fundamentals_auto.json)
   screener/
     trend_template.py       トレンドテンプレート8条件(MUST) + テクニカル/フルスコア + EPS加速slope
     priority.py             ハードフィルタ + P1〜P4評価 (※UIからP1-P4は廃止済み。バックエンドは残存)
@@ -56,9 +57,9 @@ docs/                       GitHub Pages ルート
   data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json)
 data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
                             status_history.json, sector_history.json, sector_map.json,
-                            trend_template_debug.json, ※EDINET実行後: fundamentals_auto.json, edinet_state.json)
+                            trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json)
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
-tests/                      pytest 126件 (test_edinet.py 含む)
+tests/                      pytest 126件 (test_jquants.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -70,7 +71,7 @@ tests/                      pytest 126件 (test_edinet.py 含む)
 5. `compute_all` で指標付与 → `rs_percentile_rank` でRS(1-99パーセンタイル、母集団はユニバース)
 6. `trend_template.screen_universe` → 8条件フラグ (debug: data/trend_template_debug.json)
 7. `priority_mod.evaluate_priority` — ハードフィルタ通過銘柄にP1〜P4付与。`p1_scarce` = P1数 < priority.p1_warn_threshold(3)
-8. **ファンダ**: `load_fundamentals_csv()` (手動CSV) + `edinet_mod.update_fundamentals_auto(codes, config)` (自動取得、try/exceptで失敗無視) → `merge_fundamentals(auto, manual)` (手動が勝ち)
+8. **ファンダ**: `load_fundamentals_csv()` (手動CSV) + `jquants_mod.update_fundamentals_auto(codes, config)` (自動取得、try/exceptで失敗無視) → `merge_fundamentals(auto, manual)` (手動が勝ち)
 9. P1銘柄のみ: VCP評価 → エントリー評価 → `score_stock` → レコード組立 + チャートJSON出力
    - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B/EXTENDED + pivotあり) → confirmed/pool ティア
    - それ以外 → `tier_override="watchlist"` (=フロントの〔候補〕)
@@ -90,43 +91,53 @@ tests/                      pytest 126件 (test_edinet.py 含む)
 - 地合いメーターに「候補(8条件合格): N件」を表示 (renderBreadth)。
 - style.css の .prio-badge / .prio-1〜4 は未使用のまま残存(削除しても良い)。
 
-## 4. EDINET 自動ファンダ取得 (src/data/edinet.py) — 今回実装
+## 4. J-Quants 自動ファンダ取得 (src/data/jquants.py) — EDINETから移行済み
+
+### 経緯
+- 当初 EDINET API v2 で自動ファンダ取得を実装していたが、**2024年4月の四半期報告書廃止で
+  Q1/Q3が単体で取れなくなり粒度不足**と判明 → `a5c76fc` で撤去。
+- 決算短信サマリーをそのまま四半期粒度で返す J-Quants `/v2/fins/summary` に置き換え (`72ffe1a`)。
+  post-2024でも1Q/3Qが単体で取得できるのがEDINET比での決定的な利点。
 
 ### 仕組み
-- **API**: EDINET API v2。`GET {api_url}/documents.json?date=YYYY-MM-DD&type=2` で日別提出一覧、
-  `GET {api_url}/documents/{docID}?type=5` でCSVバンドル(zip)。認証はヘッダ `Subscription-Key: <EDINET_API_KEY>`。
-- **APIキー**: 環境変数 `EDINET_API_KEY`。GitHub Secret に登録済み想定(ユーザーに依頼済み)。
+- **API**: J-Quants API v2。`GET {api_url}/fins/summary?date=YYYY-MM-DD`(日別全銘柄)または
+  `?code=XXXX`(銘柄別全期間)。認証はヘッダ `x-api-key: <JQUANTS_API_KEY>`。ページングは `pagination_key`。
+- **APIキー**: 環境変数 `JQUANTS_API_KEY`。GitHub Secret に登録済み想定。
   **キーが無い場合はネットワークに一切触れず既存ストアを返すだけ**(テスト/ローカルが壊れない設計)。
-- **対象書類**: docTypeCode 120(有報) / 140(四半期報告書※2024年4月廃止) / 160(半期報告書)、csvFlag=="1"、
-  secCode(5桁) の先頭4桁がユニバースcodeに一致するもの。
-- **CSVパース**: zip内の *.csv は UTF-16 のタブ区切り。列: 要素ID/項目名/コンテキストID/相対年度/連結・個別/期間・時点/ユニットID/単位/値。
-  - EPS: 要素IDに `BasicEarningsLossPerShare` or `BasicEarningsPerShare` を含む行
-  - 売上: `NetSales`, `RevenueIFRS`, `Revenue`, `OperatingRevenue`, `GrossOperatingRevenue`, `OperatingIncomeINS` (優先順)
-  - コンテキスト: `CurrentYTDDuration` / `CurrentYearDuration` / `InterimDuration` (連結優先、`_NonConsolidatedMember` フォールバック)
-- **四半期ラベル**: `quarter_label(period_start, period_end)` — fy = 期首の年、n = round(期間月数/3) → `"{fy}Q{n}"`。
-  periodStart/periodEnd は一覧APIのフィールドを使う(XBRLは見ない)。
-- **YTD差分導出**: `derive_quarters` — 会計年度内でYTD点を昇順に並べ `値(Qn) = ytd(n) − ytd(直前の点)`。
-  - 2024年4月以降は四半期報告書廃止→Q1/Q3のYTD点が無い。その場合 Q2ラベル=上期合計、Q4ラベル=通期−上期 のスパン値になる。
-    **前年も同じ体制なので compute_accel_slope のYoY比較は整合する**(これが設計意図。1四半期換算に按分しない)。
-  - 同一ラベル重複(訂正報告書等)は先勝ち。年度をまたぐ差分はしない。
+- **Freeプランの制約**: データが**12週間(84日)遅延**で提供される。`config.yaml: jquants.data_delay_days`(既定85日
+  =84日+1日マージン)で取得対象を `今日 - delay` までに制限し、state もそこまでしか進めない
+  (でないと遅延データを永久に取りこぼす。`abb001c` で対応)。有償プランに上げたら 0 にしてよい。
+- **レコード種別**: `DocType` に `"FinancialStatements"` を含むもののみ対象(業績予想修正・配当予想修正等は除外)。
+  `CurPerType`(1Q/2Q/3Q/4Q/FY) → 四半期番号 n にマップ(`_PERIOD_TO_N`、5Q変則決算は対象外)。
+- **値の抽出**: EPS = `EPS`(空なら `NCEPS`=非連結)。売上 = `Sales`(空なら `NCSales`)。値はカンマ除去して数値化、
+  `-`/全角ダッシュは欠損扱い。
+- **四半期ラベル**: `f"{fy_start[:4]}Q{n}"`。CurPerTypeがそのままYTD点の四半期番号になるので、
+  EDINETのような期間月数からの逆算ロジックは不要(J-Quantsの方が単純で頑丈)。
+- **YTD差分導出**: `derive_quarters` — 会計年度(`fy_start`)ごとにYTD点を昇順に並べ
+  `値(Qn) = ytd(n) − ytd(直前の点)`。同一四半期の重複(訂正短信等)は開示日が新しい方を採用。
+  年度をまたぐ差分はしない。**EDINET版と同一ロジックを踏襲**。
+- **年度前半の再取得**: `_refetch_incomplete` — 日次インクリメンタルで2Q以降の点だけ拾った銘柄は、
+  YTD差分の基準となる前Q点が無いため、その銘柄だけ `?code=` で全期間を取り直して整合させる。
 - **永続化**:
-  - `data/fundamentals_auto.json`: `{code: {"quarters":[{fiscal_quarter,eps,revenue}], "checked_date":"YYYY-MM-DD", "source":"edinet"}}`
-    (checked_date = 最新提出日。銘柄あたり max_quarters_keep=12 四半期に切り詰め)
-  - `data/edinet_state.json`: `{"last_list_date":"YYYY-MM-DD", "processed_doc_ids":[...直近5000]}`
-- **インクリメンタル**: 日次実行は state.last_list_date+1〜今日 (上限 lookback_days=7)。
-  `--backfill-days N` 指定時は state を無視して N 日遡る。
-- **CLI**: `python -m src.data.edinet --backfill-days 730` (edinet-backfill.yml が呼ぶ)
+  - `data/fundamentals_auto.json`: `{code: {"quarters":[{fiscal_quarter,eps,revenue}], "checked_date":"YYYY-MM-DD", "source":"jquants"}}`
+    (checked_date = 最新開示日。銘柄あたり `max_quarters_keep`=12 四半期に切り詰め)。ストア機構自体は
+    `fundamentals.load_auto_store`/`AUTO_PATH` としてEDINET時代から汎用化して流用している。
+  - `data/jquants_state.json`: `{"last_list_date":"YYYY-MM-DD"}`
+- **インクリメンタル**: 日次実行は `state.last_list_date+1` 〜 `end_day`(=今日−delay、上限 `lookback_days`=7)。
+  全日失敗時(APIキー不正など)は state を進めない。
+- **CLI**: `python -m src.data.jquants --backfill` (jquants-backfill.yml が呼ぶ。全銘柄を code 指定で1件ずつ取得、
+  ~1000銘柄・60req/分で約17〜20分。50銘柄ごとに中間セーブ)
 
 ### マージ (src/data/fundamentals.py :: merge_fundamentals)
 - `merge_fundamentals(auto_by_code, manual_by_code)` — 同一 (code, fiscal_quarter) は**手動CSVが勝ち**。
   monthly_yoy は手動のみ(自動には無い)。checked_date は手動優先、無ければ自動。
 - pipeline.py での呼び出し: `fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))`
-- 効果: EDINETデータが入った銘柄は quarters が存在する → `fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格。
+- 効果: J-Quantsデータが入った銘柄は quarters が存在する → `fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格。
 
 ### 制約(ユーザー了解済み)
-- 2024年4月以降のQ1/Q3単体値はEDINETに存在しない(決算短信はTDnetでAPIキー方式なし)。
+- Freeプランは12週間遅延のため、直近四半期の開示が〔本命〕に反映されるのは数ヶ月遅れる。
 - EPSのYTD差分は株式数変動時に厳密でない(許容)。
-- 年度途中からの取得だと最初の点がYTDそのままになる → **バックフィル(2年分)実行が前提**。
+- 年度途中からの取得だと最初の点がYTDそのままになる → **バックフィル(全期間)実行が前提**。
 
 ## 5. config.yaml の要点
 
@@ -138,7 +149,7 @@ tests/                      pytest 126件 (test_edinet.py 含む)
 - `vcp`: zigzag/収縮/スコアの全パラメータ
 - `entry`: breakout_vol_mult 1.4, stop_loss_pct 0.05, tick_table (JPX呼値簡易版)
 - `fundamentals`: min_quarters_for_full 7, stale_days 120
-- `edinet`: enabled true, api_url, lookback_days 7, sleep_sec 0.3, doc_type_codes ["120","140","160"], max_quarters_keep 12
+- `jquants`: enabled true, api_url, data_delay_days 85(Free 12週遅延+マージン), lookback_days 7, sleep_sec 1.1, max_quarters_keep 12
 - `scoring`: phase1_weight 0.5, vcp_weight 0.5
 
 ## 6. フロントエンド詳細 (docs/assets/app.js)
@@ -178,9 +189,9 @@ tests/                      pytest 126件 (test_edinet.py 含む)
 |---|---|---|---|
 | daily.yml | 平日 16:30 JST + 手動 | `python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分 |
 | universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` | **40-60分** (timeout 120分) |
-| edinet-backfill.yml | 手動のみ (days入力) | `python -m src.data.edinet --backfill-days N` → data/ コミット | days=730で数時間可 (timeout 300分) |
+| jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
 
-- 3つとも `EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}` を env に設定済み。
+- daily.yml / jquants-backfill.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` を env に設定済み。
 - コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
 - concurrency グループでワークフロー多重起動を防止。
 
@@ -212,8 +223,8 @@ node --check docs/assets/app.js   # JS構文チェック
 ```
 - tests/test_pipeline.py の `wired` fixture は全外部I/Oをmonkeypatchでモック。
   **pipelineに新モジュールを足したら必ずここにもモックを追加**
-  (例: `monkeypatch.setattr(pipeline.edinet_mod, "update_fundamentals_auto", lambda codes, config: {})`)。
-- tests/test_edinet.py: quarter_label / extract(UTF-16 TSV zip合成) / derive_quarters / ストア / merge_fundamentals をカバー。
+  (例: `monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})`)。
+- tests/test_jquants.py: record_to_point / derive_quarters / _refetch_incomplete / ストア / merge_fundamentals をカバー。
 - フロントは自動テスト無し。手動確認 or node で DOM stub を書いて smoke。
 
 ## 10. 開発環境の注意 (Cowork/Claudeサンドボックス固有)
@@ -229,17 +240,18 @@ node --check docs/assets/app.js   # JS構文チェック
     `rm -f .git/index.lock .git/HEAD.lock .git/objects/maintenance.lock .git/lockdump_*` してから pull/push。
 - daily.yml が平日毎日 docs/data/ と data/ にコミットする → **作業前に必ず `git fetch` して origin/master との乖離を確認**。
   乖離時は生成データ(data/, docs/data/)はリモート(bot)側を正、ソースはローカル側を正として統合する。
-- 現在の状態 (2026-07-07): ローカル master = b99d17b が origin/master (b505046) より 1 コミット先行。
-  **ユーザーが `git push` すれば同期完了** (fast-forward)。
+- 現在の状態 (2026-07-07): ローカル master = dbc431e が origin/master (abb001c) より 1 コミット先行
+  (HANDOFF.md のJ-Quants反映のみ)。**ユーザーが `git push` すれば同期完了** (fast-forward)。
 
 ## 11. 未対応・次のタスク候補
 
-1. **EDINETキー登録+バックフィル実行の確認**(ユーザー作業): Secret `EDINET_API_KEY` 登録 →
-   Actions「EDINET fundamentals backfill」を days=730 で手動実行 → data/fundamentals_auto.json ができ、
-   翌日次実行から〔本命〕に自動昇格銘柄が出るはず。動かなければ edinet.py のログ(printのみ)をActionsログで確認。
-2. EDINETの要素ID候補 (_EPS_CANDIDATES/_REVENUE_CANDIDATES) は実データ検証がまだ。
+1. **J-Quantsキー登録+バックフィル実行の確認**(ユーザー作業): Secret `JQUANTS_API_KEY` 登録 →
+   Actions「J-Quants fundamentals backfill」を手動実行 → data/fundamentals_auto.json ができ、
+   翌日次実行から〔本命〕に自動昇格銘柄が出るはず。Freeプランは12週間遅延があるため直近四半期はすぐには反映されない点に注意。
+   動かなければ jquants.py のログ(printのみ)をActionsログで確認。
+2. J-Quantsの `EPS`/`Sales` 列は実データ検証がまだ。
    バックフィル後に fundamentals_auto.json の値を数銘柄、決算短信と突き合わせて検証するのが望ましい。
-   銀行・保険等の特殊業種は revenue が取れない/変な要素を拾う可能性 → 候補リストの調整で対応。
+   銀行・保険等の特殊業種は Sales が取れず NCSales にもフォールバックしない可能性 → 必要ならフィールド追加で対応。
 3. style.css の未使用 .prio-badge / .prio-1〜4 の削除(任意)。
 4. passkeyAuth (書き込み系UI) はキルスイッチOFFのまま。再有効化するなら config.js の passkeyAuthEnabled を true に。
 5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
