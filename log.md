@@ -4,6 +4,55 @@
 
 ---
 
+## 2026-07-08 (5): 個別株ページをSPA統合 + ダッシュボード表のコード/銘柄名列をスティッキー化 (Sonnet, ユーザー指摘)
+
+### やったこと
+- **個別株ページのSPA統合**: `docs/stock.html`(チャート3ペイン等の独立ページ)を`index.html`の5番目の
+  ビュー`view-stock`として統合。`index.html`の`<head>`にLightweight Charts CDNスクリプトを追加。
+  `stock.html`は`?code=X`を`index.html#stock/X`へJSリダイレクトするだけのスタブに書き換え
+  (meta refreshだとクエリをhashへ引き継げないため、heatmap.htmlとは違いJS実装)。
+  - `VIEWS`に`"stock"`を追加、`showView(hash)`が`hash.split("/")`で`[name, param]`に分解し
+    `stock/CODE`形式のパラメータ付きルートに対応。`initStockPage(param)`をrouterから呼ぶ。
+    Dockナビには`view-stock`用ボタンは追加しない(ダッシュボード表の行クリック専用のドリルダウン)。
+  - ダッシュボード表の行クリック遷移を`window.location.href = "stock.html?code=..."`から
+    `window.location.hash = "stock/" + code`に変更。
+  - **SPA再初期化の後始末**: フルリロード前提だった`renderCharts()`は、同じDOMのまま銘柄を切り替える
+    SPAでは前回分のチャートインスタンス・`resize`リスナー・チェックボックス/期間トグルのイベント
+    リスナーが積み上がって壊れるため、`teardownCharts()`(モジュール変数`stockChartState`が前回の
+    `{charts, resizeHandler, dateLabels}`を保持)を`initStockPage()`の先頭で必ず呼び、チャートの
+    `.remove()`・リスナー解除・日付ラベルDOM除去を行ってから再構築するように修正。
+    `#toggle-pivot`/`#toggle-stop`/`#timeframe-toggle`は`cloneNode(true)`+`replaceWith`で要素ごと
+    差し替えてリスナー重複を防止。RS無し銘柄で`rs-card`を`remove()`していた処理は、RS有り銘柄に
+    戻した時に復活できなくなるバグがあったため`hidden`切替に変更。
+- **コード・銘柄名列のスティッキー化**: 横スクロール中にどの行の銘柄か分からなくなる問題への対応。
+  `renderTable`のwrapperに`stock-table-scroll`クラスを追加し、`style.css`で1列目(コード, 84px固定幅)・
+  2列目(銘柄名)を`position: sticky`で左固定。batch履歴テーブル等、他の`.table-scroll`には影響しない
+  ようクラスでスコープ。fund-stale行の黄色背景・row-static行も個別に背景色を追従させた。
+- キャッシュバスター: `app.js` v=8→v=9、`style.css` v=9→v=10(いずれもindex.htmlのみ、stock.htmlは
+  リダイレクトスタブ化でscriptタグ自体を持たなくなった)。
+- `node --check`でapp.js/batch.jsの構文確認済み。HANDOFF.md §2/§7/§12/§13/キャッシュバスター表を更新。
+
+### 次にやること
+- ユーザーにコミット/プッシュを依頼(サンドボックスからはpush不可、`git fetch`で乖離確認→
+  必要ならrebase→pushの手順を提示予定)。
+- 実機確認推奨: view-stockへの遷移・戻る・別銘柄への連続遷移(チャートリークが無いか)、
+  横スクロールでのスティッキー列の見た目(特にモバイル幅)。
+
+---
+
+## 2026-07-08 (4): Dockアイコン差し替え + バッチ履歴テーブルの横溢れ修正 (Sonnet, ユーザー指摘)
+
+- Dockナビの絵文字+テキストラベルをBootstrap Icons(CDN, `bootstrap-icons@1.11.3`)に置き換え、
+  アイコンのみ表示に変更(`title`/`aria-label`でツールチップ・アクセシビリティは確保)。
+  `.dock-btn`を縦積み(アイコン+文字)から48px角の円形アイコンボタンに変更。
+- `docs/assets/batch.js`の実行履歴テーブルが`.table-scroll`でラップされておらず、
+  グローバルな`table { min-width: 760px }`を継承してバッチページ全体が横に溢れていた不具合を修正。
+  ラッパーdivを追加+`.run-history-table`に`min-width: 0`を上書き。
+- キャッシュバスター: style.css v=9(index.html/stock.html両方)、batch.js v=2。
+- `node --check`で構文確認済み。
+
+---
+
 ## 2026-07-08 (3): フロントエンドをSPA化 + 列統一 + 投資法/バッチ実行ページ追加 (Sonnet)
 
 ### やったこと

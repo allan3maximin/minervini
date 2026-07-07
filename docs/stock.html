@@ -4,56 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>銘柄詳細 | ミネルヴィニ式スクリーナー</title>
-<link rel="stylesheet" href="assets/style.css?v=8">
-<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<!-- index.htmlのSPA化(view-stock)に伴い、このページは旧URL(?code=...)からの
+     リダイレクトスタブのみを残す。実体はindex.html#stock/CODEに統合済み。
+     ?code=をhashに引き継ぐ必要があるためmeta refreshではなくJSでリダイレクトする。 -->
+<script>
+  var code = new URLSearchParams(window.location.search).get("code");
+  window.location.replace("index.html" + (code ? "#stock/" + encodeURIComponent(code) : "#dashboard"));
+</script>
 </head>
 <body>
-<a class="back-link" href="index.html">&larr; ダッシュボードに戻る</a>
-<h1 id="stock-title"></h1>
-<div id="stock-meta" class="meta-chips"></div>
-
-<div class="chart-toolbar">
-  <div class="line-toggles">
-    <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label>
-    <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label>
-  </div>
-  <div class="segmented" id="timeframe-toggle">
-    <button type="button" data-tf="22" class="active">1ヶ月</button>
-    <button type="button" data-tf="66">3ヶ月</button>
-    <button type="button" data-tf="130">半年</button>
-    <button type="button" data-tf="250">1年</button>
-    <button type="button" data-tf="500">2年</button>
-  </div>
-</div>
-
-<section class="chart-card">
-  <div class="chart-card-head">
-    <h2>株価・移動平均線</h2>
-    <div id="ohlc-legend" class="ohlc-legend"></div>
-  </div>
-  <div id="chart-container" class="chart-box"></div>
-</section>
-
-<section class="chart-card" id="volume-card">
-  <div class="chart-card-head"><h2>出来高</h2></div>
-  <div id="volume-container" class="chart-box chart-box-small"></div>
-</section>
-
-<section class="chart-card" id="rs-card">
-  <div class="chart-card-head"><h2>RSライン（対TOPIX相対力）</h2></div>
-  <div id="rs-container" class="chart-box chart-box-small"></div>
-</section>
-
-<section class="detail-card">
-  <h2>MUST条件チェックリスト</h2>
-  <div id="must-checklist"></div>
-</section>
-
-<section class="detail-card">
-  <h2>スコア内訳</h2>
-  <div id="score-breakdown"></div>
-</section>
-
-<script src="assets/app.js?v=8"></script>
+<p>銘柄詳細は<a id="fallback-link" href="index.html#dashboard">ダッシュボード</a>に統合されました。自動的に移動しない場合はリンクをクリックしてください。</p>
+<script>
+  var link = document.getElementById("fallback-link");
+  if (code) link.href = "index.html#stock/" + encodeURIComponent(code);
+</script>
 </body>
 </html>

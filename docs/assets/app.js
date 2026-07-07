@@ -372,7 +372,9 @@ function renderTable(stocks, tier, options = {}) {
   let sortDesc = options.initialSortDesc ?? true;
 
   const wrapper = document.createElement("div");
-  wrapper.className = "table-scroll";
+  // stock-table-scroll: コード・銘柄名列を横スクロール中も固定表示するためのフック
+  // (batch履歴テーブル等、他の.table-scrollには影響させない)。
+  wrapper.className = "table-scroll stock-table-scroll";
   const table = document.createElement("table");
   wrapper.appendChild(table);
 
@@ -421,7 +423,7 @@ function renderTable(stocks, tier, options = {}) {
       if (navigable) {
         row.addEventListener("click", (e) => {
           if (e.target.tagName === "BUTTON") return;
-          window.location.href = `stock.html?code=${encodeURIComponent(s.code)}`;
+          window.location.hash = `stock/${encodeURIComponent(s.code)}`;
         });
       } else {
         row.classList.add("row-static");
@@ -503,13 +505,28 @@ function renderPriorityTier(report, containerId) {
 // Stock detail page (stock.html)
 // ---------------------------------------------------------------------------
 
-async function initStockPage() {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get("code");
+// SPAルーターから#stock/CODEへ遷移するたびに呼ばれる。codeOverrideがあれば
+// それを使い(SPAルート経由)、なければ旧来の?code=クエリを見る(stock.html直リンク互換)。
+async function initStockPage(codeOverride) {
+  const code = codeOverride || new URLSearchParams(window.location.search).get("code");
+
+  // 前の銘柄のチャート・イベントリスナーを必ず片付けてから描画し直す
+  // (teardownしないと銘柄を切り替えるたびにチャート/リスナーが積み上がる)。
+  teardownCharts();
+
+  const titleEl = document.getElementById("stock-title");
+  const metaEl = document.getElementById("stock-meta");
+  const mustEl = document.getElementById("must-checklist");
+  const scoreEl = document.getElementById("score-breakdown");
+  if (metaEl) metaEl.innerHTML = "";
+  if (mustEl) mustEl.innerHTML = "";
+  if (scoreEl) scoreEl.innerHTML = "";
+
   if (!code) {
-    document.getElementById("stock-title").textContent = "銘柄コードが指定されていません";
+    if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
     return;
   }
+  if (titleEl) titleEl.textContent = "読み込み中...";
 
   const [report, chart] = await Promise.all([
     fetch("data/report.json", { cache: "no-store" }).then((r) => r.json()),
@@ -517,11 +534,12 @@ async function initStockPage() {
   ]);
   const stock = report.stocks.find((s) => s.code === code);
 
-  document.getElementById("stock-title").textContent = `${code} ${stock ? stock.name : ""}`;
+  if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
 
   if (!chart) {
-    document.getElementById("chart-container").textContent = "チャートデータがありません";
+    const chartContainer = document.getElementById("chart-container");
+    if (chartContainer) chartContainer.textContent = "チャートデータがありません";
     return;
   }
   renderCharts(chart);
@@ -698,6 +716,21 @@ function syncTimeScales(charts) {
 // 期間ボタン(1ヶ月〜2年)の営業日換算。初期表示は日足1ヶ月。
 const DEFAULT_DAILY_BARS = 22;
 
+// SPA化前は銘柄詳細ページを開くたびにフルリロードされていたため
+// renderCharts()の中身(チャートインスタンス・resizeリスナー・チェックボックス/
+// 期間トグルのイベントリスナー)は使い捨てで問題なかった。SPA化後は同じDOMを
+// 再利用して別銘柄を描画し直すため、前回分を確実に破棄してから作り直す。
+let stockChartState = null;
+
+function teardownCharts() {
+  if (!stockChartState) return;
+  const { charts, resizeHandler, dateLabels } = stockChartState;
+  window.removeEventListener("resize", resizeHandler);
+  for (const c of charts) c.remove();
+  for (const { label } of dateLabels) label.remove();
+  stockChartState = null;
+}
+
 function renderCharts(chart) {
   const monthly = aggregateMonthly(chart);
   const dailyVolume = colorizeVolume(chart);
@@ -706,10 +739,10 @@ function renderCharts(chart) {
   const volEl = document.getElementById("volume-container");
   const rsEl = document.getElementById("rs-container");
   const hasRs = !!(chart.rs_line && chart.rs_line.length);
-  if (!hasRs) {
-    const rsCard = document.getElementById("rs-card");
-    if (rsCard) rsCard.remove();
-  }
+  // 銘柄を切り替えた時にRS無し→ありへ戻せるよう、DOMからremove()するのではなく
+  // hidden切り替えにする(remove()すると次にRSありの銘柄を見てもrs-cardが復活しない)。
+  const rsCard = document.getElementById("rs-card");
+  if (rsCard) rsCard.hidden = !hasRs;
 
   // Each pane lives in its own card now, so each shows its own time axis
   // (they still pan/zoom in lockstep via syncTimeScales).
@@ -742,8 +775,14 @@ function renderCharts(chart) {
   let stopLine = null;
 
   function wireLineToggle(id, price, apply) {
-    const box = document.getElementById(id);
-    if (!box) return;
+    const boxOld = document.getElementById(id);
+    if (!boxOld) return;
+    // SPA再描画のたびに呼ばれるので、cloneNodeで前回分のchangeリスナーごと
+    // 使い捨てる(そのままだと銘柄を切り替えるたびにリスナーが積み上がる)。
+    const box = boxOld.cloneNode(true);
+    boxOld.replaceWith(box);
+    box.disabled = false;
+    box.closest("label")?.classList.remove("disabled");
     if (price == null) {
       box.disabled = true;
       box.closest("label")?.classList.add("disabled");
@@ -877,8 +916,13 @@ function renderCharts(chart) {
     dateLabels = [priceEl, volEl, ...(rsChart ? [rsEl] : [])].map((el) => ({ el, label: addLatestDateLabel(el, shortDate) }));
   }
 
-  const toggle = document.getElementById("timeframe-toggle");
-  if (toggle) {
+  const toggleOld = document.getElementById("timeframe-toggle");
+  if (toggleOld) {
+    // 同上の理由でcloneして前回分のclickリスナーを捨てる。あわせて
+    // 表示状態(1ヶ月ボタンがactive)をデフォルトにリセットしておく。
+    const toggle = toggleOld.cloneNode(true);
+    toggleOld.replaceWith(toggle);
+    toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tf === String(DEFAULT_DAILY_BARS)));
     toggle.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-tf]");
       if (!btn) return;
@@ -887,12 +931,15 @@ function renderCharts(chart) {
     });
   }
 
-  window.addEventListener("resize", () => {
+  const resizeHandler = () => {
     for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
       c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     }
     for (const { el, label } of dateLabels) alignLatestDateLabel(el, label);
-  });
+  };
+  window.addEventListener("resize", resizeHandler);
+
+  stockChartState = { charts, resizeHandler, dateLabels };
 }
 
 // Japanese labels for the MUST-condition flags. Unknown keys fall back to
@@ -965,16 +1012,18 @@ function renderScoreBreakdown(stock) {
 }
 
 // ---------------------------------------------------------------------------
-// SPA router (Dockナビ): index.htmlの4ビューをlocation.hashで切り替える。
+// SPA router (Dockナビ): index.htmlの5ビューをlocation.hashで切り替える。
 // セクターマップ/バッチ実行は表示のたびに再init(ヒートマップはコンテナが
 // 見えて初めてclientWidthが正しく取れるため、バッチ実行は履歴を毎回最新化
-// するため)。
+// するため)。銘柄詳細は"stock/CODE"の形でパラメータ付きハッシュを取る
+// (Dockメニューには出さない、ダッシュボードからのドリルダウン専用ビュー)。
 // ---------------------------------------------------------------------------
 
-const VIEWS = ["dashboard", "sectormap", "invest", "batch"];
+const VIEWS = ["dashboard", "sectormap", "invest", "batch", "stock"];
 
-function showView(name) {
-  if (!VIEWS.includes(name)) name = "dashboard";
+function showView(hash) {
+  const [rawName, param] = hash.split("/");
+  const name = VIEWS.includes(rawName) ? rawName : "dashboard";
   for (const v of VIEWS) {
     const section = document.getElementById(`view-${v}`);
     if (section) section.hidden = v !== name;
@@ -987,6 +1036,9 @@ function showView(name) {
   }
   if (name === "batch" && window.MinerviniBatch) {
     window.MinerviniBatch.initBatchView();
+  }
+  if (name === "stock") {
+    initStockPage(param ? decodeURIComponent(param) : null);
   }
 }
 
@@ -1009,9 +1061,9 @@ function initRouter() {
 if (document.getElementById("confirmed-tier-body")) {
   initDashboard();
 }
-if (document.getElementById("chart-container")) {
-  initStockPage();
-}
+// 銘柄詳細(view-stock)はDockナビを持つSPAシェル(index.html)内の1ビューに
+// なったため、initStockPage()はここで直接呼ばず、initRouter()内のshowView()が
+// hashが"stock/CODE"の時にだけ呼ぶ。
 if (document.getElementById("dock-nav")) {
   initRouter();
 }

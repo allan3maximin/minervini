@@ -4,7 +4,8 @@
 ※ かつてのEDINET API v2連携(四半期報告書ベース)は撤去済み(a5c76fc)。自動ファンダ取得のメインは
   J-Quants API(72ffe1a)。2026-07-08、その12週遅延窓を補うEDINET DB(決算短信ベース、別サービス)
   連携を追加(下記5章)。同日、フロントエンドを1ページSPA化(ダッシュボード/セクターマップ/投資法/
-  バッチ実行をDockナビで切替、下記7章)。
+  バッチ実行/個別株詳細の5ビューをDockナビ+hashルーティングで切替、下記7章)。同日、ダッシュボード表の
+  コード・銘柄名列を横スクロール時も左固定表示するsticky列対応も追加。
 このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
 
 ---
@@ -48,9 +49,12 @@ src/
     build_site.py           report.json / breadth.json / charts/*.json の生成
     heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
 docs/                       GitHub Pages ルート
-  index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-batch の
-                            4セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
-  stock.html                個別株詳細 (チャート3ペイン + チェックリスト + スコア内訳、Dockナビの対象外の独立ページ)
+  index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-batch/view-stock の
+                            5セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
+                            view-stockのみDockナビにボタンが無いドリルダウン専用ビューで、hashは"stock/CODE"の形
+                            (パラメータ付き)。Lightweight Charts CDNスクリプトもここに追加済み。
+  stock.html                旧URL(?code=...)用リダイレクトスタブのみ(JSでindex.html#stock/CODEへ転送)。
+                            実体はview-stockに統合済み(2026-07-08〜)。
   heatmap.html              旧URL用リダイレクトスタブ (meta refresh → index.html#sectormap。実体はSPAに統合済み)
   assets/
     app.js                  ダッシュボード+個別株+SPAルーターの全ロジック (~1080行, 唯一の大物JS)
@@ -262,13 +266,16 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 
 ## 7. フロントエンド詳細 (docs/assets/app.js)
 
-同一ファイルで index.html と stock.html の両方を担当 (bodyの要素有無で分岐、末尾で initDashboard / initStockPage / initRouter を起動)。
+index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter を起動。initStockPage はrouterのshowViewから
+"stock/CODE" hashの時だけ呼ばれる)。stock.html は2026-07-08にリダイレクトスタブ化され、スクリプトを持たない。
 
 ### SPA構造 (2026-07-08〜)
-- index.html は4つの `<section class="view-section" id="view-{dashboard|sectormap|invest|batch}">` を持つ1ページ。
+- index.html は5つの `<section class="view-section" id="view-{dashboard|sectormap|invest|batch|stock}">` を持つ1ページ。
   初期状態は view-dashboard のみ表示、他は `hidden`。
 - 下部固定 `<nav class="dock-nav" id="dock-nav">` にmacOS Dock風の4ボタン(`.dock-btn[data-view=...]`)。
-- ルーター (app.js): `showView(name)` が対象セクションの `hidden` を切り替え、`.dock-btn.active` を付け替える。
+  `view-stock` はドリルダウン専用でDockには出さない(ダッシュボード表の行クリックからのみ遷移)。
+- ルーター (app.js): `showView(hash)` が `hash.split("/")` で `[name, param]` に分解し、対象セクションの
+  `hidden` を切り替え、`.dock-btn.active` を付け替える(`name` がVIEWSに無ければ"dashboard"扱い)。
   `initRouter()` が dock ボタンの click → `location.hash` 変更、`hashchange` → `showView` の配線と、
   初期表示(hashが無ければ "dashboard")を行う。
   - `view-sectormap` を開くたび `initHeatmap()` を再実行(非表示中は `clientWidth` が0でツリーマップが
@@ -276,8 +283,11 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
     イベント登録だけガードし、render自体は毎回実行)。
   - `view-batch` を開くたび `window.MinerviniBatch.initBatchView()` を実行(カード自体は初回のみ生成、
     実行履歴は毎回再取得して最新化)。
-- `stock.html` はDockナビの対象外の独立ページ(旧来通り)。
+  - `view-stock` (hash = `stock/CODE`) を開くたび `initStockPage(param)` を実行。ダッシュボード表の行クリックは
+    `window.location.hash = "stock/" + code` (旧: `stock.html?code=...` への遷移)。
 - 旧 `heatmap.html` は `index.html#sectormap` への meta-refresh リダイレクトスタブのみ残存(旧URL互換)。
+  旧 `stock.html?code=X` は同様にJSで `index.html#stock/X` へリダイレクトするスタブ(?codeをhashへ引き継ぐ
+  必要があるためmeta refreshではなくJS実装)。
 
 ### ダッシュボード (view-dashboard)
 - `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
@@ -288,7 +298,11 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
     `initialSortDesc` で初期ソート列を指定(confirmed/poolはtotal_score降順、watchlistはrs降順)。
     各列は `sortValue(s)` を任意で持てる(フォーマット済み文字列ではなく元の数値でソートするため)。
   - セクター強度の文字色: `.sector-strength-strong`(accent) / `-mid`(text-dim) / `-weak`(danger)。
-  - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(stock.htmlへ遷移させない)。
+  - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(view-stockへ遷移させない)。
+  - 行クリックは `window.location.hash = "stock/" + code` で view-stock へ遷移(旧: `stock.html?code=...`)。
+  - 表のwrapperには `stock-table-scroll` クラスを付与し、コード列(1列目, 84px固定幅)・銘柄名列(2列目)を
+    `position: sticky` で左固定(style.css参照)。横スクロール中もどの行の銘柄か常時わかるようにする対応
+    (2026-07-08追加)。batch履歴テーブル等、他の `.table-scroll` には影響しない(クラスをスコープに使用)。
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
@@ -318,7 +332,7 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   (`.passkey-gated` でボタンごと非表示)だが、履歴閲覧自体は認証不要(公開リポジトリのActions実行履歴は
   未認証でも読めるため `listWorkflowRuns` はプレーン `fetch` を使用、60req/hr制限はこの用途では十分)。
 
-### 個別株 (stock.html)
+### 個別株 (view-stock, 2026-07-08にSPA統合)
 - 3ペイン: 価格+MA(50/150/200) / 出来高 / RSライン(対TOPIX)。`makeChart` で共通生成、時間軸は最下段のみ表示、
   `timeScale.fixRightEdge: true`, `handleScale.axisPressedMouseMove.price: false` (価格軸ドラッグで縮尺変更しない),
   `handleScroll.vertTouchDrag: false` (スマホ縦スワイプはページスクロール)
@@ -331,12 +345,20 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   実測bottom/heightを取得して合わせている(以前は下にズレて見えていた不具合の修正。resize時も再計測)。
 - ピボット/損切りの水平線トグル (#toggle-pivot / #toggle-stop)
 - データは docs/data/charts/{code}.json (candles, volumes, rs_line, ma各種, pivot, stop_loss, 収縮マーカー)
+- **SPA化に伴う再初期化の後始末 (2026-07-08)**: 以前はページ遷移のたびにフルリロードされていたため
+  `renderCharts()` の中身は使い捨てで良かったが、SPA化で同じDOMのまま銘柄を切り替えるようになったため、
+  `teardownCharts()` (モジュール変数 `stockChartState` に前回の `{charts, resizeHandler, dateLabels}` を保持)
+  で毎回 `initStockPage()` の先頭で: 各チャートインスタンスの `.remove()`、`resize` リスナーの `removeEventListener`、
+  `.latest-date-label` の除去、を行ってから再構築する。`#toggle-pivot`/`#toggle-stop`/`#timeframe-toggle` は
+  `cloneNode(true)` + `replaceWith` でDOM要素ごと差し替え、前回分のイベントリスナーが積み上がらないようにしている。
+  `rs-card` (RSラインの無い銘柄では非表示) は以前 `remove()` していたが、RS無し→有りの銘柄に切り替えた時に
+  戻せなくなるため `hidden` 切り替えに変更。
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-08時点:
-app.js v=8 (index.html/stock.html両方), style.css v=8 (index.html/stock.html両方), heatmap.js v=8,
-config.js v=6, github-api.js v=6, fundamentals-modal.js v=7, batch.js v=1(新規), webauthn-vault.js v=5(今回未変更)。
-heatmap.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
+app.js v=9 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=10 (index.htmlのみ),
+heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7, batch.js v=2, webauthn-vault.js v=5(今回未変更)。
+heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
 
 ## 8. GitHub Actions
 
@@ -435,7 +457,8 @@ node --check docs/assets/app.js   # JS構文チェック
 
 ## 13. 変更時のチェックリスト (Sonnet向け)
 
-- [ ] docs/ の JS/CSS を触ったら 3つの html の `?v=N` を全部上げたか
+- [ ] docs/ の JS/CSS を触ったら index.html(唯一scriptタグ/linkタグを持つHTML)の `?v=N` を全部上げたか
+      (stock.html/heatmap.htmlはリダイレクトスタブのみでアセット参照なし)
 - [ ] pipeline に外部I/Oを足したら test_pipeline.py の wired fixture にモックを足したか
 - [ ] `python -m pytest tests/ -q` 全パス + `node --check docs/assets/app.js`
 - [ ] コミット前に `.git/*.lock` を mv で退避したか (サンドボックスの場合)

@@ -172,6 +172,7 @@ th {
   user-select: none;
   position: sticky;
   top: 0;
+  z-index: 2;
   background: var(--panel-2);
   font-weight: 600;
   font-size: 12px;
@@ -184,6 +185,36 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
 /* has_chart===false 等、詳細ページへ遷移できない行(クリック無効) */
 tbody tr.row-static { cursor: default; }
 tbody tr.row-static:hover { background: transparent; }
+
+/* ダッシュボード表(コード・銘柄名を左固定): 横スクロール中も左端の2列は
+   その場に留まる。右スクロール中にどの行の銘柄か分からなくなる問題への対応。
+   コード列は4桁の数値のみで内容が短いと分かっているため、幅を固定して
+   銘柄名列のleftオフセットを確定させる(JSでの幅計測は不要)。 */
+.stock-table-scroll td:nth-child(1),
+.stock-table-scroll td:nth-child(2) {
+  position: sticky;
+  z-index: 1;
+  background: var(--panel);
+}
+.stock-table-scroll th:nth-child(1),
+.stock-table-scroll td:nth-child(1) {
+  left: 0;
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
+}
+.stock-table-scroll th:nth-child(2),
+.stock-table-scroll td:nth-child(2) {
+  left: 84px;
+}
+.stock-table-scroll tbody tr.fund-stale td:nth-child(1),
+.stock-table-scroll tbody tr.fund-stale td:nth-child(2) {
+  background: #262420;
+}
+.stock-table-scroll tbody tr.row-static td:nth-child(1),
+.stock-table-scroll tbody tr.row-static td:nth-child(2) {
+  background: var(--panel);
+}
 
 /* セクター(強度)列: 強度の文字だけ色付け */
 .sector-strength-strong { color: var(--accent); font-weight: 700; }
@@ -681,20 +712,18 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .dock-btn {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  min-height: auto;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
   background: transparent;
   border: none;
   border-radius: 999px;
-  padding: 6px 16px;
+  padding: 0;
   color: var(--text-dim);
-  font-size: 10px;
-  line-height: 1.3;
   transition: background 0.15s, color 0.15s, transform 0.15s;
 }
-.dock-btn .dock-icon { font-size: 18px; line-height: 1; }
+.dock-btn .dock-icon { font-size: 20px; line-height: 1; }
 .dock-btn:hover { color: var(--text); transform: translateY(-2px); }
 .dock-btn.active { background: var(--panel-2); color: var(--accent); }
 
@@ -758,6 +787,7 @@ body:has(.dock-nav) { padding-bottom: 84px; }
 .run-status-failure { border-color: var(--danger); color: var(--danger); }
 .run-status-in_progress, .run-status-queued { border-color: var(--warn); color: var(--warn); }
 
+.run-history-table { min-width: 0; }
 .run-history-table td, .run-history-table th { font-size: 12px; }
 
 /* --------------------------------------------------------------- mobile */
@@ -796,9 +826,9 @@ body:has(.dock-nav) { padding-bottom: 84px; }
   .hm-sector-head { font-size: 10px; padding: 0 4px; gap: 4px; }
   .hm-popup-box { max-width: none; }
 
-  /* dock nav: narrower padding, smaller labels */
-  .dock-btn { padding: 6px 10px; font-size: 9px; }
-  .dock-btn .dock-icon { font-size: 16px; }
+  /* dock nav: slightly smaller icon buttons */
+  .dock-btn { width: 42px; height: 42px; }
+  .dock-btn .dock-icon { font-size: 18px; }
   .batch-card { flex-direction: column; align-items: stretch; }
   .batch-card-actions { justify-content: flex-start; }
 }
