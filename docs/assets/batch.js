@@ -96,6 +96,8 @@
         continue;
       }
 
+      const wrapper = document.createElement("div");
+      wrapper.className = "table-scroll";
       const table = document.createElement("table");
       table.className = "run-history-table";
       const thead = document.createElement("thead");
@@ -124,7 +126,8 @@
         tbody.appendChild(tr);
       }
       table.appendChild(tbody);
-      section.appendChild(table);
+      wrapper.appendChild(table);
+      section.appendChild(wrapper);
       container.appendChild(section);
     }
   }

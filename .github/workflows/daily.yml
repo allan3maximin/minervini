@@ -2,7 +2,11 @@ name: Daily screener run
 
 on:
   schedule:
-    - cron: "30 7 * * 1-5" # 16:30 JST, Mon-Fri (実際の起動は数分〜数十分遅れることがある)
+    # GitHub Actionsのcronは高負荷時に数時間遅延したり、まれに完全にドロップされることがある
+    # (実測: 2026-07-06分は発火せず、2026-07-07分は07:30予定が10:38に3時間超遅延して発火)。
+    # 単発cronだと1回落ちるとその日は手動リカバリ必須になるため、07:00-11:00 UTC(16:00-20:00 JST)の
+    # 間で毎時リトライし、下記「当日実行済みチェック」で二重実行を防ぐ構成に変更(2026-07-08)。
+    - cron: "0 7-11 * * 1-5"
   workflow_dispatch:
 
 concurrency:
@@ -18,15 +22,31 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 直後の「当日実行済みチェック」がgit logで当日分のコミットを探すため必要
+
+      - name: Check if already run today
+        id: check
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          if git log --format=%s -20 | grep -qF "chore: daily screener run ${TODAY}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Already ran today ($TODAY), skipping remaining steps."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip != 'true'
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: steps.check.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
       - name: Run daily pipeline
+        if: steps.check.outputs.skip != 'true'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}
@@ -34,6 +54,7 @@ jobs:
 
       - name: Commit results
         id: commit
+        if: steps.check.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
