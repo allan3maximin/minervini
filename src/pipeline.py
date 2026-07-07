@@ -22,6 +22,7 @@ from src.data.fundamentals import (
     load_fundamentals_csv,
     merge_fundamentals,
     score_stock,
+    write_public_json,
 )
 from src.indicators import compute_all, rs_percentile_rank
 from src.report import build_site
@@ -118,6 +119,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         auto_by_code = {}
 
     fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))
+    write_public_json(fundamentals_by_code)
 
     history = entry_mod.load_status_history()
     previous_status_by_code = {code: entry_mod.previous_status(history, code) for code in codes}

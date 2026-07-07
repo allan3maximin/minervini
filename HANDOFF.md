@@ -135,6 +135,29 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 - pipeline.py での呼び出し: `fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))`
 - 効果: J-Quantsデータが入った銘柄は quarters が存在する → `fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格。
 
+### フロントエンドへの公開 (docs/data/fundamentals_public.json) — 2026-07-07 追加
+- **バグ**: 「ファンダ入力欄にバッチで取得したはずのデータが表示されない」と報告あり。原因は
+  `data/fundamentals_auto.json`(J-Quants自動取得の生データ)が **docs/ の外**にあり GitHub Pages から
+  配信されず、かつ `docs/assets/fundamentals-modal.js` のプリフィル処理が `manual/fundamentals.csv`
+  (当時は空)しか読んでいなかったこと。バックフィル自体は成功していた(`54c09e9`で
+  data/fundamentals_auto.json に997銘柄分の実データが投入済み・jquants_state.json も遅延日数分まで
+  追いついている)ので、パイプライン側の不具合ではなくフロント側の配線漏れだった。
+- **修正**: `src/data/fundamentals.py :: write_public_json(fundamentals_by_code, path=None)` を追加。
+  マージ済み(自動+手動)データのうち quarters が存在する銘柄だけをトリムして
+  `docs/data/fundamentals_public.json` に書き出す(`PUBLIC_JSON_PATH`)。pipeline.py で
+  `merge_fundamentals` 直後に呼び出し(`src/pipeline.py`)。daily.yml は既存の `git add data/ docs/` で
+  自動的にコミット対象になるためワークフロー変更は不要。
+- `fundamentals-modal.js :: openFundamentalsModal` はモーダルを開くたびにこのJSONを取得し、
+  **手動CSVに行が無い四半期だけ**バッチ値でプリフィルする(手動値は常に優先。`pickValue`ヘルパー、
+  0とundefined/nullを区別)。バッチ由来で埋まった行には `.auto-prefill-row`
+  (style.css: 薄い accent 背景 + 破線input)を付けて「未確定の自動取得値」であることを視覚的に示す。
+  保存すると通常どおり manual/fundamentals.csv に確定値として書き込まれる。
+- キャッシュバスター: `docs/index.html` の `fundamentals-modal.js` を `?v=6` に更新(style.cssは既に`?v=7`)。
+- テスト: `tests/test_fundamentals.py`(write_public_jsonの空quarters除外・手動優先)、
+  `tests/test_pipeline.py` の `wired` フィクスチャに `write_public_json` のno-opモンキーパッチを追加
+  (これが無いと pytest 実行のたびに実リポジトリの docs/data/fundamentals_public.json が空dictで
+  上書きされてしまう — docs/data/indices.json の既知の汚染問題と同種)。
+
 ### 制約(ユーザー了解済み)
 - Freeプランは12週間遅延のため、直近四半期の開示が〔本命〕に反映されるのは数ヶ月遅れる。
 - EPSのYTD差分は株式数変動時に厳密でない(許容)。
@@ -248,9 +271,10 @@ node --check docs/assets/app.js   # JS構文チェック
     `rm -f .git/index.lock .git/HEAD.lock .git/objects/maintenance.lock .git/lockdump_*` してから pull/push。
 - daily.yml が平日毎日 docs/data/ と data/ にコミットする → **作業前に必ず `git fetch` して origin/master との乖離を確認**。
   乖離時は生成データ(data/, docs/data/)はリモート(bot)側を正、ソースはローカル側を正として統合する。
-- 現在の状態 (2026-07-07): ローカルmasterが origin/master (abb001c) より2コミット先行
-  (7e60ced: HANDOFF.mdのJ-Quants反映 / その次: 指数リアルタイム化・ヒートマップ簡易表示・日付ラベル修正)。
-  **ユーザーが `git push` すれば同期完了** (fast-forward)。`git log --oneline -3` で最新ハッシュを確認。
+- 現在の状態 (2026-07-07): ローカルmasterが origin/master より複数コミット先行
+  (指数リアルタイム化・ヒートマップ簡易表示・日付ラベル修正 → その後 ファンダ入力欄プリフィル修正
+  〔fundamentals_public.json新設〕)。**ユーザーが `git pull --rebase` → `git push` すれば同期完了**。
+  `git log --oneline -5` で最新ハッシュを確認。
 
 ## 11. 未対応・次のタスク候補
 
@@ -260,10 +284,10 @@ node --check docs/assets/app.js   # JS構文チェック
    構成にした(ページ開きっぱなしでも手動リロード不要)。intraday-indices.yml と daily.yml は同じ
    docs/data/indices.json・data/indices/ を触るため、稀に `git pull --rebase` がコンフリクトして
    そのIntraday実行だけ失敗することがある(次回実行で復旧する想定・致命的ではない)。
-1. **J-Quantsキー登録+バックフィル実行の確認**(ユーザー作業): Secret `JQUANTS_API_KEY` 登録 →
-   Actions「J-Quants fundamentals backfill」を手動実行 → data/fundamentals_auto.json ができ、
-   翌日次実行から〔本命〕に自動昇格銘柄が出るはず。Freeプランは12週間遅延があるため直近四半期はすぐには反映されない点に注意。
-   動かなければ jquants.py のログ(printのみ)をActionsログで確認。
+1. ~~J-Quantsキー登録+バックフィル実行の確認~~ → **完了確認済み** (`54c09e9`実行済み、
+   data/fundamentals_auto.json に997銘柄・jquants_state.json も遅延日数分まで追いついている)。
+   ただしフロントの「ファンダ入力/編集」モーダルがこのデータを一切参照していなかったため
+   2026-07-07に fundamentals_public.json 経由のプリフィルを追加 (上記4章参照)。
 2. J-Quantsの `EPS`/`Sales` 列は実データ検証がまだ。
    バックフィル後に fundamentals_auto.json の値を数銘柄、決算短信と突き合わせて検証するのが望ましい。
    銀行・保険等の特殊業種は Sales が取れず NCSales にもフォールバックしない可能性 → 必要ならフィールド追加で対応。

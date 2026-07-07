@@ -470,6 +470,11 @@ body.modal-open {
   font-size: 14px;
 }
 .fund-table input.has-error { border-color: var(--danger); }
+/* Rows prefilled from the J-Quants batch (not yet a manual/fundamentals.csv
+   row) get a subtle tint + dashed input border so it's clear the value is
+   an unconfirmed baseline, not something already committed. */
+.fund-table tr.auto-prefill-row { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fund-table tr.auto-prefill-row input { border-style: dashed; }
 
 /* ------------------------------------------------- 機能A: プライオリティ */
 

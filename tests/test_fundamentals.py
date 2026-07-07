@@ -4,6 +4,8 @@ from io import StringIO
 import pandas as pd
 import pytest
 
+import json
+
 from src.config import load_config
 from src.data.fundamentals import (
     build_fundamentals_by_code,
@@ -11,7 +13,9 @@ from src.data.fundamentals import (
     fund_coverage_tier,
     get_fundamentals_for_code,
     load_fundamentals_csv,
+    merge_fundamentals,
     score_stock,
+    write_public_json,
 )
 
 CONFIG = load_config()
@@ -129,3 +133,54 @@ def test_pool_tier_stock_has_tech_score_but_no_full_score():
     assert result["tier"] == "pool"
     assert result["full_score"] is None
     assert result["tech_score"] is not None
+
+
+def test_write_public_json_includes_only_codes_with_quarters(tmp_path):
+    # code "1111" has real J-Quants-sourced quarters and should be exported;
+    # code "2222" has an entry but no quarters (e.g. a failed/empty auto
+    # fetch) and should be skipped so the dashboard's fundamentals modal
+    # doesn't get a code entry with nothing usable to prefill.
+    auto_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2025Q1", "eps": 10.5, "revenue": 1000.0}],
+            "monthly_yoy": None,
+            "checked_date": "2026-06-01",
+        },
+        "2222": {"quarters": [], "monthly_yoy": None, "checked_date": None},
+    }
+    merged = merge_fundamentals(auto_by_code, {})
+
+    out_path = tmp_path / "fundamentals_public.json"
+    write_public_json(merged, path=out_path)
+
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert list(data.keys()) == ["1111"]
+    assert data["1111"]["quarters"] == [{"fiscal_quarter": "2025Q1", "eps": 10.5, "revenue": 1000.0}]
+    assert data["1111"]["checked_date"] == "2026-06-01"
+
+
+def test_write_public_json_manual_overrides_take_precedence(tmp_path):
+    # merge_fundamentals already applies "manual wins" per quarter; this just
+    # confirms write_public_json passes that merged result through as-is
+    # rather than re-deriving from the raw auto store.
+    auto_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2025Q1", "eps": 10.5, "revenue": 1000.0}],
+            "monthly_yoy": None,
+            "checked_date": "2026-06-01",
+        }
+    }
+    manual_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2025Q1", "eps": 11.0, "revenue": 1010.0}],
+            "monthly_yoy": 5.0,
+            "checked_date": "2026-07-01",
+        }
+    }
+    merged = merge_fundamentals(auto_by_code, manual_by_code)
+
+    out_path = tmp_path / "fundamentals_public.json"
+    write_public_json(merged, path=out_path)
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["1111"]["quarters"][0]["eps"] == 11.0
+    assert data["1111"]["checked_date"] == "2026-07-01"

@@ -288,20 +288,54 @@
       renderFormError(e.message || String(e));
     }
 
-    renderForm(labels, existingByQuarter, latestExisting);
+    // Batch (J-Quants)-fetched baseline: docs/data/fundamentals_public.json
+    // is written by the daily pipeline (src/data/fundamentals.py
+    // write_public_json). It's only used to fill quarters that have no
+    // manual/fundamentals.csv row yet, so a manual entry always wins.
+    // Fetch failures here are silent -- the form still works manual-only.
+    let autoByQuarter = {};
+    try {
+      const resp = await fetch("data/fundamentals_public.json", { cache: "no-store" });
+      if (resp.ok) {
+        const all = await resp.json();
+        const entry = all[code];
+        if (entry && entry.quarters) {
+          entry.quarters.forEach((q) => {
+            autoByQuarter[q.fiscal_quarter] = q;
+          });
+        }
+      }
+    } catch (e) {
+      /* non-fatal: baseline prefill only */
+    }
+
+    renderForm(labels, existingByQuarter, latestExisting, autoByQuarter);
     document.getElementById("fund-save").disabled = false;
     document.getElementById("fund-save").addEventListener("click", () => onSaveClicked(code));
 
-    function renderForm(labels, existingByQuarter, latestExisting) {
+    function pickValue(existingVal, autoVal) {
+      if (existingVal !== undefined && existingVal !== null && existingVal !== "") return existingVal;
+      if (autoVal !== undefined && autoVal !== null) return autoVal;
+      return "";
+    }
+
+    function renderForm(labels, existingByQuarter, latestExisting, autoByQuarter) {
       const body = document.getElementById("fund-form-body");
       const rowsHtml = labels
         .map((label, i) => {
           const existing = existingByQuarter[label] || {};
+          const auto = (autoByQuarter && autoByQuarter[label]) || {};
+          const epsVal = pickValue(existing.eps, auto.eps);
+          const revVal = pickValue(existing.revenue, auto.revenue);
+          const isAutoFilled =
+            (existing.eps === undefined || existing.eps === null || existing.eps === "") &&
+            (existing.revenue === undefined || existing.revenue === null || existing.revenue === "") &&
+            (auto.eps != null || auto.revenue != null);
           return `
-            <tr>
+            <tr${isAutoFilled ? ' class="auto-prefill-row" title="J-Quants自動取得値(未確定)。保存すると手動値として確定します。"' : ""}>
               <td><input type="text" class="q-fiscal" data-i="${i}" value="${escapeAttr(label)}"></td>
-              <td><input type="number" step="any" class="q-eps" data-i="${i}" value="${escapeAttr(existing.eps || "")}"></td>
-              <td><input type="number" step="any" class="q-revenue" data-i="${i}" value="${escapeAttr(existing.revenue || "")}"></td>
+              <td><input type="number" step="any" class="q-eps" data-i="${i}" value="${escapeAttr(epsVal)}"></td>
+              <td><input type="number" step="any" class="q-revenue" data-i="${i}" value="${escapeAttr(revVal)}"></td>
             </tr>
           `;
         })

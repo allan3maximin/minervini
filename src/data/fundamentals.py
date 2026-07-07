@@ -19,6 +19,11 @@ from src.screener.trend_template import compute_accel_slope, compute_full_score,
 
 DEFAULT_CSV_PATH = REPO_ROOT / "manual" / "fundamentals.csv"
 AUTO_PATH = REPO_ROOT / "data" / "fundamentals_auto.json"
+# Public, Pages-served mirror of the merged (auto + manual) fundamentals data.
+# data/fundamentals_auto.json lives outside docs/ so GitHub Pages never serves
+# it; the dashboard's fundamentals input modal needs *some* pre-fetched
+# baseline to prefill from, so we write a trimmed copy here every run.
+PUBLIC_JSON_PATH = REPO_ROOT / "docs" / "data" / "fundamentals_public.json"
 CSV_COLUMNS = ["code", "fiscal_quarter", "eps", "revenue", "monthly_yoy", "checked_date"]
 _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
 
@@ -125,6 +130,40 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict) -> dict:
             "checked_date": manual.get("checked_date") or auto.get("checked_date"),
         }
     return result
+
+
+def write_public_json(fundamentals_by_code: dict, path=None) -> None:
+    """Write a trimmed, Pages-servable copy of the merged fundamentals data.
+
+    Only codes with at least one quarter are included (skips empty/None
+    entries) so the file doesn't balloon with universe-wide null rows. This
+    is what docs/assets/fundamentals-modal.js fetches to prefill the
+    "ファンダ入力/編集" form with whatever the J-Quants batch (or a prior
+    manual commit) already found -- without it, the input modal only ever
+    saw manual/fundamentals.csv and appeared blank even after a successful
+    auto-fetch.
+    """
+    path = path or PUBLIC_JSON_PATH
+    out: dict[str, dict] = {}
+    for code, data in fundamentals_by_code.items():
+        quarters = data.get("quarters") or []
+        if not quarters:
+            continue
+        out[code] = {
+            "quarters": [
+                {
+                    "fiscal_quarter": q.get("fiscal_quarter"),
+                    "eps": q.get("eps"),
+                    "revenue": q.get("revenue"),
+                }
+                for q in quarters
+            ],
+            "monthly_yoy": data.get("monthly_yoy"),
+            "checked_date": data.get("checked_date"),
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
 
 
 def fund_coverage_tier(code: str, fundamentals_by_code: dict) -> dict:
