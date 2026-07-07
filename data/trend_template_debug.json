@@ -22,11 +22,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 74.3
+    "passed": false
   },
   {
     "code": "9984",
@@ -55,7 +54,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 78.6
+    "tech_score": 74.8
   },
   {
     "code": "6981",
@@ -66,11 +65,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 75.7
+    "passed": false
   },
   {
     "code": "5803",
@@ -99,7 +97,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 56.2
+    "tech_score": 56.1
   },
   {
     "code": "4062",
@@ -110,11 +108,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 73.9
+    "passed": false
   },
   {
     "code": "6920",
@@ -123,13 +120,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 56.3
+    "passed": false
   },
   {
     "code": "6146",
@@ -138,13 +134,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 44.2
+    "passed": false
   },
   {
     "code": "5801",
@@ -184,9 +179,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 47.0
   },
   {
     "code": "8316",
@@ -201,7 +197,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 52.7
+    "tech_score": 54.3
   },
   {
     "code": "5706",
@@ -230,7 +226,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.4
+    "tech_score": 65.7
   },
   {
     "code": "7011",
@@ -259,7 +255,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 76.9
+    "tech_score": 81.3
   },
   {
     "code": "6525",
@@ -274,7 +270,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 84.0
+    "tech_score": 72.9
   },
   {
     "code": "5802",
@@ -303,7 +299,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 57.2
+    "tech_score": 58.2
   },
   {
     "code": "7203",
@@ -346,7 +342,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 95.3
+    "tech_score": 82.9
   },
   {
     "code": "6758",
@@ -375,7 +371,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 83.8
+    "tech_score": 82.1
   },
   {
     "code": "6501",
@@ -384,7 +380,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -398,13 +394,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 53.1
+    "passed": false
   },
   {
     "code": "7735",
@@ -419,7 +414,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 81.9
+    "tech_score": 77.7
   },
   {
     "code": "4004",
@@ -442,7 +437,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -462,7 +457,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 44.0
+    "tech_score": 51.7
   },
   {
     "code": "6861",
@@ -499,13 +494,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 41.4
+    "passed": false
   },
   {
     "code": "7013",
@@ -618,7 +612,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 74.8
+    "tech_score": 63.4
   },
   {
     "code": "2802",
@@ -633,7 +627,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 48.7
+    "tech_score": 42.3
   },
   {
     "code": "8031",
@@ -662,7 +656,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 84.9
+    "tech_score": 75.5
   },
   {
     "code": "2914",
@@ -705,7 +699,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 71.6
+    "tech_score": 68.0
   },
   {
     "code": "7741",
@@ -731,9 +725,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 43.6
   },
   {
     "code": "6526",
@@ -773,7 +768,7 @@
       "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
-      "rs_above_min": true
+      "rs_above_min": false
     },
     "passed": false
   },
@@ -812,7 +807,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -888,7 +883,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 57.5
+    "tech_score": 61.8
   },
   {
     "code": "6361",
@@ -903,7 +898,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.5
+    "tech_score": 58.9
   },
   {
     "code": "8308",
@@ -918,7 +913,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.3
+    "tech_score": 50.8
   },
   {
     "code": "8053",
@@ -961,7 +956,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.7
+    "tech_score": 65.0
   },
   {
     "code": "6871",
@@ -976,7 +971,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 68.7
+    "tech_score": 70.6
   },
   {
     "code": "8750",
@@ -991,7 +986,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 52.6
+    "tech_score": 52.4
   },
   {
     "code": "6479",
@@ -1006,7 +1001,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 55.2
+    "tech_score": 52.6
   },
   {
     "code": "8309",
@@ -1021,7 +1016,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 49.2
+    "tech_score": 49.7
   },
   {
     "code": "4568",
@@ -1156,7 +1151,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -1166,7 +1161,7 @@
   {
     "code": "9101",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": true,
@@ -1302,7 +1297,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 86.9
+    "tech_score": 75.8
   },
   {
     "code": "8604",
@@ -1331,7 +1326,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 87.4
+    "tech_score": 83.7
   },
   {
     "code": "6504",
@@ -1342,7 +1337,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
     "passed": false
@@ -1416,7 +1411,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 44.6
+    "tech_score": 28.9
   },
   {
     "code": "5108",
@@ -1445,7 +1440,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.6
+    "tech_score": 56.0
   },
   {
     "code": "6613",
@@ -1464,7 +1459,7 @@
   {
     "code": "3382",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -1502,12 +1497,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.2
+    "tech_score": 72.7
   },
   {
     "code": "186A",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -1528,9 +1523,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 50.4
   },
   {
     "code": "9107",
@@ -1539,7 +1535,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -1573,7 +1569,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.9
+    "tech_score": 67.4
   },
   {
     "code": "1801",
@@ -1654,7 +1650,7 @@
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": false,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -1672,7 +1668,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 59.2
+    "tech_score": 50.7
   },
   {
     "code": "3687",
@@ -1765,13 +1761,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 36.9
+    "passed": false
   },
   {
     "code": "5344",
@@ -1782,8 +1777,8 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
-      "rs_above_min": true
+      "within_high52w_margin": false,
+      "rs_above_min": false
     },
     "passed": false
   },
@@ -1850,13 +1845,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 47.1
+    "passed": false
   },
   {
     "code": "9020",
@@ -1907,13 +1901,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 61.2
+    "passed": false
   },
   {
     "code": "3086",
@@ -1964,7 +1957,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -2034,13 +2027,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 57.0
+    "passed": false
   },
   {
     "code": "1802",
@@ -2136,9 +2128,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 37.7
   },
   {
     "code": "3407",
@@ -2153,7 +2146,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 52.7
+    "tech_score": 51.6
   },
   {
     "code": "5334",
@@ -2168,7 +2161,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.4
+    "tech_score": 65.1
   },
   {
     "code": "7729",
@@ -2177,13 +2170,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 53.4
+    "passed": false
   },
   {
     "code": "2503",
@@ -2212,7 +2204,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 51.3
+    "tech_score": 37.5
   },
   {
     "code": "9503",
@@ -2311,7 +2303,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 75.4
+    "tech_score": 66.5
   },
   {
     "code": "5631",
@@ -2321,7 +2313,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": true,
+      "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -2362,7 +2354,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -2378,7 +2370,7 @@
       "ma_stack_50_150_200": false,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -2417,7 +2409,7 @@
       "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
-      "ma_stack_50_150_200": true,
+      "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
@@ -2432,8 +2424,8 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
-      "above_low52w_margin": false,
+      "close_above_ma50": true,
+      "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -2446,7 +2438,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -2490,11 +2482,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 77.5
+    "passed": false
   },
   {
     "code": "9697",
@@ -2561,7 +2552,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
     "passed": false
@@ -2621,7 +2612,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.2
+    "tech_score": 52.0
   },
   {
     "code": "7272",
@@ -2706,7 +2697,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 67.9
+    "tech_score": 66.4
   },
   {
     "code": "4689",
@@ -2763,7 +2754,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 67.2
+    "tech_score": 60.8
   },
   {
     "code": "5101",
@@ -2778,7 +2769,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 56.2
+    "tech_score": 57.7
   },
   {
     "code": "6841",
@@ -2818,9 +2809,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 40.0
   },
   {
     "code": "6855",
@@ -2845,11 +2837,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 73.4
+    "passed": false
   },
   {
     "code": "4005",
@@ -2892,7 +2883,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 44.2
+    "tech_score": 45.3
   },
   {
     "code": "9531",
@@ -2935,7 +2926,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 58.6
+    "tech_score": 60.0
   },
   {
     "code": "8233",
@@ -2947,9 +2938,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 34.8
   },
   {
     "code": "278A",
@@ -2958,7 +2950,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": true
@@ -2978,7 +2970,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 69.9
+    "tech_score": 59.4
   },
   {
     "code": "6407",
@@ -2993,7 +2985,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 79.5
+    "tech_score": 69.7
   },
   {
     "code": "6134",
@@ -3008,7 +3000,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 88.9
+    "tech_score": 78.2
   },
   {
     "code": "3092",
@@ -3037,7 +3029,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.5
+    "tech_score": 56.6
   },
   {
     "code": "8593",
@@ -3066,7 +3058,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.2
+    "tech_score": 64.3
   },
   {
     "code": "5844",
@@ -3081,7 +3073,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 43.7
+    "tech_score": 43.5
   },
   {
     "code": "6674",
@@ -3090,13 +3082,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 52.7
+    "passed": false
   },
   {
     "code": "6327",
@@ -3133,13 +3124,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 31.1
+    "passed": false
   },
   {
     "code": "5019",
@@ -3196,7 +3186,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 43.9
+    "tech_score": 47.3
   },
   {
     "code": "4751",
@@ -3235,11 +3225,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 61.7
+    "passed": false
   },
   {
     "code": "1878",
@@ -3268,7 +3257,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.4
+    "tech_score": 58.1
   },
   {
     "code": "4704",
@@ -3339,7 +3328,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 54.8
+    "tech_score": 55.7
   },
   {
     "code": "7259",
@@ -3368,7 +3357,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 60.1
+    "tech_score": 65.0
   },
   {
     "code": "9962",
@@ -3383,7 +3372,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 68.5
+    "tech_score": 64.6
   },
   {
     "code": "3659",
@@ -3402,7 +3391,7 @@
   {
     "code": "2875",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -3426,7 +3415,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.8
+    "tech_score": 66.3
   },
   {
     "code": "464A",
@@ -3469,7 +3458,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.4
+    "tech_score": 68.6
   },
   {
     "code": "9005",
@@ -3502,7 +3491,7 @@
   {
     "code": "3003",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
@@ -3516,7 +3505,7 @@
   {
     "code": "7550",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -3548,13 +3537,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 42.8
+    "passed": false
   },
   {
     "code": "5711",
@@ -3565,7 +3553,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -3593,7 +3581,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -3625,7 +3613,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 50.3
+    "tech_score": 38.4
   },
   {
     "code": "3350",
@@ -3706,7 +3694,7 @@
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": false,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -3734,7 +3722,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
     "passed": false
@@ -3752,7 +3740,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 51.0
+    "tech_score": 54.0
   },
   {
     "code": "9023",
@@ -3809,7 +3797,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 44.1
+    "tech_score": 38.9
   },
   {
     "code": "3289",
@@ -3838,7 +3826,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 64.4
+    "tech_score": 64.7
   },
   {
     "code": "4612",
@@ -3867,7 +3855,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.8
+    "tech_score": 67.4
   },
   {
     "code": "2579",
@@ -3882,7 +3870,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 54.0
+    "tech_score": 59.8
   },
   {
     "code": "3038",
@@ -3947,13 +3935,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 64.8
+    "passed": false
   },
   {
     "code": "4042",
@@ -3986,7 +3973,7 @@
   {
     "code": "6368",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -4066,7 +4053,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 49.9
+    "tech_score": 48.2
   },
   {
     "code": "6141",
@@ -4113,7 +4100,7 @@
   {
     "code": "5714",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -4131,13 +4118,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 48.8
+    "passed": false
   },
   {
     "code": "7747",
@@ -4194,7 +4180,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 56.7
+    "tech_score": 57.4
   },
   {
     "code": "4324",
@@ -4289,11 +4275,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 70.2
+    "passed": false
   },
   {
     "code": "2897",
@@ -4345,7 +4330,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -4386,13 +4371,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 71.6
+    "passed": false
   },
   {
     "code": "8359",
@@ -4407,7 +4391,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.2
+    "tech_score": 60.7
   },
   {
     "code": "2269",
@@ -4444,7 +4428,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -4534,7 +4518,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 89.5
+    "tech_score": 79.3
   },
   {
     "code": "4043",
@@ -4543,7 +4527,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -4609,7 +4593,7 @@
   {
     "code": "5105",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
@@ -4643,10 +4627,11 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 84.9
   },
   {
     "code": "5367",
@@ -4707,13 +4692,13 @@
   {
     "code": "7721",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -4725,7 +4710,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -4767,7 +4752,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -4801,7 +4786,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 48.2
+    "tech_score": 46.2
   },
   {
     "code": "5301",
@@ -4816,7 +4801,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 58.2
+    "tech_score": 56.2
   },
   {
     "code": "5032",
@@ -4826,7 +4811,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": false,
-      "above_low52w_margin": true,
+      "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -4853,13 +4838,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 73.8
+    "passed": false
   },
   {
     "code": "4588",
@@ -4868,13 +4852,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 67.5
+    "passed": false
   },
   {
     "code": "290A",
@@ -4899,7 +4882,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
     "passed": false
@@ -4931,7 +4914,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.6
+    "tech_score": 46.9
   },
   {
     "code": "6753",
@@ -4956,11 +4939,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 71.8
+    "passed": false
   },
   {
     "code": "2871",
@@ -5021,11 +5003,11 @@
   {
     "code": "1893",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -5073,12 +5055,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.7
+    "tech_score": 50.4
   },
   {
     "code": "8252",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -5112,7 +5094,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": false,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -5130,7 +5112,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 71.5
+    "tech_score": 68.9
   },
   {
     "code": "4208",
@@ -5149,7 +5131,7 @@
   {
     "code": "9513",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -5165,7 +5147,7 @@
     "must_flags": {
       "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
-      "ma200_uptrend_1m": true,
+      "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
@@ -5187,7 +5169,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 75.4
+    "tech_score": 66.3
   },
   {
     "code": "6471",
@@ -5196,7 +5178,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -5213,7 +5195,7 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
     "passed": false
   },
@@ -5342,7 +5324,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 66.1
+    "tech_score": 53.9
   },
   {
     "code": "6103",
@@ -5379,7 +5361,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -5403,7 +5385,7 @@
   {
     "code": "5741",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -5455,7 +5437,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.8
+    "tech_score": 73.9
   },
   {
     "code": "3105",
@@ -5470,7 +5452,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 69.5
+    "tech_score": 72.5
   },
   {
     "code": "4613",
@@ -5478,7 +5460,7 @@
       "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
-      "ma_stack_50_150_200": false,
+      "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
@@ -5555,7 +5537,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 60.2
+    "tech_score": 69.7
   },
   {
     "code": "4536",
@@ -5584,7 +5566,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 38.6
+    "tech_score": 42.4
   },
   {
     "code": "4403",
@@ -5607,9 +5589,9 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -5627,7 +5609,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 44.2
+    "tech_score": 62.9
   },
   {
     "code": "7649",
@@ -5698,7 +5680,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.1
+    "tech_score": 62.3
   },
   {
     "code": "4631",
@@ -5713,7 +5695,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 36.2
+    "tech_score": 36.6
   },
   {
     "code": "8050",
@@ -5728,7 +5710,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.2
+    "tech_score": 72.6
   },
   {
     "code": "7966",
@@ -5743,7 +5725,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 70.1
+    "tech_score": 60.1
   },
   {
     "code": "7951",
@@ -5751,7 +5733,7 @@
       "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
-      "ma_stack_50_150_200": true,
+      "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
@@ -5786,7 +5768,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 45.0
+    "tech_score": 41.4
   },
   {
     "code": "3480",
@@ -5801,7 +5783,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.7
+    "tech_score": 82.8
   },
   {
     "code": "6376",
@@ -5816,7 +5798,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 85.5
+    "tech_score": 79.2
   },
   {
     "code": "8366",
@@ -5831,12 +5813,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 67.2
+    "tech_score": 78.4
   },
   {
     "code": "9508",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
@@ -5854,10 +5836,10 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
-      "rs_above_min": true
+      "rs_above_min": false
     },
     "passed": false
   },
@@ -5874,7 +5856,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.1
+    "tech_score": 62.5
   },
   {
     "code": "6072",
@@ -5893,12 +5875,12 @@
   {
     "code": "4527",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -5973,7 +5955,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 48.0
+    "tech_score": 42.1
   },
   {
     "code": "6951",
@@ -5985,10 +5967,9 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 45.3
+    "passed": false
   },
   {
     "code": "4732",
@@ -6059,7 +6040,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 76.7
+    "tech_score": 69.1
   },
   {
     "code": "3923",
@@ -6130,7 +6111,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 53.0
+    "tech_score": 49.5
   },
   {
     "code": "6465",
@@ -6229,7 +6210,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 41.9
+    "tech_score": 39.5
   },
   {
     "code": "8358",
@@ -6244,7 +6225,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 58.6
+    "tech_score": 59.3
   },
   {
     "code": "7956",
@@ -6315,12 +6296,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 59.3
+    "tech_score": 39.9
   },
   {
     "code": "5253",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -6340,7 +6321,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -6348,7 +6329,7 @@
   {
     "code": "6961",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -6372,7 +6353,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 61.0
+    "tech_score": 55.0
   },
   {
     "code": "9142",
@@ -6401,7 +6382,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 49.0
+    "tech_score": 51.7
   },
   {
     "code": "2334",
@@ -6444,7 +6425,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 81.2
+    "tech_score": 59.3
   },
   {
     "code": "2181",
@@ -6515,7 +6496,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 56.7
+    "tech_score": 54.9
   },
   {
     "code": "3774",
@@ -6600,7 +6581,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 48.0
+    "tech_score": 45.2
   },
   {
     "code": "6490",
@@ -6609,13 +6590,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 73.8
+    "passed": false
   },
   {
     "code": "1959",
@@ -6644,7 +6624,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 74.7
+    "tech_score": 70.9
   },
   {
     "code": "4205",
@@ -6656,9 +6636,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 42.3
   },
   {
     "code": "7180",
@@ -6673,7 +6654,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.4
+    "tech_score": 59.0
   },
   {
     "code": "4202",
@@ -6710,8 +6691,8 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
-      "above_low52w_margin": true,
+      "close_above_ma50": false,
+      "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -6724,13 +6705,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 45.2
+    "passed": false
   },
   {
     "code": "6962",
@@ -6739,22 +6719,21 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 35.2
+    "passed": false
   },
   {
     "code": "7746",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
-      "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "ma_stack_50_150_200": false,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": true
@@ -6788,7 +6767,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 54.6
+    "tech_score": 50.7
   },
   {
     "code": "2670",
@@ -6798,7 +6777,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -6831,7 +6810,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 53.0
+    "tech_score": 51.9
   },
   {
     "code": "6472",
@@ -7056,7 +7035,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 45.4
+    "tech_score": 48.4
   },
   {
     "code": "9166",
@@ -7141,7 +7120,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.8
+    "tech_score": 81.2
   },
   {
     "code": "6592",
@@ -7212,7 +7191,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.4
+    "tech_score": 88.7
   },
   {
     "code": "2809",
@@ -7238,10 +7217,9 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 44.3
+    "passed": false
   },
   {
     "code": "7988",
@@ -7474,13 +7452,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 68.9
+    "passed": false
   },
   {
     "code": "7867",
@@ -7593,7 +7570,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 50.8
+    "tech_score": 50.0
   },
   {
     "code": "4483",
@@ -7665,7 +7642,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.4
+    "tech_score": 64.9
   },
   {
     "code": "7004",
@@ -7674,7 +7651,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -7708,7 +7685,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.0
+    "tech_score": 76.8
   },
   {
     "code": "8060",
@@ -7751,7 +7728,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 63.0
+    "tech_score": 54.0
   },
   {
     "code": "2331",
@@ -7760,7 +7737,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -7802,7 +7779,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -7822,7 +7799,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 59.1
+    "tech_score": 59.4
   },
   {
     "code": "4099",
@@ -7831,13 +7808,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 70.7
+    "passed": false
   },
   {
     "code": "6232",
@@ -7908,7 +7884,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 75.6
+    "tech_score": 70.8
   },
   {
     "code": "7685",
@@ -7951,7 +7927,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.7
+    "tech_score": 81.2
   },
   {
     "code": "4023",
@@ -8036,7 +8012,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.3
+    "tech_score": 61.0
   },
   {
     "code": "8876",
@@ -8065,7 +8041,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 53.6
+    "tech_score": 55.4
   },
   {
     "code": "6005",
@@ -8090,11 +8066,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 63.5
+    "passed": false
   },
   {
     "code": "6524",
@@ -8113,7 +8088,7 @@
   {
     "code": "2593",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -8173,7 +8148,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -8187,13 +8162,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 41.4
+    "passed": false
   },
   {
     "code": "2962",
@@ -8250,7 +8224,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 76.0
+    "tech_score": 77.9
   },
   {
     "code": "6085",
@@ -8363,7 +8337,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.7
+    "tech_score": 65.8
   },
   {
     "code": "8020",
@@ -8389,9 +8363,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 39.4
   },
   {
     "code": "1407",
@@ -8424,7 +8399,7 @@
   {
     "code": "2127",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -8526,13 +8501,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 77.3
+    "passed": false
   },
   {
     "code": "3863",
@@ -8757,7 +8731,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.3
+    "tech_score": 71.8
   },
   {
     "code": "6597",
@@ -8766,7 +8740,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": true
@@ -8794,7 +8768,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -8833,7 +8807,7 @@
     "code": "4206",
     "must_flags": {
       "close_above_ma150_ma200": true,
-      "ma150_above_ma200": false,
+      "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
@@ -8870,7 +8844,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 39.0
+    "tech_score": 37.3
   },
   {
     "code": "4617",
@@ -8913,7 +8887,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 58.8
+    "tech_score": 57.0
   },
   {
     "code": "3387",
@@ -8970,7 +8944,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 58.5
+    "tech_score": 64.1
   },
   {
     "code": "6838",
@@ -9008,7 +8982,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -9035,13 +9009,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 27.0
+    "passed": false
   },
   {
     "code": "4681",
@@ -9060,7 +9033,7 @@
   {
     "code": "4776",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -9078,7 +9051,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -9162,7 +9135,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -9200,7 +9173,7 @@
   {
     "code": "6862",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -9218,7 +9191,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -9274,7 +9247,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -9284,7 +9257,7 @@
   {
     "code": "3549",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -9316,13 +9289,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 63.3
+    "passed": false
   },
   {
     "code": "8367",
@@ -9337,12 +9309,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 66.8
+    "tech_score": 66.5
   },
   {
     "code": "8174",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -9366,7 +9338,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 66.3
+    "tech_score": 67.9
   },
   {
     "code": "6849",
@@ -9403,13 +9375,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 59.2
+    "passed": false
   },
   {
     "code": "8522",
@@ -9424,7 +9395,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 61.7
+    "tech_score": 63.7
   },
   {
     "code": "9603",
@@ -9447,22 +9418,21 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 64.4
+    "passed": false
   },
   {
     "code": "9533",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -9476,13 +9446,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 74.9
+    "passed": false
   },
   {
     "code": "9956",
@@ -9505,13 +9474,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 75.6
+    "passed": false
   },
   {
     "code": "7995",
@@ -9534,7 +9502,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -9558,7 +9526,7 @@
   {
     "code": "9044",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
@@ -9582,7 +9550,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 70.0
+    "tech_score": 69.6
   },
   {
     "code": "2201",
@@ -9605,13 +9573,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 58.5
+    "passed": false
   },
   {
     "code": "8386",
@@ -9626,7 +9593,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 69.3
+    "tech_score": 72.1
   },
   {
     "code": "9045",
@@ -9693,11 +9660,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 76.4
+    "passed": false
   },
   {
     "code": "2685",
@@ -9754,7 +9720,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 59.7
+    "tech_score": 63.5
   },
   {
     "code": "6498",
@@ -9769,7 +9735,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 60.0
+    "tech_score": 50.2
   },
   {
     "code": "8425",
@@ -9795,9 +9761,10 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
-    "passed": false
+    "passed": true,
+    "tech_score": 47.6
   },
   {
     "code": "2001",
@@ -9896,7 +9863,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 61.1
+    "tech_score": 61.3
   },
   {
     "code": "4028",
@@ -9921,11 +9888,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 44.4
+    "passed": false
   },
   {
     "code": "6203",
@@ -9954,7 +9920,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 83.0
+    "tech_score": 84.9
   },
   {
     "code": "6866",
@@ -9977,7 +9943,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -10025,7 +9991,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.8
+    "tech_score": 77.0
   },
   {
     "code": "6958",
@@ -10096,7 +10062,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 54.6
+    "tech_score": 57.6
   },
   {
     "code": "7972",
@@ -10119,13 +10085,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 57.2
+    "passed": false
   },
   {
     "code": "8424",
@@ -10134,7 +10099,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -10163,7 +10128,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -10210,7 +10175,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 64.5
+    "tech_score": 66.3
   },
   {
     "code": "8616",
@@ -10267,7 +10232,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 95.4
+    "tech_score": 95.8
   },
   {
     "code": "8022",
@@ -10359,7 +10324,7 @@
       "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
-      "ma_stack_50_150_200": true,
+      "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
@@ -10394,7 +10359,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 59.3
+    "tech_score": 46.6
   },
   {
     "code": "6331",
@@ -10409,7 +10374,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 45.2
+    "tech_score": 47.0
   },
   {
     "code": "6140",
@@ -10446,13 +10411,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 57.8
+    "passed": false
   },
   {
     "code": "6492",
@@ -10467,7 +10431,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 80.2
+    "tech_score": 79.5
   },
   {
     "code": "4095",
@@ -10493,10 +10457,9 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 34.6
+    "passed": false
   },
   {
     "code": "4046",
@@ -10505,7 +10468,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -10515,7 +10478,7 @@
   {
     "code": "4816",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -10539,7 +10502,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 67.6
+    "tech_score": 66.3
   },
   {
     "code": "7456",
@@ -10592,7 +10555,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -10604,7 +10567,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -10632,13 +10595,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 48.1
+    "passed": false
   },
   {
     "code": "9936",
@@ -10649,7 +10611,7 @@
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": false,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -10734,7 +10696,7 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
     "passed": false
   },
@@ -10746,7 +10708,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": false,
-      "above_low52w_margin": true,
+      "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -10761,7 +10723,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -10773,7 +10735,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -10913,7 +10875,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -10947,7 +10909,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.6
+    "tech_score": 74.3
   },
   {
     "code": "6810",
@@ -10986,7 +10948,7 @@
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
       "above_low52w_margin": false,
-      "within_high52w_margin": false,
+      "within_high52w_margin": true,
       "rs_above_min": false
     },
     "passed": false
@@ -11004,7 +10966,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.5
+    "tech_score": 33.1
   },
   {
     "code": "3444",
@@ -11013,7 +10975,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": true
@@ -11027,7 +10989,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -11056,7 +11018,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -11085,7 +11047,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
     "passed": false
@@ -11107,7 +11069,7 @@
   {
     "code": "4935",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -11145,7 +11107,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 47.4
+    "tech_score": 60.5
   },
   {
     "code": "4481",
@@ -11272,7 +11234,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 69.1
+    "tech_score": 66.4
   },
   {
     "code": "2986",
@@ -11298,7 +11260,7 @@
       "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
     "passed": false
   },
@@ -11371,7 +11333,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 81.2
+    "tech_score": 80.4
   },
   {
     "code": "3765",
@@ -11436,7 +11398,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -11484,7 +11446,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 81.2
+    "tech_score": 80.7
   },
   {
     "code": "3050",
@@ -11507,7 +11469,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -11578,7 +11540,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -11611,7 +11573,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 65.5
+    "tech_score": 55.7
   },
   {
     "code": "9010",
@@ -11654,7 +11616,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 72.3
+    "tech_score": 74.0
   },
   {
     "code": "9722",
@@ -11693,11 +11655,10 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 59.5
+    "passed": false
   },
   {
     "code": "6794",
@@ -11706,7 +11667,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -11734,7 +11695,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -11793,7 +11754,7 @@
       "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
-      "rs_above_min": false
+      "rs_above_min": true
     },
     "passed": false
   },
@@ -11804,8 +11765,8 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
-      "above_low52w_margin": true,
+      "close_above_ma50": false,
+      "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -11824,7 +11785,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 66.2
+    "tech_score": 74.1
   },
   {
     "code": "6395",
@@ -11945,13 +11906,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": true
+      "rs_above_min": false
     },
-    "passed": true,
-    "tech_score": 31.2
+    "passed": false
   },
   {
     "code": "9336",
@@ -11984,7 +11944,7 @@
   {
     "code": "262A",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -12002,7 +11962,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12036,7 +11996,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 34.9
+    "tech_score": 33.9
   },
   {
     "code": "6840",
@@ -12073,7 +12033,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12107,7 +12067,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 49.2
+    "tech_score": 53.6
   },
   {
     "code": "4996",
@@ -12136,7 +12096,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 70.4
+    "tech_score": 67.4
   },
   {
     "code": "4082",
@@ -12249,7 +12209,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 40.5
+    "tech_score": 23.4
   },
   {
     "code": "9303",
@@ -12272,7 +12232,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -12292,12 +12252,12 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 45.7
+    "tech_score": 35.0
   },
   {
     "code": "8273",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
@@ -12321,7 +12281,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 73.1
+    "tech_score": 80.0
   },
   {
     "code": "5423",
@@ -12358,7 +12318,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12378,16 +12338,16 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 90.9
+    "tech_score": 89.2
   },
   {
     "code": "9605",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12463,7 +12423,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 39.2
+    "tech_score": 42.5
   },
   {
     "code": "3491",
@@ -12472,7 +12432,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -12548,7 +12508,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 74.6
+    "tech_score": 63.7
   },
   {
     "code": "3663",
@@ -12591,7 +12551,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 85.9
+    "tech_score": 77.3
   },
   {
     "code": "4431",
@@ -12634,7 +12594,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.3
+    "tech_score": 61.8
   },
   {
     "code": "9279",
@@ -12695,11 +12655,11 @@
   {
     "code": "6588",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12719,7 +12679,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 33.5
+    "tech_score": 34.1
   },
   {
     "code": "4547",
@@ -12744,7 +12704,7 @@
       "ma_stack_50_150_200": true,
       "close_above_ma50": false,
       "above_low52w_margin": true,
-      "within_high52w_margin": true,
+      "within_high52w_margin": false,
       "rs_above_min": false
     },
     "passed": false
@@ -12855,7 +12815,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": true,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
     },
@@ -12888,7 +12848,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 60.9
+    "tech_score": 62.9
   },
   {
     "code": "7606",
@@ -12897,7 +12857,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -12931,7 +12891,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 88.4
+    "tech_score": 86.7
   },
   {
     "code": "8600",
@@ -13038,7 +12998,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -13052,13 +13012,12 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": true
     },
-    "passed": true,
-    "tech_score": 40.6
+    "passed": false
   },
   {
     "code": "3762",
@@ -13185,7 +13144,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 48.3
+    "tech_score": 54.4
   },
   {
     "code": "3612",
@@ -13214,7 +13173,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 63.6
+    "tech_score": 63.1
   },
   {
     "code": "3465",
@@ -13240,7 +13199,7 @@
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
-      "rs_above_min": false
+      "rs_above_min": true
     },
     "passed": false
   },
@@ -13251,7 +13210,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -13349,7 +13308,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -13373,7 +13332,7 @@
   {
     "code": "4446",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": false,
@@ -13391,7 +13350,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -13447,7 +13406,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -13537,7 +13496,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 78.8
+    "tech_score": 81.8
   },
   {
     "code": "4521",
@@ -13570,7 +13529,7 @@
   {
     "code": "6929",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -13584,7 +13543,7 @@
   {
     "code": "2337",
     "must_flags": {
-      "close_above_ma150_ma200": false,
+      "close_above_ma150_ma200": true,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -13616,7 +13575,7 @@
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
       "rs_above_min": false
@@ -13627,9 +13586,9 @@
     "code": "5889",
     "must_flags": {
       "close_above_ma150_ma200": true,
-      "ma150_above_ma200": false,
+      "ma150_above_ma200": true,
       "ma200_uptrend_1m": false,
-      "ma_stack_50_150_200": false,
+      "ma_stack_50_150_200": true,
       "close_above_ma50": true,
       "above_low52w_margin": true,
       "within_high52w_margin": true,
@@ -13659,7 +13618,7 @@
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
       "close_above_ma50": true,
-      "above_low52w_margin": false,
+      "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": false
     },
@@ -13756,7 +13715,7 @@
       "ma150_above_ma200": false,
       "ma200_uptrend_1m": false,
       "ma_stack_50_150_200": false,
-      "close_above_ma50": false,
+      "close_above_ma50": true,
       "above_low52w_margin": false,
       "within_high52w_margin": false,
       "rs_above_min": false
@@ -13776,16 +13735,16 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 62.0
+    "tech_score": 65.2
   },
   {
     "code": "7409",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
-      "close_above_ma50": true,
+      "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": false,
       "rs_above_min": true
@@ -13847,7 +13806,7 @@
       "rs_above_min": true
     },
     "passed": true,
-    "tech_score": 57.3
+    "tech_score": 65.7
   },
   {
     "code": "4432",
@@ -14062,7 +14021,7 @@
   {
     "code": "1968",
     "must_flags": {
-      "close_above_ma150_ma200": true,
+      "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
       "ma_stack_50_150_200": true,
@@ -14093,7 +14052,7 @@
       "close_above_ma150_ma200": false,
       "ma150_above_ma200": true,
       "ma200_uptrend_1m": true,
-      "ma_stack_50_150_200": true,
+      "ma_stack_50_150_200": false,
       "close_above_ma50": false,
       "above_low52w_margin": true,
       "within_high52w_margin": true,

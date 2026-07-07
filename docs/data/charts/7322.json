@@ -2,13 +2,6 @@
   "code": "7322",
   "candles": [
     {
-      "time": "2025-06-12",
-      "open": 688.55,
-      "high": 697.76,
-      "low": 687.34,
-      "close": 692.43
-    },
-    {
       "time": "2025-06-13",
       "open": 695.34,
       "high": 695.34,
@@ -1820,13 +1813,16 @@
       "high": 1844.0,
       "low": 1790.0,
       "close": 1816.0
+    },
+    {
+      "time": "2026-07-07",
+      "open": 1825.0,
+      "high": 1873.0,
+      "low": 1753.0,
+      "close": 1780.0
     }
   ],
   "volume": [
-    {
-      "time": "2025-06-12",
-      "value": 206000.0
-    },
     {
       "time": "2025-06-13",
       "value": 419600.0
@@ -2862,13 +2858,13 @@
     {
       "time": "2026-07-06",
       "value": 226600.0
+    },
+    {
+      "time": "2026-07-07",
+      "value": 534800.0
     }
   ],
   "ma50": [
-    {
-      "time": "2025-06-12",
-      "value": 591.6646
-    },
     {
       "time": "2025-06-13",
       "value": 594.1085
@@ -3904,13 +3900,13 @@
     {
       "time": "2026-07-06",
       "value": 1676.56
+    },
+    {
+      "time": "2026-07-07",
+      "value": 1681.06
     }
   ],
   "ma150": [
-    {
-      "time": "2025-06-12",
-      "value": 546.1516
-    },
     {
       "time": "2025-06-13",
       "value": 548.0826
@@ -4946,13 +4942,13 @@
     {
       "time": "2026-07-06",
       "value": 1436.8889
+    },
+    {
+      "time": "2026-07-07",
+      "value": 1442.4209
     }
   ],
   "ma200": [
-    {
-      "time": "2025-06-12",
-      "value": 509.8229
-    },
     {
       "time": "2025-06-13",
       "value": 511.0606
@@ -5988,13 +5984,13 @@
     {
       "time": "2026-07-06",
       "value": 1299.3485
+    },
+    {
+      "time": "2026-07-07",
+      "value": 1303.9572
     }
   ],
   "rs_line": [
-    {
-      "time": "2025-06-12",
-      "value": 2.4004
-    },
     {
       "time": "2025-06-13",
       "value": 2.4166
@@ -7030,90 +7026,13 @@
     {
       "time": "2026-07-06",
       "value": 4.1709
+    },
+    {
+      "time": "2026-07-07",
+      "value": 4.1223
     }
   ],
   "pivot": null,
   "stop_loss": null,
-  "markers": [
-    {
-      "type": "swing_high",
-      "price": 1803.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1658.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1771.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1654.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1753.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1590.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1693.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1522.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1640.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1545.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1634.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1550.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1740.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1647.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1838.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1681.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1782.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1627.0
-    },
-    {
-      "type": "swing_high",
-      "price": 1716.0
-    },
-    {
-      "type": "swing_low",
-      "price": 1625.0
-    }
-  ]
+  "markers": []
 }
