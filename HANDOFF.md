@@ -4,8 +4,7 @@
 ※ かつてのEDINET API v2連携(四半期報告書ベース)は撤去済み(a5c76fc)。自動ファンダ取得のメインは
   J-Quants API(72ffe1a)。2026-07-08、その12週遅延窓を補うEDINET DB(決算短信ベース、別サービス)
   連携を追加(下記5章)。同日、フロントエンドを1ページSPA化(ダッシュボード/セクターマップ/投資法/
-  バッチ実行/個別株詳細の5ビューをDockナビ+hashルーティングで切替、下記7章)。同日、ダッシュボード表の
-  コード・銘柄名列を横スクロール時も左固定表示するsticky列対応も追加。
+  バッチ実行/個別株詳細の5ビューをDockナビ+hashルーティングで切替、下記7章)。
 このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
 
 ---
@@ -288,6 +287,8 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - 旧 `heatmap.html` は `index.html#sectormap` への meta-refresh リダイレクトスタブのみ残存(旧URL互換)。
   旧 `stock.html?code=X` は同様にJSで `index.html#stock/X` へリダイレクトするスタブ(?codeをhashへ引き継ぐ
   必要があるためmeta refreshではなくJS実装)。
+- `showView(hash)` の先頭で `window.scrollTo(0, 0)` を実行(2026-07-08追加)。SPA化により前ビューの
+  スクロール位置がそのまま残ってしまう(ページ遷移してもブラウザが自動で先頭に戻さない)問題への対応。
 
 ### ダッシュボード (view-dashboard)
 - `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
@@ -300,9 +301,6 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   - セクター強度の文字色: `.sector-strength-strong`(accent) / `-mid`(text-dim) / `-weak`(danger)。
   - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(view-stockへ遷移させない)。
   - 行クリックは `window.location.hash = "stock/" + code` で view-stock へ遷移(旧: `stock.html?code=...`)。
-  - 表のwrapperには `stock-table-scroll` クラスを付与し、コード列(1列目, 84px固定幅)・銘柄名列(2列目)を
-    `position: sticky` で左固定(style.css参照)。横スクロール中もどの行の銘柄か常時わかるようにする対応
-    (2026-07-08追加)。batch履歴テーブル等、他の `.table-scroll` には影響しない(クラスをスコープに使用)。
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
@@ -356,7 +354,7 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-08時点:
-app.js v=9 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=10 (index.htmlのみ),
+app.js v=11 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=11 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7, batch.js v=2, webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
 

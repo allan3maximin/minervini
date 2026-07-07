@@ -372,9 +372,7 @@ function renderTable(stocks, tier, options = {}) {
   let sortDesc = options.initialSortDesc ?? true;
 
   const wrapper = document.createElement("div");
-  // stock-table-scroll: コード・銘柄名列を横スクロール中も固定表示するためのフック
-  // (batch履歴テーブル等、他の.table-scrollには影響させない)。
-  wrapper.className = "table-scroll stock-table-scroll";
+  wrapper.className = "table-scroll";
   const table = document.createElement("table");
   wrapper.appendChild(table);
 
@@ -1024,6 +1022,7 @@ const VIEWS = ["dashboard", "sectormap", "invest", "batch", "stock"];
 function showView(hash) {
   const [rawName, param] = hash.split("/");
   const name = VIEWS.includes(rawName) ? rawName : "dashboard";
+  window.scrollTo(0, 0); // ページ切替時に前ビューのスクロール位置を引き継がないようにする
   for (const v of VIEWS) {
     const section = document.getElementById(`view-${v}`);
     if (section) section.hidden = v !== name;

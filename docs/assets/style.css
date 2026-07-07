@@ -172,7 +172,6 @@ th {
   user-select: none;
   position: sticky;
   top: 0;
-  z-index: 2;
   background: var(--panel-2);
   font-weight: 600;
   font-size: 12px;
@@ -185,36 +184,6 @@ tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
 /* has_chart===false 等、詳細ページへ遷移できない行(クリック無効) */
 tbody tr.row-static { cursor: default; }
 tbody tr.row-static:hover { background: transparent; }
-
-/* ダッシュボード表(コード・銘柄名を左固定): 横スクロール中も左端の2列は
-   その場に留まる。右スクロール中にどの行の銘柄か分からなくなる問題への対応。
-   コード列は4桁の数値のみで内容が短いと分かっているため、幅を固定して
-   銘柄名列のleftオフセットを確定させる(JSでの幅計測は不要)。 */
-.stock-table-scroll td:nth-child(1),
-.stock-table-scroll td:nth-child(2) {
-  position: sticky;
-  z-index: 1;
-  background: var(--panel);
-}
-.stock-table-scroll th:nth-child(1),
-.stock-table-scroll td:nth-child(1) {
-  left: 0;
-  width: 84px;
-  min-width: 84px;
-  max-width: 84px;
-}
-.stock-table-scroll th:nth-child(2),
-.stock-table-scroll td:nth-child(2) {
-  left: 84px;
-}
-.stock-table-scroll tbody tr.fund-stale td:nth-child(1),
-.stock-table-scroll tbody tr.fund-stale td:nth-child(2) {
-  background: #262420;
-}
-.stock-table-scroll tbody tr.row-static td:nth-child(1),
-.stock-table-scroll tbody tr.row-static td:nth-child(2) {
-  background: var(--panel);
-}
 
 /* セクター(強度)列: 強度の文字だけ色付け */
 .sector-strength-strong { color: var(--accent); font-weight: 700; }

@@ -2,6 +2,29 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (6): ダッシュボード表のスティッキー列をrevert(ユーザー指摘「表の固定は無しで戻して」)
+
+- 前エントリ(5)で入れたコード・銘柄名列のsticky固定を撤去。個別株ページのSPA統合(view-stock)自体は維持。
+- `docs/assets/app.js`: `renderTable`のwrapper classを`"table-scroll stock-table-scroll"` → `"table-scroll"`に戻した。
+- `docs/assets/style.css`: `.stock-table-scroll`関連のCSSブロック(sticky/left/width固定/fund-stale・row-static背景)を全削除。
+  `th`ルールに追加していた`z-index: 2`も、sticky列専用の重ね順対策だったため削除(元の値に復元)。
+- `HANDOFF.md`: 冒頭サマリ・§2・§7のsticky列に関する記述を削除。
+- キャッシュバスター: `app.js` v=9→v=10, `style.css` v=10→v=11(いずれもindex.htmlのみ)。
+- 未コミットで残っていた`docs/assets/batch.js`(バッチ履歴テーブルのtable-scrollラップ)と
+  `.github/workflows/daily.yml`(cron再試行対応)はこのrevertとは無関係の別作業。ユーザーがローカルで
+  rebase前に別コミットとして処理する予定。
+
+## 2026-07-08 (7): ビュー切替時にスクロール位置をトップにリセット(ユーザー指摘「前のページのスクロール状態を継承しちゃってる」)
+
+- SPA化(hidden切り替えのみで実DOMナビゲーションが発生しない)により、ページ切替してもブラウザが
+  スクロール位置を自動で先頭に戻してくれなくなっていた問題を修正。
+- `docs/assets/app.js`の`showView(hash)`冒頭に`window.scrollTo(0, 0)`を追加。dockボタンクリック・
+  hashchange・初期表示いずれの経路でも`showView`を通るため、この1箇所の追加で全パターンをカバー。
+- キャッシュバスター: `app.js` v=10→v=11(index.htmlのみ)。
+
+### 次にやること
+- ユーザーにコミット/push依頼(サンドボックスからはpush不可)。
+
 ---
 
 ## 2026-07-08 (6): daily.ymlのcronドロップ調査 → hourly window + 当日実行済みスキップに変更 (Sonnet, ユーザー指摘)
