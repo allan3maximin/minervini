@@ -232,12 +232,18 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
         return store
 
     state = load_state()
-    today = datetime.now().date()
+    # Freeプランはデータが12週間遅延で提供される。遅延分より新しい日付を
+    # 問い合わせても空が返るだけなので、取得対象は end_day までに留めて
+    # state もそこまでしか進めない(でないと遅延データを永久に取りこぼす)。
+    delay = cfg.get("data_delay_days", 0)
+    end_day = datetime.now().date() - timedelta(days=delay)
     lookback = cfg.get("lookback_days", 7)
-    start = today - timedelta(days=lookback)
+    start = end_day - timedelta(days=lookback)
     if state.get("last_list_date"):
         resume = date.fromisoformat(state["last_list_date"]) + timedelta(days=1)
-        start = max(start, min(resume, today))
+        start = max(start, min(resume, end_day))
+    if start > end_day:
+        return store  # 進める日が無い(前回実行から1日未満など)
 
     sleep_sec = cfg.get("sleep_sec", 1.1)
     max_keep = cfg.get("max_quarters_keep", 12)
@@ -246,7 +252,7 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
     points_by_code: dict[str, list[dict]] = {}
     ok = fail = n_recs = 0
     day = start
-    while day <= today:
+    while day <= end_day:
         try:
             recs = fetch_summaries(api_key, config, day=day)
             ok += 1
@@ -276,7 +282,7 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
         # その期間を永久にスキップしてしまうため。
         print(f"J-Quants: all {fail} requests failed; state not advanced (check {API_KEY_ENV}).")
         return store
-    state["last_list_date"] = today.isoformat()
+    state["last_list_date"] = end_day.isoformat()
     save_state(state)
     print(f"J-Quants: {n_recs} records processed, {len(points_by_code)} codes updated.")
     return store
@@ -343,7 +349,8 @@ def backfill_all(codes: list[str], config: dict | None = None) -> dict:
     save_auto_store(store)
     if n_ok > 0:
         state = load_state()
-        state["last_list_date"] = datetime.now().date().isoformat()
+        delay = cfg.get("data_delay_days", 0)
+        state["last_list_date"] = (datetime.now().date() - timedelta(days=delay)).isoformat()
         save_state(state)
     print(f"J-Quants backfill done: {n_ok} codes stored, {n_fail} failed.")
     return store

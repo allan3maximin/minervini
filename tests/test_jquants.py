@@ -230,6 +230,29 @@ def test_update_all_failures_does_not_advance_state(isolated_paths, monkeypatch)
     assert not state_path.exists()  # 全fail -> stateを進めない
 
 
+def test_update_respects_data_delay(isolated_paths, monkeypatch):
+    """Freeプラン: 遅延分より新しい日付は問い合わせず、stateもそこまで。"""
+    auto_path, state_path = isolated_paths
+    monkeypatch.setenv(jq.API_KEY_ENV, "KEY")
+    from datetime import datetime, timedelta
+
+    queried = []
+
+    def fake_fetch(api_key, config, *, code=None, day=None):
+        queried.append(day)
+        return []
+
+    monkeypatch.setattr(jq, "fetch_summaries", fake_fetch)
+    cfg = {"jquants": {"enabled": True, "lookback_days": 2, "sleep_sec": 0,
+                       "max_quarters_keep": 12, "data_delay_days": 85}}
+    jq.update_fundamentals_auto(["7203"], cfg)
+
+    end_day = datetime.now().date() - timedelta(days=85)
+    assert max(queried) == end_day
+    state = json.loads(state_path.read_text())
+    assert state["last_list_date"] == end_day.isoformat()
+
+
 def test_update_success_stores_quarters_and_state(isolated_paths, monkeypatch):
     auto_path, state_path = isolated_paths
     monkeypatch.setenv(jq.API_KEY_ENV, "KEY")
