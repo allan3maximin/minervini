@@ -135,6 +135,65 @@ def test_pool_tier_stock_has_tech_score_but_no_full_score():
     assert result["tech_score"] is not None
 
 
+# ---------------------------------------------------------------------------
+# merge_fundamentals (3ソース: manual > auto(jquants) > tanshin(edinetdb))
+# ---------------------------------------------------------------------------
+
+def test_merge_fundamentals_tanshin_only_quarter_is_included():
+    tanshin_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 5.0, "revenue": 500.0}],
+            "checked_date": "2026-07-05",
+        }
+    }
+    merged = merge_fundamentals({}, {}, tanshin_by_code=tanshin_by_code)
+    assert merged["1111"]["quarters"] == [{"fiscal_quarter": "2026Q1", "eps": 5.0, "revenue": 500.0}]
+    assert merged["1111"]["checked_date"] == "2026-07-05"
+
+
+def test_merge_fundamentals_auto_beats_tanshin_for_same_label():
+    auto_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 10.0, "revenue": 1000.0}],
+            "checked_date": "2026-07-06",
+        }
+    }
+    tanshin_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 9.0, "revenue": 900.0}],
+            "checked_date": "2026-07-05",
+        }
+    }
+    merged = merge_fundamentals(auto_by_code, {}, tanshin_by_code=tanshin_by_code)
+    assert merged["1111"]["quarters"] == [{"fiscal_quarter": "2026Q1", "eps": 10.0, "revenue": 1000.0}]
+
+
+def test_merge_fundamentals_manual_beats_auto_and_tanshin():
+    auto_by_code = {
+        "1111": {"quarters": [{"fiscal_quarter": "2026Q1", "eps": 10.0, "revenue": 1000.0}],
+                 "checked_date": "2026-07-06"}
+    }
+    tanshin_by_code = {
+        "1111": {"quarters": [{"fiscal_quarter": "2026Q1", "eps": 9.0, "revenue": 900.0}],
+                 "checked_date": "2026-07-05"}
+    }
+    manual_by_code = {
+        "1111": {"quarters": [{"fiscal_quarter": "2026Q1", "eps": 11.0, "revenue": 1010.0,
+                               "monthly_yoy": 3.0, "checked_date": "2026-07-07"}],
+                 "monthly_yoy": 3.0, "checked_date": "2026-07-07"}
+    }
+    merged = merge_fundamentals(auto_by_code, manual_by_code, tanshin_by_code=tanshin_by_code)
+    assert merged["1111"]["quarters"][0]["eps"] == 11.0
+    assert merged["1111"]["checked_date"] == "2026-07-07"
+
+
+def test_merge_fundamentals_checked_date_uses_max_of_auto_and_tanshin_when_no_manual():
+    auto_by_code = {"1111": {"quarters": [], "checked_date": "2026-07-01"}}
+    tanshin_by_code = {"1111": {"quarters": [], "checked_date": "2026-07-05"}}
+    merged = merge_fundamentals(auto_by_code, {}, tanshin_by_code=tanshin_by_code)
+    assert merged["1111"]["checked_date"] == "2026-07-05"  # tanshinの方が新しい
+
+
 def test_write_public_json_includes_only_codes_with_quarters(tmp_path):
     # code "1111" has real J-Quants-sourced quarters and should be exported;
     # code "2222" has an entry but no quarters (e.g. a failed/empty auto

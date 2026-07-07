@@ -29,6 +29,7 @@ jobs:
       - name: Run daily pipeline
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}
         run: python -m src.pipeline
 
       - name: Commit results

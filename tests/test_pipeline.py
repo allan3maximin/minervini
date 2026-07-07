@@ -99,6 +99,8 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
     # J-Quants自動取得はネットワークに出さない。
     monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})
+    # EDINET DB自動取得もネットワークに出さない。
+    monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", lambda codes, config, base_store=None: {})
     # 実リポジトリの docs/data/fundamentals_public.json を汚さない。
     monkeypatch.setattr(pipeline, "write_public_json", lambda fundamentals_by_code, path=None: None)
 

@@ -97,6 +97,16 @@ jquants:
   sleep_sec: 1.1          # 60req/分 → 1.1sで安全マージン
   max_quarters_keep: 12   # 銘柄あたり保持四半期数
 
+# EDINET DB API (決算短信でJ-Quants 12週遅延窓の直近四半期を補完。案A構成)
+# 実地確認(DESIGN_EDINETDB.md 1節)未実施のため enabled: false で導入。
+edinetdb:
+  enabled: false            # APIキー登録+実地確認(DESIGN_EDINETDB.md 1節)完了後に true へ
+  api_url: "https://edinetdb.jp/v1"
+  requests_per_day: 90      # Free 100/日。手動検証・失敗リトライ用に10残す
+  earnings_limit: 8         # /earnings の limit (default 8, max 30)
+  codemap_refresh_days: 30  # 証券コード→EDINETコード表の再取得間隔
+  max_quarters_keep: 12     # jquants と同じ
+
 scoring:
   phase1_weight: 0.5
   vcp_weight: 0.5

@@ -16,6 +16,7 @@ import jpholiday
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
 from src.data import prices as prices_mod
+from src.data import edinetdb as edinetdb_mod
 from src.data import jquants as jquants_mod
 from src.data.fundamentals import (
     build_fundamentals_by_code,
@@ -118,7 +119,16 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         print(f"J-Quants fundamentals update failed (ignored): {e}")
         auto_by_code = {}
 
-    fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))
+    # EDINET DB (決算短信) で J-Quants 12週遅延窓の直近四半期を補完。
+    # APIキー未設定/enabled:false なら既存ストアを読むだけ。失敗しても本体は止めない。
+    try:
+        tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config, base_store=auto_by_code)
+    except Exception as e:
+        print(f"EDINET DB fundamentals update failed (ignored): {e}")
+        tanshin_by_code = {}
+
+    fundamentals_by_code = merge_fundamentals(
+        auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)
     write_public_json(fundamentals_by_code)
 
     history = entry_mod.load_status_history()

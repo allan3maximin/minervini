@@ -1,7 +1,9 @@
 # ミネルヴィニ式スクリーナー 実装ハンドオフドキュメント
 
-最終更新: 2026-07-07 / 対象コミット: abb001c (fix: J-Quants Freeプランの12週間データ遅延対応)
-※ EDINET連携は撤去済み(a5c76fc)。自動ファンダ取得は J-Quants API に一本化(72ffe1a)。
+最終更新: 2026-07-08 / 対象コミット: (未コミット — EDINET DB決算短信補完の追加)
+※ かつてのEDINET API v2連携(四半期報告書ベース)は撤去済み(a5c76fc)。自動ファンダ取得のメインは
+  J-Quants API(72ffe1a)。2026-07-08、その12週遅延窓を補うEDINET DB(決算短信ベース、別サービス)
+  連携を追加(下記5章)。
 このドキュメントは、以降の軽微な改修を別モデル(Sonnet等)が引き継げるように全体像と実装詳細をまとめたもの。
 
 ---
@@ -32,8 +34,9 @@ src/
     prices.py               株価取得 (yfinanceチャンク→stooqフォールバック, parquetキャッシュ data/prices/)
     indices.py              市場指標7種 (日経/TOPIX/グロース250/JGB10y/USDJPY/NASDAQ/SOX) → docs/data/indices.json
                             (CLI: `python -m src.data.indices` で単独更新可。intraday-indices.yml が使用)
-    fundamentals.py         手動CSVロード + J-Quants自動データとのマージ + tier判定 + スコア
+    fundamentals.py         手動CSV + J-Quants自動 + EDINET DB自動の3ソースマージ + tier判定 + スコア
     jquants.py              J-Quants API v2 自動ファンダ取得 (→ data/fundamentals_auto.json)
+    edinetdb.py              EDINET DB 決算短信取得 (J-Quants 12週遅延窓の直近四半期のみ補完, → data/edinetdb_auto.json)
   screener/
     trend_template.py       トレンドテンプレート8条件(MUST) + テクニカル/フルスコア + EPS加速slope
     priority.py             ハードフィルタ + P1〜P4評価 (※UIからP1-P4は廃止済み。バックエンドは残存)
@@ -58,9 +61,10 @@ docs/                       GitHub Pages ルート
   data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json)
 data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
                             status_history.json, sector_history.json, sector_map.json,
-                            trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json)
+                            trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
+                            ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
-tests/                      pytest 126件 (test_jquants.py 含む)
+tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -163,7 +167,76 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 - EPSのYTD差分は株式数変動時に厳密でない(許容)。
 - 年度途中からの取得だと最初の点がYTDそのままになる → **バックフィル(全期間)実行が前提**。
 
-## 5. config.yaml の要点
+## 5. EDINET DB 決算短信補完 (src/data/edinetdb.py)
+
+### 経緯
+- J-Quants Freeプランは12週間(84日)遅延するため、直近四半期の開示が〔本命〕へ反映されるまで
+  数ヶ月のタイムラグがある。IRBANKスクレイピングでの補完も検討したが規約違反のためクローズ済み。
+- EDINET DB (`https://edinetdb.jp`) の `get_earnings` は決算短信ベースで開示後ほぼ即日〜翌日に
+  取得できるため、**「案A: 補完バックアップ」**として採用 (`DESIGN_EDINETDB.md` 参照)。
+  J-Quantsを置き換えるのではなく、その遅延窓の直近四半期だけを補って昇格を早める役割。
+
+### 仕組み
+- **API**: `GET {api_url}/companies`(証券コード↔EDINETコード対応表)、
+  `GET {api_url}/events?event_type=earnings_summary`(当日決算短信の開示イベント一覧、backlog検出用)、
+  `GET {api_url}/companies/{edinet_code}/earnings`(銘柄別の決算短信サマリー、YTD値)。
+  認証はヘッダ `X-API-Key: <EDINETDB_API_KEY>`。
+- **APIキー**: 環境変数 `EDINETDB_API_KEY`。**キーが無い場合はネットワークに一切触れず既存ストアを返すだけ**
+  (J-Quantsと同じフェイルセーフ設計)。`config.yaml: edinetdb.enabled` が `false` の間はキーの有無に関わらず
+  既存ストアを返すだけで完全にスキップされる(APIキー登録+実地確認完了までの安全弁)。
+- **Free枠バックログ設計**: アカウント単位100req/日(`requests_per_day`で90に制限し10残す)。
+  全銘柄を毎日ポーリングすると枠が枯渇するため、
+  1. `data/edinetdb_state.json` に証券コード→EDINETコードの「codemap」を保持(`codemap_refresh_days`=30日ごとに再取得)。
+  2. 日次実行のたびに `/events` で当日の決算短信開示イベントを取得し、対象コードを `backlog` キューに追加。
+  3. `backlog` を予算(`requests_per_day` − 消費済み)の範囲で先頭から消費して `/earnings` を取得。
+     予算切れで残ったコードは翌日以降に持ち越す(`test_update_budget_exceeded_leaves_backlog`)。
+  4. codemapに無いコード(新規上場等)はbacklogに留め置き、次回codemap更新後に再試行する
+     (`test_update_code_missing_from_codemap_stays_in_backlog`)。
+  5. `/events` が全滅した日は `last_events_date` を進めない(取りこぼし防止、
+     `test_update_events_all_fail_does_not_advance_last_events_date`)。
+- **YTD差分の四半期化**: J-Quants(`fundamentals_auto.json`)を `base_store` として渡し、直前四半期までの
+  YTD値との差分から単四半期値を導出する(`derive_with_base`)。Q1はYTDそのまま。前四半期が
+  base側に無い/欠損している場合はそのレコードごと破棄する(半端な値を出さない)。
+- **値の変換**: `record_to_point` — 四半期ラベル(`Q1`〜`Q4` → `n`)と開示日から
+  `{fy_start}Q{n}` を組み立て、revenue は百万円→円に `×1,000,000` 変換(EPSはそのまま)。
+  fiscal_year_start が API レスポンスに無い場合は決算月+開示日+四半期番号から数学的に推定
+  (`_estimate_fy_start`。両方失敗したらそのレコードは破棄)。
+- **永続化**:
+  - `data/edinetdb_auto.json`: `{code: {"quarters":[...], "checked_date":"YYYY-MM-DD", "source":"edinetdb"}}`
+    (`fundamentals.load_auto_store`と同形式。銘柄あたり `max_quarters_keep`=12 四半期に切り詰め)。
+  - `data/edinetdb_state.json`: `{"codemap":{...}, "codemap_date":..., "last_events_date":..., "backlog":[...]}`
+
+### マージ (src/data/fundamentals.py :: merge_fundamentals) — 3ソース拡張
+- `merge_fundamentals(auto_by_code, manual_by_code, tanshin_by_code=None)` — 優先度は
+  **manual > auto(jquants) > tanshin(edinetdb)**。同一 (code, fiscal_quarter) は投入順
+  (tanshin → auto → manual)の後勝ちで実現。J-Quantsの遅延が追いつけば同ラベルを自動的に
+  上書きするため、tanshin値は暫定速報の扱いになる。`tanshin_by_code` はキーワード引数・既定 `None` で
+  後方互換を維持(既存呼び出しはそのまま動く)。
+  monthly_yoy は従来どおり手動のみ。checked_date は manual があれば manual、無ければ auto と
+  tanshin の新しい方(ISO日付文字列の辞書順比較)。
+- pipeline.py での呼び出し: J-Quantsブロックの直後に
+  `tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config, base_store=auto_by_code)`
+  (try/exceptで失敗を無視)を追加し、
+  `merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)` に変更。
+- 効果: EDINET DBで直近四半期が入った銘柄も quarters が非空になり `fund_coverage_tier` が
+  "confirmed" を返す → 〔本命〕昇格が最大12週早まる。
+
+### 実地確認について(重要・未完了)
+- サンドボックス環境からは `edinetdb.jp` へのネットワークアクセスがブロックされており
+  (`irbank.net`と同様、許可リスト外)、`DESIGN_EDINETDB.md` 1節が求めるAPI実地確認(curl検証)を
+  この実装セッションでは実行できなかった。ユーザーの判断で**検証をスキップし、防御的な実装で進める**
+  方針を採用(fy_start推定ロジック・revenue単位変換・フィールド名の一部は未検証)。
+- そのため `config.yaml: edinetdb.enabled` は **`false`** のまま導入している。ユーザーが
+  `EDINETDB_API_KEY` を取得し、ローカル環境で `/companies` `/events` `/earnings` の実レスポンスを
+  curlで確認して `DESIGN_EDINETDB.md` 1節の項目(特にrevenue単位・fiscal_year_startフィールド名)と
+  差異が無いことを確認してから `enabled: true` に切り替えること。差異があれば `record_to_point` /
+  `_estimate_fy_start` の修正が必要になる可能性がある。
+
+### 制約(ユーザー了解済み)
+- EDINET DBの決算短信データは2026-01-01以降のみ存在(バックフィル不可)。
+- Free枠100req/日のため、当日中に全対象コードを消化できないことがある(backlogで翌日以降に持ち越し)。
+
+## 6. config.yaml の要点
 
 - `universe`: size 1000, jpx_list_url (東証上場一覧xls), shares_sleep_sec 0.5
 - `data`: history_days 520, chunk_size 50, sleep_range [2,4], max_fail_ratio 0.10, topix_proxy_ticker "1306.T"
@@ -174,9 +247,10 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 - `entry`: breakout_vol_mult 1.4, stop_loss_pct 0.05, tick_table (JPX呼値簡易版)
 - `fundamentals`: min_quarters_for_full 7, stale_days 120
 - `jquants`: enabled true, api_url, data_delay_days 85(Free 12週遅延+マージン), lookback_days 7, sleep_sec 1.1, max_quarters_keep 12
+- `edinetdb`: enabled **false**(実地確認完了まで), api_url, requests_per_day 90, earnings_limit 8, codemap_refresh_days 30, max_quarters_keep 12
 - `scoring`: phase1_weight 0.5, vcp_weight 0.5
 
-## 6. フロントエンド詳細 (docs/assets/app.js)
+## 7. フロントエンド詳細 (docs/assets/app.js)
 
 同一ファイルで index.html と stock.html の両方を担当 (bodyの要素有無で分岐、末尾で initDashboard / initStockPage を起動)。
 
@@ -213,7 +287,7 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 **docs のJS/CSSを変更したら index.html / stock.html / heatmap.html の `?v=N` を必ず全箇所インクリメントする。現在 app.js/style.css/heatmap.js は v=7。
 (config.js/github-api.js/webauthn-vault.js/fundamentals-modal.js は今回未変更のため v=5 のまま。)**
 
-## 7. GitHub Actions
+## 8. GitHub Actions
 
 | workflow | トリガ | 内容 | 所要時間 |
 |---|---|---|---|
@@ -222,11 +296,12 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 | jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
 | intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → data/indices/ docs/data/indices.json をコミット→ pull --rebase → push | 数分 |
 
-- daily.yml / jquants-backfill.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` を env に設定済み。
+- daily.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` と `EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}` を env に設定済み(EDINETDB_API_KEY のSecret登録はユーザー依頼、`edinetdb.enabled: false` の間は未登録でも動作に影響なし)。
+  jquants-backfill.yml は `JQUANTS_API_KEY` のみ(EDINET DBにバックフィルCLIは無い)。
 - コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
 - concurrency グループでワークフロー多重起動を防止。
 
-## 8. 出力JSONスキーマ(要点)
+## 9. 出力JSONスキーマ(要点)
 
 ### docs/data/report.json
 ```
@@ -246,19 +321,21 @@ tests/                      pytest 126件 (test_jquants.py 含む)
 ### data/status_history.json
 エントリー状態の履歴 (ピボットのロック、EXTENDEDクールダウン、ブレイク成功率算出に使用)
 
-## 9. テスト・検証
+## 10. テスト・検証
 
 ```bash
-python -m pytest tests/ -q        # 126件 (2026-07-07時点全パス)
+python -m pytest tests/ -q        # 152件 (2026-07-08時点全パス)
 node --check docs/assets/app.js   # JS構文チェック
 ```
 - tests/test_pipeline.py の `wired` fixture は全外部I/Oをmonkeypatchでモック。
   **pipelineに新モジュールを足したら必ずここにもモックを追加**
-  (例: `monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})`)。
+  (例: `monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})`、
+  `monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", lambda codes, config, base_store=None: {})`)。
 - tests/test_jquants.py: record_to_point / derive_quarters / _refetch_incomplete / ストア / merge_fundamentals をカバー。
+- tests/test_edinetdb.py: record_to_point / derive_with_base / update_fundamentals_auto(backlog/budget/events失敗系) / state・storeの永続化をカバー。
 - フロントは自動テスト無し。手動確認 or node で DOM stub を書いて smoke。
 
-## 10. 開発環境の注意 (Cowork/Claudeサンドボックス固有)
+## 11. 開発環境の注意 (Cowork/Claudeサンドボックス固有)
 
 - **マウントフォルダ上で git はファイルを書き換えられない** (unlink が Operation not permitted)。
   - `git commit` 等は `.git/index.lock` / `.git/HEAD.lock` / `.git/objects/maintenance.lock` が残留しやすい。
@@ -276,7 +353,7 @@ node --check docs/assets/app.js   # JS構文チェック
   〔fundamentals_public.json新設〕)。**ユーザーが `git pull --rebase` → `git push` すれば同期完了**。
   `git log --oneline -5` で最新ハッシュを確認。
 
-## 11. 未対応・次のタスク候補
+## 12. 未対応・次のタスク候補
 
 0. **市場概況カードの「リアルタイム」表示について**: 本サイトは静的GitHub Pagesでバックエンドが無いため、
    ティック単位の真のリアルタイムは不可能。代わりに intraday-indices.yml が市場時間中15分間隔で
@@ -296,8 +373,13 @@ node --check docs/assets/app.js   # JS構文チェック
 5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
    ※やる場合 breadth の p2-p4 カウント履歴と priority.py テストへの影響に注意。
 6. RSパーセンタイルの母集団はユニバース内銘柄(全市場ではない)— 既知の仕様。
+7. **EDINET DB実地確認(最優先)**: `EDINETDB_API_KEY` をユーザーが発行 → `/companies` `/events`
+   `/earnings` の実レスポンスをcurlで確認し、`DESIGN_EDINETDB.md` 1節・上記5章の想定
+   (revenue単位=百万円、fiscal_year_startフィールド名等)との差異を洗い出す → 差異があれば
+   `src/data/edinetdb.py :: record_to_point` / `_estimate_fy_start` を修正 → 問題なければ
+   `config.yaml: edinetdb.enabled` を `true` にし、daily.yml の `EDINETDB_API_KEY` Secretを登録。
 
-## 12. 変更時のチェックリスト (Sonnet向け)
+## 13. 変更時のチェックリスト (Sonnet向け)
 
 - [ ] docs/ の JS/CSS を触ったら 3つの html の `?v=N` を全部上げたか
 - [ ] pipeline に外部I/Oを足したら test_pipeline.py の wired fixture にモックを足したか

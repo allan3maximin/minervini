@@ -105,15 +105,29 @@ def build_fundamentals_by_code(df: pd.DataFrame) -> dict[str, dict]:
     return result
 
 
-def merge_fundamentals(auto_by_code: dict, manual_by_code: dict) -> dict:
-    """自動取得ストアと手動CSVを統合する。同一(code, fiscal_quarter)は手動が勝ち、
-    monthly_yoy / checked_date も手動があれば手動を採用する。"""
+def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
+                       tanshin_by_code: dict | None = None) -> dict:
+    """自動取得ストア(J-Quants) + EDINET DB決算短信補完 + 手動CSVを統合する。
+
+    優先度: manual > auto(jquants) > tanshin(edinetdb) -- 同一(code,
+    fiscal_quarter)は投入順(tanshin -> auto -> manual)で後勝ちさせるだけ。
+    J-Quantsの遅延が追いつけば同ラベルを自動的に上書きするので、tanshin値は
+    暫定速報の扱いになる(DESIGN_EDINETDB.md 0節)。
+    monthly_yoy は従来どおり手動のみ。checked_date は manual があれば manual、
+    無ければ auto と tanshin の新しい方 (ISO日付文字列は辞書順比較で正しく比較可)。
+    """
+    tanshin_by_code = tanshin_by_code or {}
     result: dict[str, dict] = {}
-    for code in set(auto_by_code) | set(manual_by_code):
+    for code in set(auto_by_code) | set(manual_by_code) | set(tanshin_by_code):
+        tanshin = tanshin_by_code.get(code) or {}
         auto = auto_by_code.get(code) or {}
         manual = manual_by_code.get(code) or {}
 
         by_label: dict[str, dict] = {}
+        for q in tanshin.get("quarters", []):
+            fq = q.get("fiscal_quarter")
+            if fq:
+                by_label[fq] = {"fiscal_quarter": fq, "eps": q.get("eps"), "revenue": q.get("revenue")}
         for q in auto.get("quarters", []):
             fq = q.get("fiscal_quarter")
             if fq:
@@ -124,10 +138,13 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict) -> dict:
                 by_label[fq] = dict(q)  # manual wins
 
         quarters = sorted(by_label.values(), key=lambda q: quarter_sort_key(q["fiscal_quarter"]))
+        checked_date = manual.get("checked_date") or max(
+            (d for d in (auto.get("checked_date"), tanshin.get("checked_date")) if d), default=None
+        )
         result[code] = {
             "quarters": quarters,
             "monthly_yoy": manual.get("monthly_yoy") if manual else None,
-            "checked_date": manual.get("checked_date") or auto.get("checked_date"),
+            "checked_date": checked_date,
         }
     return result
 
