@@ -221,15 +221,15 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 - 効果: EDINET DBで直近四半期が入った銘柄も quarters が非空になり `fund_coverage_tier` が
   "confirmed" を返す → 〔本命〕昇格が最大12週早まる。
 
-### 実地確認について(重要・未完了)
+### 実地確認について
 - サンドボックス環境からは `edinetdb.jp` へのネットワークアクセスがブロックされており
-  (`irbank.net`と同様、許可リスト外)、`DESIGN_EDINETDB.md` 1節が求めるAPI実地確認(curl検証)を
-  この実装セッションでは実行できなかった。ユーザーの判断で**検証をスキップし、防御的な実装で進める**
-  方針を採用(fy_start推定ロジック・revenue単位変換・フィールド名の一部は未検証)。
-- そのため `config.yaml: edinetdb.enabled` は **`false`** のまま導入している。ユーザーが
-  `EDINETDB_API_KEY` を取得し、ローカル環境で `/companies` `/events` `/earnings` の実レスポンスを
-  curlで確認して `DESIGN_EDINETDB.md` 1節の項目(特にrevenue単位・fiscal_year_startフィールド名)と
-  差異が無いことを確認してから `enabled: true` に切り替えること。差異があれば `record_to_point` /
+  (`irbank.net`と同様、許可リスト外)、`DESIGN_EDINETDB.md` 1節が求めるAPI実地確認(curl検証)は
+  実装セッション(2026-07-08)では実行できなかった。ユーザーの判断で**検証をスキップし、防御的な
+  実装で進める**方針を採用(fy_start推定ロジック・revenue単位変換・フィールド名の一部は未検証)。
+- **2026-07-08、ユーザーの指示で `config.yaml: edinetdb.enabled` を `true` に切替**。ローカルでの
+  実地確認結果はこのドキュメントには反映されていない(Claude側では未確認)。daily.yml 実行後に
+  `data/edinetdb_auto.json` の値(特にrevenue単位・fiscal_quarterラベル)が決算短信の実際の数値と
+  一致しているか、初回実行分は必ず目視確認すること。差異があれば `record_to_point` /
   `_estimate_fy_start` の修正が必要になる可能性がある。
 
 ### 制約(ユーザー了解済み)
@@ -247,7 +247,7 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 - `entry`: breakout_vol_mult 1.4, stop_loss_pct 0.05, tick_table (JPX呼値簡易版)
 - `fundamentals`: min_quarters_for_full 7, stale_days 120
 - `jquants`: enabled true, api_url, data_delay_days 85(Free 12週遅延+マージン), lookback_days 7, sleep_sec 1.1, max_quarters_keep 12
-- `edinetdb`: enabled **false**(実地確認完了まで), api_url, requests_per_day 90, earnings_limit 8, codemap_refresh_days 30, max_quarters_keep 12
+- `edinetdb`: enabled **true**(2026-07-08〜), api_url, requests_per_day 90, earnings_limit 8, codemap_refresh_days 30, max_quarters_keep 12
 - `scoring`: phase1_weight 0.5, vcp_weight 0.5
 
 ## 7. フロントエンド詳細 (docs/assets/app.js)
@@ -296,7 +296,10 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
 | jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
 | intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → data/indices/ docs/data/indices.json をコミット→ pull --rebase → push | 数分 |
 
-- daily.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` と `EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}` を env に設定済み(EDINETDB_API_KEY のSecret登録はユーザー依頼、`edinetdb.enabled: false` の間は未登録でも動作に影響なし)。
+- daily.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` と `EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}` を env に設定済み。
+  `edinetdb.enabled: true`(2026-07-08〜)のため、**`EDINETDB_API_KEY` の GitHub Secret 登録が
+  未了だとネットワークに出られず既存ストアのみ返す**(エラーにはならないが補完も効かない) →
+  Secret未登録なら早めに登録すること。
   jquants-backfill.yml は `JQUANTS_API_KEY` のみ(EDINET DBにバックフィルCLIは無い)。
 - コミット→`git pull --rebase`→push の順(先にコミットしてツリーを綺麗にしてからrebase)。
 - concurrency グループでワークフロー多重起動を防止。
@@ -373,11 +376,11 @@ node --check docs/assets/app.js   # JS構文チェック
 5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
    ※やる場合 breadth の p2-p4 カウント履歴と priority.py テストへの影響に注意。
 6. RSパーセンタイルの母集団はユニバース内銘柄(全市場ではない)— 既知の仕様。
-7. **EDINET DB実地確認(最優先)**: `EDINETDB_API_KEY` をユーザーが発行 → `/companies` `/events`
-   `/earnings` の実レスポンスをcurlで確認し、`DESIGN_EDINETDB.md` 1節・上記5章の想定
-   (revenue単位=百万円、fiscal_year_startフィールド名等)との差異を洗い出す → 差異があれば
-   `src/data/edinetdb.py :: record_to_point` / `_estimate_fy_start` を修正 → 問題なければ
-   `config.yaml: edinetdb.enabled` を `true` にし、daily.yml の `EDINETDB_API_KEY` Secretを登録。
+7. ~~EDINET DB実地確認~~ → 2026-07-08、ユーザー指示で `config.yaml: edinetdb.enabled: true` に切替済み。
+   **daily.yml の `EDINETDB_API_KEY` Secret が未登録なら登録すること**(未登録でもエラーにはならず
+   既存ストアを返すだけで補完が効かないだけ、なので気付きにくい)。初回実行後は
+   `data/edinetdb_auto.json` の値(revenue単位・fiscal_quarterラベル)を決算短信の実際の数値と
+   突き合わせて確認するのが望ましい(§5「実地確認について」参照)。
 
 ## 13. 変更時のチェックリスト (Sonnet向け)
 

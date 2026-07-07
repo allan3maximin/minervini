@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-08 (2): edinetdb.enabled を true に切替 (Sonnet, ユーザー指示)
+
+- ユーザー指示により `config.yaml: edinetdb.enabled` を `false` → `true` に変更。
+  Claude側ではサンドボックス制約により実地確認(curl検証)は未実施のまま(下記参照)。
+- HANDOFF.md 5章「実地確認について」を更新: enabled化した旨と、daily.yml初回実行後に
+  `data/edinetdb_auto.json` の値(revenue単位・fiscal_quarterラベル)を実際の決算短信と
+  突き合わせ確認することを推奨する記述に変更。§12チェックリストの該当項目も更新。
+- `docs/assets/app.js` と `CLAUDE.md` はユーザーがローカルで作業中とのことなので、この
+  コミットには含めていない(未コミットのまま手元に残る)。
+- 次: ユーザーがdaily.ymlの `EDINETDB_API_KEY` Secret登録状況を確認し、workflow_dispatchで
+  手動実行するか翌営業日のcronを待つ。
+
+---
+
 ## 2026-07-08: EDINET DB統合を実装 (Sonnet) — enabled: false で導入、実地確認は未完了
 
 ### やったこと
