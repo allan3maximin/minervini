@@ -149,6 +149,17 @@ def _extract_list_of_dicts(body, known_keys: tuple[str, ...], context: str) -> l
                   f"(none of {known_keys} matched; response top-level keys: {list(body.keys())})")
             return val
 
+    # 2026-07-08の実地確認で判明: /companies/{edinet_code}/earnings はlimit/
+    # include_nullsを渡してもリストではなく単一レコードのdictを "data" 直下に
+    # 返すケースがある(複数期間ではなく直近1件のみ)。known_keysのいずれかが
+    # 空でないdictならそれを単一レコードとして[dict]でラップして救う。
+    for key in known_keys:
+        val = body.get(key)
+        if isinstance(val, dict) and val:
+            print(f"EDINET DB: {context} '{key}' was a single dict, not a list "
+                  f"(wrapping as one record; keys: {list(val.keys())})")
+            return [val]
+
     print(f"EDINET DB: {context} response had no list field at all; top-level keys: {list(body.keys())}")
     return []
 

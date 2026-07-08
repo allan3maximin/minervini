@@ -157,6 +157,26 @@ def test_fetch_events_uses_fallback_key(monkeypatch):
     assert events == [{"security_code": "72030"}]
 
 
+def test_extract_list_wraps_single_dict_record(capsys):
+    # 2026-07-08の実地確認で判明: /earnings は "data" 直下がlistではなく単一
+    # レコードのdictで返ってくることがある。
+    body = {"data": {"quarter": "Q1", "eps": 10}, "meta": {"page": 1}}
+    out = ed._extract_list_of_dicts(body, ("data", "earnings"), "ctx")
+    assert out == [{"quarter": "Q1", "eps": 10}]
+    assert "was a single dict, not a list" in capsys.readouterr().out
+
+
+def test_fetch_earnings_wraps_single_dict_record(monkeypatch):
+    monkeypatch.setattr(ed, "_get", lambda *a, **kw: {
+        "data": {"quarter": "Q1", "eps": 10, "revenue": 100,
+                  "disclosure_date": "2026-05-10", "fiscal_year_start": "2026-01-01"},
+        "meta": {"page": 1},
+    })
+    recs = ed.fetch_earnings("KEY", {}, "E02144")
+    assert recs == [{"quarter": "Q1", "eps": 10, "revenue": 100,
+                      "disclosure_date": "2026-05-10", "fiscal_year_start": "2026-01-01"}]
+
+
 # ---------------------------------------------------------------------------
 # update_fundamentals_auto
 # ---------------------------------------------------------------------------
