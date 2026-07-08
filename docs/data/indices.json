@@ -1,13 +1,6 @@
 {
- "generated_at": "2026-07-08T14:06:04.819313+00:00",
- "stale_keys": [
-  "nikkei225",
-  "topix",
-  "growth250",
-  "usdjpy",
-  "nasdaq",
-  "sox"
- ],
+ "generated_at": "2026-07-08T14:08:30.711197+00:00",
+ "stale_keys": [],
  "indices": [
   {
    "key": "nikkei225",
@@ -3169,10 +3162,10 @@
    "key": "usdjpy",
    "name": "ドル円",
    "unit": "JPY",
-   "last": 162.51,
+   "last": 162.54,
    "prev": 162.09,
-   "change": 0.42,
-   "change_pct": 0.26,
+   "change": 0.45,
+   "change_pct": 0.28,
    "last_date": "2026-07-08",
    "series": [
     {
@@ -4213,7 +4206,7 @@
     },
     {
      "t": "2026-07-08",
-     "v": 162.51
+     "v": 162.54
     }
    ]
   },
@@ -4221,10 +4214,10 @@
    "key": "nasdaq",
    "name": "NASDAQ",
    "unit": "",
-   "last": 25713.55,
+   "last": 25742.27,
    "prev": 25818.69,
-   "change": -105.13,
-   "change_pct": -0.41,
+   "change": -76.42,
+   "change_pct": -0.3,
    "last_date": "2026-07-08",
    "series": [
     {
@@ -5265,7 +5258,7 @@
     },
     {
      "t": "2026-07-08",
-     "v": 25713.55
+     "v": 25742.27
     }
    ]
   },
@@ -5273,10 +5266,10 @@
    "key": "sox",
    "name": "SOX",
    "unit": "",
-   "last": 12492.41,
+   "last": 12462.25,
    "prev": 12300.52,
-   "change": 191.89,
-   "change_pct": 1.56,
+   "change": 161.73,
+   "change_pct": 1.31,
    "last_date": "2026-07-08",
    "series": [
     {
@@ -6317,7 +6310,7 @@
     },
     {
      "t": "2026-07-08",
-     "v": 12492.41
+     "v": 12462.25
     }
    ]
   }
