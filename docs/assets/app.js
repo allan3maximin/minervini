@@ -495,10 +495,12 @@ async function initStockPage(codeOverride) {
   const mustEl = document.getElementById("must-checklist");
   const scoreEl = document.getElementById("score-breakdown");
   const fundEl = document.getElementById("fund-detail-body");
+  const copyBtn = document.getElementById("copy-stock-data-btn");
   if (metaEl) metaEl.innerHTML = "";
   if (mustEl) mustEl.innerHTML = "";
   if (scoreEl) scoreEl.innerHTML = "";
   if (fundEl) fundEl.innerHTML = "";
+  if (copyBtn) copyBtn.hidden = true;
 
   if (!code) {
     if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
@@ -515,6 +517,7 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
+  setupStockCopyButton(stock, chart, report);
 
   if (!chart) {
     const chartContainer = document.getElementById("chart-container");
@@ -662,6 +665,225 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
   if (window.MinerviniFundamentalsUI) {
     window.MinerviniFundamentalsUI.onSaved = () => renderStockFundamentals(code, name, reportGeneratedAt);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stock detail page: 分析用データコピー
+// 個別株の全コンテキスト(テクニカル/8条件/VCP/直近値動き/ファンダ/市況)を
+// 自己完結のMarkdownテキストに整形してクリップボードへコピーする。
+// Claude等のAIに貼り付けてミネルヴィニ手法での分析相談に使う想定
+// (リポジトリの skills/minervini-analysis/SKILL.md がこの形式を読む前提)。
+// ---------------------------------------------------------------------------
+
+const TIER_COPY_LABELS = {
+  confirmed: "本命 (ファンダ確認済み)",
+  pool: "候補プール (テクニカルのみ・VCPセットアップあり)",
+  watchlist: "候補 (トレンドテンプレート8条件合格・セットアップ形成待ち)",
+};
+
+function copyNum(v, digits = 2) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return n.toLocaleString("ja-JP", { maximumFractionDigits: digits });
+}
+
+function copySignedPct(v, digits = 2) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
+}
+
+function copyFlagLines(flags, labels) {
+  return Object.entries(flags)
+    .map(([name, value]) => `- ${value ? "✓" : "✗"} ${labels[name] || name}`)
+    .join("\n");
+}
+
+// N本前の終値に対する騰落率 (直近値動きサマリー用)
+function closeChangePct(candles, bars) {
+  if (!candles || candles.length <= bars) return null;
+  const cur = candles[candles.length - 1].close;
+  const prev = candles[candles.length - 1 - bars].close;
+  return growthPct(cur, prev);
+}
+
+function volumeAvg(volume, bars) {
+  if (!volume || !volume.length) return null;
+  const slice = volume.slice(-bars);
+  if (!slice.length) return null;
+  return slice.reduce((sum, v) => sum + (v.value || 0), 0) / slice.length;
+}
+
+function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData) {
+  const L = [];
+  L.push(`# ${stock.code} ${stock.name} — ミネルヴィニ式スクリーナー 分析用データ`);
+  L.push("");
+  L.push(`- データ生成日時: ${report.generated_at ?? "-"}`);
+  L.push(`- ティア: ${TIER_COPY_LABELS[stock.tier] || stock.tier || "-"}`);
+  L.push(`- エントリーステータス: ${stock.status ?? "-"}${STATUS_LABELS[stock.status] ? ` = ${STATUS_LABELS[stock.status]}` : ""}`);
+  L.push(`- セクター: ${stock.sector33 ?? "-"} (強度: ${stock.sector_strength ?? "-"} / 方向: ${stock.sector_direction ?? "-"})`);
+  L.push("");
+
+  L.push("## 価格・テクニカル");
+  L.push("");
+  L.push("| 項目 | 値 |");
+  L.push("|---|---|");
+  L.push(`| 終値 | ${copyNum(stock.close, 1)} |`);
+  L.push(`| RSレーティング (1-99) | ${stock.rs ?? "-"} |`);
+  L.push(`| ピボット | ${copyNum(stock.pivot, 1)} |`);
+  L.push(`| 推奨逆指値 | ${copyNum(stock.buy_stop, 1)} |`);
+  L.push(`| 推奨損切り | ${copyNum(stock.stop_loss, 1)} |`);
+  L.push(`| リスク% (逆指値→損切り) | ${copyNum(stock.risk_pct)}% |`);
+  L.push(`| ピボットまでの距離 | ${copySignedPct(stock.dist_to_pivot)} |`);
+  L.push(`| 52週高値からの距離 | ${copySignedPct(stock.high52w_distance_pct != null ? -stock.high52w_distance_pct : null)} |`);
+  const dev = stock.ma_deviation_pct || {};
+  L.push(`| MA50乖離 | ${copySignedPct(dev.ma50)} |`);
+  L.push(`| MA150乖離 | ${copySignedPct(dev.ma150)} |`);
+  L.push(`| MA200乖離 | ${copySignedPct(dev.ma200)} |`);
+  L.push(`| EPS加速slope | ${copyNum(stock.eps_accel_slope)} |`);
+  L.push("");
+
+  L.push("## スコア");
+  L.push("");
+  L.push(`- テクニカルスコア: ${stock.tech_score ?? "-"}`);
+  L.push(`- フルスコア: ${stock.full_score ?? "-"}`);
+  L.push(`- VCPスコア: ${stock.vcp_score ?? "-"}`);
+  L.push(`- 総合スコア: ${stock.total_score ?? "-"}`);
+  L.push("");
+
+  const mustFlags = stock.must_flags || {};
+  L.push("## トレンドテンプレート8条件 (MUST)");
+  L.push("");
+  L.push(mustFlags.tt ? copyFlagLines(mustFlags.tt, MUST_FLAG_LABELS.tt) : "- データなし");
+  L.push("");
+  L.push("## VCP条件 (V1〜V7)");
+  L.push("");
+  L.push(mustFlags.vcp ? copyFlagLines(mustFlags.vcp, MUST_FLAG_LABELS.vcp) : "- VCP評価なし (セットアップ未形成 or 評価対象外)");
+  if (stock.footprint) L.push(`- フットプリント: ${stock.footprint}`);
+  L.push("");
+
+  if (chart && Array.isArray(chart.candles) && chart.candles.length) {
+    const candles = chart.candles;
+    L.push("## 直近の値動き (直近20営業日)");
+    L.push("");
+    L.push("| 日付 | 始値 | 高値 | 安値 | 終値 | 出来高 |");
+    L.push("|---|---|---|---|---|---|");
+    const volByTime = new Map((chart.volume || []).map((v) => [v.time, v.value]));
+    for (const c of candles.slice(-20)) {
+      L.push(
+        `| ${c.time} | ${copyNum(c.open, 1)} | ${copyNum(c.high, 1)} | ${copyNum(c.low, 1)} | ${copyNum(c.close, 1)} | ${copyNum(volByTime.get(c.time), 0)} |`
+      );
+    }
+    L.push("");
+    L.push(`- 騰落率: 5日 ${copySignedPct(closeChangePct(candles, 5), 1)} / 20日 ${copySignedPct(closeChangePct(candles, 20), 1)} / 60日 ${copySignedPct(closeChangePct(candles, 60), 1)}`);
+    const vol10 = volumeAvg(chart.volume, 10);
+    const vol50 = volumeAvg(chart.volume, 50);
+    if (vol10 != null && vol50 != null && vol50 > 0) {
+      L.push(`- 出来高: 直近10日平均 ${copyNum(vol10, 0)} / 50日平均 ${copyNum(vol50, 0)} (比率 ${(vol10 / vol50).toFixed(2)}${vol10 / vol50 <= 0.8 ? " → ドライアップ水準" : ""})`);
+    }
+    L.push("");
+  }
+
+  L.push("## ファンダメンタルズ (四半期・Q4はFY通期扱い)");
+  L.push("");
+  const quarters = (fundEntry && fundEntry.quarters) || [];
+  if (quarters.length) {
+    const byQuarter = new Map(quarters.map((q) => [q.fiscal_quarter, q]));
+    L.push("| 会計四半期 | EPS | EPS前年同期比 | 売上高 | 売上高前年同期比 |");
+    L.push("|---|---|---|---|---|");
+    for (const q of quarters.slice().reverse()) {
+      const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+      const epsYoy = growthPct(q.eps, prev ? prev.eps : null);
+      const revYoy = growthPct(q.revenue, prev ? prev.revenue : null);
+      L.push(`| ${q.fiscal_quarter} | ${formatEps(q.eps)} | ${formatYoy(epsYoy)} | ${formatRevenue(q.revenue)} | ${formatYoy(revYoy)} |`);
+    }
+    if (fundEntry.monthly_yoy != null) L.push(`- 月次YoY: ${fundEntry.monthly_yoy}`);
+    if (fundEntry.checked_date) L.push(`- 確認日: ${fundEntry.checked_date}`);
+  } else {
+    L.push("- ファンダデータなし");
+  }
+  L.push(`- カバレッジ: ${stock.fund_coverage ?? "-"}${stock.fund_stale ? " (古いデータ・再確認推奨)" : ""}`);
+  L.push("");
+
+  L.push("## 市況コンテキスト");
+  L.push("");
+  const indices = (indicesData && indicesData.indices) || [];
+  if (indices.length) {
+    L.push("| 指数 | 終値 | 前日比 |");
+    L.push("|---|---|---|");
+    for (const ix of indices) {
+      L.push(`| ${ix.name} | ${copyNum(ix.last)} | ${copySignedPct(ix.change_pct)} |`);
+    }
+    L.push("");
+  }
+  if (breadthLast) {
+    L.push(`- ユニバース: ${breadthLast.universe_size ?? "-"}銘柄中、トレンドテンプレート8条件合格 ${breadthLast.template_pass ?? "-"}件 (合格率 ${breadthLast.template_pass_rate != null ? (breadthLast.template_pass_rate * 100).toFixed(1) + "%" : "-"})`);
+    L.push(`- ブレイクアウト成功率(直近): ${breadthLast.breakout_success_rate != null ? (breadthLast.breakout_success_rate * 100).toFixed(0) + "%" : "-"}`);
+  }
+  if (report.p1_scarce) {
+    L.push("- 警告: 8条件完全一致の候補銘柄が極端に少なく、地合いが弱い可能性あり");
+  }
+  L.push("");
+  L.push("---");
+  L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの出力データです。SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理基準)に基づいて分析してください。");
+  return L.join("\n");
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // 非HTTPS/旧ブラウザ向けフォールバック
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
+
+function setupStockCopyButton(stock, chart, report) {
+  const btn = document.getElementById("copy-stock-data-btn");
+  if (!btn) return;
+  if (!stock) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.disabled = false;
+  // onclick上書き方式: SPAで銘柄を切り替えてもリスナーが積み上がらない
+  btn.onclick = async () => {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "生成中...";
+    try {
+      const [fundEntry, breadthLast, indicesData] = await Promise.all([
+        fetch("data/fundamentals_public.json", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : {}))
+          .then((all) => all[stock.code] || null)
+          .catch(() => null),
+        fetch("data/breadth.json", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((b) => (b && b.history && b.history.length ? b.history[b.history.length - 1] : null))
+          .catch(() => null),
+        fetch("data/indices.json", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+      const text = buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData);
+      await copyTextToClipboard(text);
+      btn.textContent = "コピーしました";
+    } catch (e) {
+      btn.textContent = "コピー失敗";
+    }
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.disabled = false;
+    }, 1800);
+  };
 }
 
 // Formats the hovered/crosshair date label as "MM/DD" (zero-padded). Chart

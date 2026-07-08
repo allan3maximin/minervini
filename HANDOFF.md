@@ -77,6 +77,7 @@ data/                       中間データ (universe.json, prices/*.parquet, in
                             trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
                             ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
+skills/minervini-analysis/  「分析用データをコピー」の出力をSEPA手法で読み解くClaude用スキル (SKILL.md)
 tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, test_pipeline.py 含む)
 ```
 
@@ -463,10 +464,21 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   **既知の注意**: `fundamentals_public.json` の最古の `XXXXQ4` はJ-Quants由来で通期(累計)値が
   混じっているケースがあり、翌年の同 `Q4` とのYoY比較が実態より歪む場合がある(データ層の既知の癖、
   UI側は現状未対処)。
+- **分析用データコピー (2026-07-09 追加、`#copy-stock-data-btn`)**: stock-metaチップの直下に
+  「分析用データをコピー」ボタンを設置(`setupStockCopyButton`、report.jsonに銘柄が無い場合は非表示)。
+  クリック時に fundamentals_public.json / breadth.json / indices.json を`cache: "no-store"`で追加fetchし、
+  `buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData)` で自己完結の
+  Markdownを生成 → `copyTextToClipboard`(navigator.clipboard、非対応時はtextarea+execCommandフォールバック)で
+  クリップボードへ。内容: ヘッダ(ティア/ステータス/セクター) / 価格・テクニカル表(RS・ピボット・
+  損切り・MA乖離等) / スコア / 8条件✓✗ / VCP V1〜V7✓✗+フットプリント / 直近20営業日OHLCV表+
+  5/20/60日騰落率+出来高10日/50日平均比 / ファンダ四半期表(YoY計算済み) / 市況(指数前日比+
+  8条件合格率+p1_scarce警告※P1という語は使わずに文言化)。Claude等のAIに貼り付けて相談する用途で、
+  読み解き側は `skills/minervini-analysis/SKILL.md`(Coworkスキルとして登録可能)が対応。
+  イベントは`btn.onclick`上書き方式でSPAの銘柄切替でもリスナーが積み上がらない。
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-09時点:
-app.js v=13 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=12 (index.htmlのみ),
+app.js v=14 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=13 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
 webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**

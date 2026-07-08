@@ -2,6 +2,59 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-09 (17): 個別株画面に「分析用データをコピー」ボタン + minervini-analysisスキル追加
+
+### 要望(ユーザー原文)
+> 個別銘柄にデータコピーボタンを追加
+> コピーした情報をclaudeに貼り付けて相談したい。
+> コピーできる内容の精査とボタンの追加実装
+> claudeが貼り付けられた情報を元にminervini手法で読み解くスキルの作成
+
+(AskUserQuestionで確認済み: 内容=全部盛り、形式=Markdown、スキル置き場=Cowork用スキル)
+
+### 変更内容
+- `docs/index.html`: `#view-stock` の stock-meta 直下に
+  `<div class="stock-actions"><button id="copy-stock-data-btn" hidden>分析用データをコピー</button></div>` を追加。
+  キャッシュバスト `app.js?v=13→14`, `style.css?v=12→13`。
+- `docs/assets/app.js`:
+  - `buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData)` 新設。
+    自己完結Markdownを生成: ヘッダ(ティア/ステータス=STATUS_LABELS併記/セクター強度・方向)、
+    価格・テクニカル表(終値/RS/ピボット/逆指値/損切り/リスク%/ピボット距離/52週高値距離
+    〔ダッシュボード同様マイナス表記〕/MA乖離50・150・200/EPS加速slope)、スコア4種、
+    8条件✓✗(MUST_FLAG_LABELS流用)、VCP V1〜V7✓✗+footprint、直近20営業日OHLCV表+
+    5/20/60日騰落率+出来高10日/50日平均比(≤0.8でドライアップ注記)、ファンダ四半期表
+    (既存のshiftFiscalQuarterYoy/growthPct/formatEps/formatRevenue流用でYoY計算済み)、
+    市況(indices前日比表+breadth最新行の8条件合格率+p1_scarce時の警告文言※P1という語は不使用)、
+    末尾にSEPA手法で分析せよという1行の指示文。
+  - `setupStockCopyButton(stock, chart, report)`: initStockPage内(`if (!chart) return`より前)から
+    呼び出し。stockが無ければ非表示。クリック時に fundamentals_public.json / breadth.json /
+    indices.json を no-store で追加fetch(いずれも失敗はnullで握りつぶし、ある分だけで生成)→
+    生成→コピー→ボタン文言を「コピーしました/コピー失敗」に1.8秒トグル。
+    `btn.onclick` 上書き方式でSPA銘柄切替時のリスナー累積を回避。
+  - `copyTextToClipboard`: navigator.clipboard優先、非対応時はtextarea+execCommandフォールバック。
+  - ヘルパー: `copyNum`/`copySignedPct`/`copyFlagLines`/`closeChangePct`/`volumeAvg`、`TIER_COPY_LABELS`。
+  - initStockPage冒頭のリセット処理に copyBtn.hidden = true を追加。
+- `docs/assets/style.css`: `.stock-actions { margin: 6px 0 10px; }` のみ追加(ボタンはグローバルbutton様式)。
+- `skills/minervini-analysis/SKILL.md` 新規: 貼り付けられたコピー出力をSEPA手法で読み解くスキル。
+  入力データの構造説明(ティア/ステータスの意味、フットプリントの読み方、Q4=FY通期・最古Q4の
+  累計値歪みという既知の癖)、分析手順(ステージ判定→VCP品質→ファンダCode33→エントリー計画→地合い)、
+  出力フォーマット(総合判定4択+強み/弱み/アクション/免責)、禁止事項(データに無い数値の捏造禁止、
+  古いデータでの当日判断禁止、断定予測禁止)。ユーザーがCoworkのスキルとして登録して使う想定。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- node vmサンドボックス(DOMスタブ)で実データ(8418)を通してbuildAnalysisMarkdownの出力を目視確認
+  (8条件✓8個、20日OHLCV表、YoY計算、指数表、ドライアップ注記まで全セクション正常)。
+- pytestは対象外(フロントエンド+スキルのみの変更)。
+
+### 次のステップ
+- ユーザーが実機で: 個別株画面→「分析用データをコピー」→Claudeに貼り付けて動作確認。
+- スキルはリポジトリ内 `skills/minervini-analysis/` に置いたので、Coworkのスキルとして登録
+  (設定→スキル→フォルダ追加 or プラグイン化)すれば貼り付け→即分析が効く。
+- コミット/push未実施(ユーザーのローカルで実行)。
+
+---
+
 ## 2026-07-08 (16): EDINET DB backlog優先順位付け -- P1〜P4ランク順にファンダ取得
 
 ### 要望(ユーザー原文)
