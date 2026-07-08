@@ -2,6 +2,31 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (12): 診断printがログ表示で途中切れて実フィールド名が見えなかった件を修正
+
+### 経緯
+- (11)の診断printを本番実行したところ発火はした(`fetched 8 earnings record(s) but 0 were
+  usable ...`)が、`sample record: {...}`の1行が長すぎてGitHub Actionsのログ表示/コピペで
+  `disclosure_date`の途中(アルファベット順で先頭寄りのキー)で切れてしまい、本来知りたかった
+  `quarter`/`eps`/`revenue`相当のフィールド(アルファベット順で後ろの方)が見えなかった。
+  ただしキー自体は確認できた実データ: `accounting_standard`, `cf_operating`等の営業CF系,
+  `comprehensive_income_*`, `diluted_eps*`, `bps`, `average_shares`など、J-Quants型とは
+  かなり違う会計項目の並び(決算短信の詳細項目そのものに近い)であることが判明。
+
+### 修正
+- `src/data/edinetdb.py` `update_fundamentals_auto`: 診断printを2本立てに分割。
+  (1) 全キー一覧だけの短い行(`sorted(sample.keys())`、必ず全部見える)、
+  (2) `quarter`/`period`/`fiscal`/`eps`/`revenue`/`sales`/`income`/`type`/`label`/`year`/`date`
+  のいずれかを含むキーだけに絞った値付きの行(短くなるので途切れにくい)。
+- テストは同等の内容のまま(候補フィールドの部分一致で確認)。フルスイート163件全パス。
+
+### 次にやること
+- ユーザーにコミット/push依頼 → daily.yml再実行 → 新しい2行診断で実フィールド名(特に
+  quarter/eps/revenue/fy_start相当)を確認 → `record_to_point`/`_QUARTER_TO_N`/
+  `_FY_START_FIELD_CANDIDATES`を実データに合わせて本修正。
+
+---
+
 ## 2026-07-08 (11): EDINET DB `/earnings` レコードが取れても0件のまま(ユーザー指摘「ファンダ入力/編集に出てこない」)
 
 ### 経緯

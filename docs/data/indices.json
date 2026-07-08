@@ -1,6 +1,13 @@
 {
- "generated_at": "2026-07-08T13:16:47.340893+00:00",
- "stale_keys": [],
+ "generated_at": "2026-07-08T13:24:39.895269+00:00",
+ "stale_keys": [
+  "nikkei225",
+  "topix",
+  "growth250",
+  "usdjpy",
+  "nasdaq",
+  "sox"
+ ],
  "indices": [
   {
    "key": "nikkei225",
@@ -3162,9 +3169,9 @@
    "key": "usdjpy",
    "name": "ドル円",
    "unit": "JPY",
-   "last": 162.52,
+   "last": 162.53,
    "prev": 162.09,
-   "change": 0.43,
+   "change": 0.44,
    "change_pct": 0.27,
    "last_date": "2026-07-08",
    "series": [
@@ -4206,7 +4213,7 @@
     },
     {
      "t": "2026-07-08",
-     "v": 162.52
+     "v": 162.53
     }
    ]
   },
