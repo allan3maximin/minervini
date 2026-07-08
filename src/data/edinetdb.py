@@ -483,10 +483,20 @@ def _merge_into_store(store: dict, code: str, quarters: list[dict], checked_date
 # ---------------------------------------------------------------------------
 
 def update_fundamentals_auto(codes: list[str], config: dict | None = None,
-                              base_store: dict | None = None) -> dict:
+                              base_store: dict | None = None,
+                              priority_by_code: dict[str, int] | None = None) -> dict:
     """日次インクリメンタル。pipeline.py から J-Quants ストアを base_store と
     して受け取り、YTD差分の基準に使う。APIキー無し or enabled: false なら
-    既存ストアを返すだけ(ネットワーク不使用)。"""
+    既存ストアを返すだけ(ネットワーク不使用)。
+
+    priority_by_code: {code: 優先度(P1=1〜P4=4)} を渡すと、backlog消化を
+    その優先度の昇順(1が最優先)で行う。2026-07-08追加 -- P1〜P4のプライオリティ
+    評価は技術指標のみで決まりファンダメンタルに依存しないため、この呼び出し
+    時点で当日分が確定済み。「P1が無くてもP2→P3→P4の順で優先的に」という
+    要件を満たすため、二値(優先/非優先)ではなくランクそのものでソートする。
+    未指定(dictに無い)コードはrank=99扱いで最後に回る。list.sort()は安定
+    ソートなので、同ランク内の相対順序(events検出順)は保持される。
+    """
     config = config or load_config()
     cfg = _ed_cfg(config)
     store = load_store()
@@ -555,6 +565,13 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
             state["last_events_date"] = today.isoformat()
         except Exception as e:
             print(f"EDINET DB events fetch failed (state not advanced): {e}")
+
+    # 2.5 優先順位付け: priority_by_codeが指定されていれば、backlogをそのランク
+    # (P1=1〜P4=4、未指定コードは99)の昇順に並べ替える。安定ソートなので
+    # 同ランク内の相対順序(検出順)は維持される。P1が無くてもP2→P3→P4の順で
+    # 優先されるよう、二値ではなくランクそのもので比較する。
+    if priority_by_code:
+        backlog.sort(key=lambda c: priority_by_code.get(c, 99))
 
     # 3. backlog消化: 残り予算の範囲で /earnings を叩き、ストアへ反映。
     processed = 0

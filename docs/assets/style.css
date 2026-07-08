@@ -484,6 +484,14 @@ body.modal-open {
 .fund-table tr.auto-prefill-row { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .fund-table tr.auto-prefill-row input { border-style: dashed; }
 
+/* 個別株画面のファンダ表(読み取り専用): モーダル用の固定幅レイアウトではなく
+   通常の可変幅にし、th/tdに下線を戻して見やすくする。 */
+.fund-detail-table { table-layout: auto; margin-top: 8px; }
+.fund-detail-table th, .fund-detail-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.fund-detail-table th { color: var(--text-dim); font-weight: 600; }
+.yoy-positive { color: var(--accent); }
+.yoy-negative { color: var(--danger); }
+
 /* ------------------------------------------------- 機能A: プライオリティ */
 
 a.nav-btn {

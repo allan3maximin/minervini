@@ -2,6 +2,108 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (16): EDINET DB backlog優先順位付け -- P1〜P4ランク順にファンダ取得
+
+### 要望(ユーザー原文)
+> ok
+>
+> で、いま候補に上がっているやつのファンダを取り急ぎとりたいから先行して次の実行で取得するようにして
+
+> あ、優先度を決めてファンダ取ってって話や。Tier1がなくても２、３の順でやってってこと
+
+(初回実装は fund_coverage の〔候補〕(pool) tier を基準にしてしまったが、ユーザーの
+真意は機能A(P1〜P4)のプライオリティ評価順にファンダを取得することだったので設計を
+差し替えた。以下は最終版。)
+
+### 変更内容
+- `src/data/edinetdb.py`: `update_fundamentals_auto()`に`priority_by_code: dict[str, int] |
+  None = None`引数を追加。backlog消化(step 3)の直前で
+  `backlog.sort(key=lambda c: priority_by_code.get(c, 99))`を実行し、backlogをランク
+  (P1=1〜P4=4、未指定コードは99)の昇順に並べ替える。二値(優先/非優先)ではなく
+  ランクそのものでソートするため、「P1が無くてもP2→P3→P4の順で優先される」という
+  要件を満たす。Pythonの`list.sort()`は安定ソートなので、同ランク内の相対順序
+  (events検出順)は維持される。budget予算自体は変えない。
+- `src/pipeline.py`: `priority_by_code`(機能Aのプライオリティ評価結果、P1〜P4は
+  技術指標のみで決まりファンダメンタルに依存しないため、EDINET DB呼び出しより前の
+  トレンドテンプレート直後の時点で当日分がすでに確定している)から
+  `priority_rank_by_code = {code: ev["priority"] for code, ev in priority_by_code.items()}`
+  を作り、EDINET DB呼び出しに`priority_by_code=priority_rank_by_code`として渡す。
+  - 初回実装で懸念していた「今回実行分のtierは鶏と卵で未確定」という問題は、
+    実はP1〜P4ランク自体には当てはまらなかった(ランクは価格/出来高等の技術指標のみで
+    決まり、ファンダメンタル取得結果に依存しない)。そのため前回report.jsonを読む
+    迂回策は不要と判明し、この実行自身のpriority_by_codeをそのまま使う設計に変更。
+  - 呼び出し箇所: J-Quants自動取得の直後、EDINET DB自動取得の直前
+    (`tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config,
+    base_store=auto_by_code, priority_by_code=priority_rank_by_code)`)。
+
+### テスト
+- `tests/test_edinetdb.py`: `test_update_priority_by_code_reorders_backlog_by_rank`
+  (P1が存在しない状態でもP2→P3→P4の順で優先消化されることを確認)、
+  `test_update_priority_by_code_unlisted_codes_sort_last`(ランク未指定コードは
+  rank=99扱いで後回し)、`test_update_priority_by_code_none_leaves_backlog_order_unchanged`
+  (未指定時は従来通りbacklog順)を追加。
+- `tests/test_pipeline.py`: `test_run_daily_passes_priority_rank_to_edinetdb`
+  (run_daily実行時にEDINET DB呼び出しへ渡るpriority_by_codeの中身を検証)を追加。
+  既存の`wired`fixtureのモックシグネチャを`priority_by_code=None`に更新。
+- `python3 -m pytest -q` -- 173 passed, 0 failed。
+
+### 次のステップ
+- まだコミットしていない。ユーザーに commit/push 手順を提示すること。
+
+## 2026-07-08 (15): UI変更 -- ファンダ入力ボタンを個別株画面に移設 + EPS/売上高成長率表を追加
+
+### 要望(ユーザー原文)
+> ファンだ入力は個別株画面に移して。ファンダは個別株画面に表示して。EPSと売上の伸び率が
+> わかるように表にして
+
+### 変更内容
+- `docs/assets/app.js`:
+  - `renderTable()`(ダッシュボード〔本命〕/〔候補〕/〔監視〕共通のtier table)から
+    「ファンダ入力/編集」ボタン列(`fund-edit-btn`)と入力済みバッジ列を削除。
+    ヘッダ行の空th、`authEnabled`変数、`actionTd`ブロックを丸ごと撤去。
+  - 個別株画面(`#view-stock`)用に`renderStockFundamentals(code, name, reportGeneratedAt)`を
+    新設。`docs/data/fundamentals_public.json`(3ソースマージ済み、`{code: {quarters:
+    [{fiscal_quarter, eps, revenue}], monthly_yoy, checked_date}}`、四半期は昇順)を
+    `cache: "no-store"`で取得し、四半期降順(直近が先頭)のテーブルを描画。
+  - 前年同期比(YoY)は`shiftFiscalQuarterYoy("2025Q1") -> "2024Q1"`のように1年前の同じ
+    四半期ラベルを引いて比較(`growthPct`)。Q4はFY(通期)相当として扱う既存の規約を
+    そのまま踏襲。プラスは`--accent`(緑)、マイナスは`--danger`(赤)で色分け。
+  - 表内に「ファンダ入力/編集」ボタン(`fund-edit-btn`クラスは維持 -- vault開錠状態の
+    グローバルトグル`applyLockState()`が`.fund-edit-btn`をクラス名で拾う既存の仕組みに
+    そのまま乗るため、page跨ぎでも自動で有効/無効が反映される)と入力済みバッジを設置。
+  - `initStockPage()`から`renderStockFundamentals()`を呼び出すよう配線(チャート
+    データが無い銘柄でもファンダ表は出るよう、`if (!chart) return`より前に呼ぶ)。
+    保存後の再描画用に`window.MinerviniFundamentalsUI.onSaved`をこの関数内で
+    `renderStockFundamentals`自身に差し替え(ダッシュボード側の`initDashboard`上書きより
+    後に評価されるため、個別株画面が最後にアクティブだった場合はそちらが優先される)。
+  - `fundamentals-modal.js`は無改修(`openFundamentalsModal(code, name)`が既に
+    汎用だったため、呼び出し元を変えるだけで再利用できた)。
+- `docs/index.html`: `#view-stock`に`<section class="detail-card">ファンダメンタルズ
+  <div id="fund-detail-body"></div></section>`を追加(MUST条件/スコア内訳の下)。
+  キャッシュバスト用クエリを`app.js?v=11→12`, `style.css?v=11→12`に更新。
+- `docs/assets/style.css`: `.fund-detail-table`(モーダル用`table-layout: fixed`を
+  上書きして通常の可変幅に)、`.yoy-positive`/`.yoy-negative`を追加。
+
+### 既知の注意点(未修正・監視のみ)
+- `fundamentals_public.json`の最古の`XXXXQ4`エントリはJ-Quants由来で通期(累計)値が
+  入っているケースがあり(例: 8051の`2023Q4`はrevenue 5,068億円 vs 翌`2024Q1〜Q4`は
+  各1,200〜1,300億円台)、その次の年の同`Q4`とのYoY比較が実態より大きく歪む可能性が
+  ある。データ層(J-Quants取り込み)の既知の癖でありUI側の表示バグではないため、
+  今回は対処せず現状の値をそのまま表示している。将来ファンダ表の見た目で違和感が
+  出たら、この記事を起点に調査すること。
+
+### 検証
+- `node -c docs/assets/app.js` / `node -c docs/assets/fundamentals-modal.js` 構文OK。
+- `docs/data/fundamentals_public.json`をpython3でパースし、期待スキーマ
+  (`quarters`昇順、`fiscal_quarter`/`eps`/`revenue`)を確認。
+- pytestは対象外(フロントエンドのみの変更)。
+
+### 次のステップ
+- ユーザーに実際のダッシュボード/個別株画面を見てもらい、表の見た目・列幅・
+  YoY表示のスマホでの見え方を確認してもらう。
+- コミット/push未実施(このセッションではmountedリポジトリへのgit書き込みを
+  行わない方針を継続)。
+
 ## 2026-07-08 (14): record_to_point本修正 -- 実データ68フィールドの全ダンプが取れた
 
 ### 経緯

@@ -121,8 +121,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
     # EDINET DB (決算短信) で J-Quants 12週遅延窓の直近四半期を補完。
     # APIキー未設定/enabled:false なら既存ストアを読むだけ。失敗しても本体は止めない。
+    # P1〜P4優先度(上のpriority_by_code、技術指標のみで決まりファンダに依存しない
+    # ためこの時点で確定済み)でbacklogを並べ替え、P1が無くてもP2→P3→P4の順で
+    # 優先的にファンダを取得する(2026-07-08追加)。
+    priority_rank_by_code = {code: ev["priority"] for code, ev in priority_by_code.items()}
     try:
-        tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config, base_store=auto_by_code)
+        tanshin_by_code = edinetdb_mod.update_fundamentals_auto(
+            codes, config, base_store=auto_by_code, priority_by_code=priority_rank_by_code)
     except Exception as e:
         print(f"EDINET DB fundamentals update failed (ignored): {e}")
         tanshin_by_code = {}

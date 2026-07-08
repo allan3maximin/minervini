@@ -100,11 +100,32 @@ def wired(tmp_path, monkeypatch):
     # J-Quants自動取得はネットワークに出さない。
     monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})
     # EDINET DB自動取得もネットワークに出さない。
-    monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", lambda codes, config, base_store=None: {})
+    monkeypatch.setattr(
+        pipeline.edinetdb_mod, "update_fundamentals_auto",
+        lambda codes, config, base_store=None, priority_by_code=None: {})
     # 実リポジトリの docs/data/fundamentals_public.json を汚さない。
     monkeypatch.setattr(pipeline, "write_public_json", lambda fundamentals_by_code, path=None: None)
 
     return tmp_path, codes
+
+
+def test_run_daily_passes_priority_rank_to_edinetdb(wired, monkeypatch):
+    # 2026-07-08追加: EDINET DB呼び出しに、この実行で確定したP1〜P4ランクを
+    # priority_by_codeとして渡していることを確認する(前回report.jsonではなく、
+    # この実行のpriority_mod.evaluate_priority結果を直接使う設計)。
+    tmp_path, codes = wired
+    captured = {}
+
+    def fake_edinetdb_update(codes, config, base_store=None, priority_by_code=None):
+        captured["priority_by_code"] = priority_by_code
+        return {}
+
+    monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", fake_edinetdb_update)
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+    # "1111"/"3333" はfake_evaluate_priorityでP1、"2222"は評価対象外(除外)。
+    assert captured["priority_by_code"] == {"1111": 1, "3333": 1}
 
 
 def test_run_daily_wires_pipeline_end_to_end(wired):

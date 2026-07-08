@@ -407,11 +407,9 @@ function renderTable(stocks, tier, options = {}) {
       });
       headRow.appendChild(th);
     }
-    headRow.appendChild(document.createElement("th")); // fund input/edit button column
     thead.appendChild(headRow);
     table.appendChild(thead);
 
-    const authEnabled = window.MINERVINI_CONFIG.passkeyAuthEnabled;
     const tbody = document.createElement("tbody");
     for (const s of sorted) {
       const row = document.createElement("tr");
@@ -434,26 +432,6 @@ function renderTable(stocks, tier, options = {}) {
         if (col.title) td.title = col.title(s);
         row.appendChild(td);
       }
-      const actionTd = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.textContent = "ファンダ入力/編集";
-      btn.className = "fund-edit-btn";
-      // With passkey auth enabled the button unlocks via the vault; with it
-      // disabled ("no git key" mode) the modal falls back to clipboard +
-      // manual GitHub commit, so the button always works.
-      if (authEnabled && !window.MinerviniGitHub.hasToken()) {
-        btn.disabled = true;
-        btn.title = "先に🔓解錠してください";
-      }
-      btn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(s.code, s.name));
-      actionTd.appendChild(btn);
-      if (window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pendingFund, s.code)) {
-        const badge = document.createElement("span");
-        badge.className = "pending-badge";
-        badge.textContent = "入力済み・次回実行で本命に昇格予定";
-        actionTd.appendChild(badge);
-      }
-      row.appendChild(actionTd);
       tbody.appendChild(row);
     }
     table.appendChild(tbody);
@@ -516,9 +494,11 @@ async function initStockPage(codeOverride) {
   const metaEl = document.getElementById("stock-meta");
   const mustEl = document.getElementById("must-checklist");
   const scoreEl = document.getElementById("score-breakdown");
+  const fundEl = document.getElementById("fund-detail-body");
   if (metaEl) metaEl.innerHTML = "";
   if (mustEl) mustEl.innerHTML = "";
   if (scoreEl) scoreEl.innerHTML = "";
+  if (fundEl) fundEl.innerHTML = "";
 
   if (!code) {
     if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
@@ -565,6 +545,122 @@ function renderStockMeta(stock) {
         `<span class="chip"><span class="chip-label">${label}</span><span class="chip-value">${value ?? "-"}</span></span>`
     )
     .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Stock detail page: fundamentals table (EPS/売上高 + 前年同期比)
+// ---------------------------------------------------------------------------
+
+// "2025Q1" -> "2024Q1" (前年同期のラベル)。Q4はFY(通期)の意味で使われている
+// ため、そのまま1年前のQ4と比較する。
+function shiftFiscalQuarterYoy(label) {
+  const m = /^(\d{4})Q([1-4])$/.exec(label || "");
+  if (!m) return null;
+  return `${Number(m[1]) - 1}Q${m[2]}`;
+}
+
+function growthPct(cur, prev) {
+  if (cur == null || prev == null || prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+function formatYoy(pct) {
+  if (pct == null || !Number.isFinite(pct)) return "-";
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function yoyClass(pct) {
+  if (pct == null || !Number.isFinite(pct)) return "";
+  return pct > 0 ? "yoy-positive" : pct < 0 ? "yoy-negative" : "";
+}
+
+function formatEps(v) {
+  return v == null ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+}
+
+// 円単位の売上高を億円表示に丸める(百万円/円単位のままだと桁が多く読みにくいため)。
+function formatRevenue(v) {
+  if (v == null) return "-";
+  return `${(Number(v) / 100000000).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}億円`;
+}
+
+async function renderStockFundamentals(code, name, reportGeneratedAt) {
+  const container = document.getElementById("fund-detail-body");
+  if (!container) return;
+  container.innerHTML = "読み込み中...";
+
+  const authEnabled = window.MINERVINI_CONFIG.passkeyAuthEnabled;
+  const canEdit = !authEnabled || (window.MinerviniGitHub && window.MinerviniGitHub.hasToken());
+  const pending = window.MinerviniFundamentalsUI
+    ? window.MinerviniFundamentalsUI.reconcilePending(reportGeneratedAt)
+    : {};
+  const isPending = !!(window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pending, code));
+
+  let entry = null;
+  try {
+    const resp = await fetch("data/fundamentals_public.json", { cache: "no-store" });
+    if (resp.ok) {
+      const all = await resp.json();
+      entry = all[code] || null;
+    }
+  } catch (e) {
+    /* fetch failure: fall through to empty state below */
+  }
+
+  const btnHtml = `
+    <button type="button" id="fund-detail-edit-btn" class="fund-edit-btn"${canEdit ? "" : ' disabled title="先に🔓解錠してください"'}>ファンダ入力/編集</button>
+    ${isPending ? '<span class="pending-badge">入力済み・次回実行で本命に昇格予定</span>' : ""}
+  `;
+
+  const quarters = (entry && entry.quarters) || [];
+  if (!quarters.length) {
+    container.innerHTML = `${btnHtml}<p class="tier-note">ファンダデータがまだありません。「ファンダ入力/編集」から入力できます。</p>`;
+  } else {
+    const byQuarter = new Map(quarters.map((q) => [q.fiscal_quarter, q]));
+    const rowsHtml = quarters
+      .slice()
+      .reverse() // 直近の四半期を先頭に表示
+      .map((q) => {
+        const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+        const epsYoy = growthPct(q.eps, prev ? prev.eps : null);
+        const revYoy = growthPct(q.revenue, prev ? prev.revenue : null);
+        return `
+        <tr>
+          <td>${escapeHtml(q.fiscal_quarter)}</td>
+          <td>${formatEps(q.eps)}</td>
+          <td class="${yoyClass(epsYoy)}">${formatYoy(epsYoy)}</td>
+          <td>${formatRevenue(q.revenue)}</td>
+          <td class="${yoyClass(revYoy)}">${formatYoy(revYoy)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const metaLine = entry.checked_date
+      ? `<p class="tier-note">確認日: ${escapeHtml(entry.checked_date)}</p>`
+      : "";
+
+    container.innerHTML = `
+      ${btnHtml}
+      <div class="table-scroll">
+        <table class="fund-table fund-detail-table">
+          <thead>
+            <tr><th>会計四半期</th><th>EPS</th><th>EPS前年同期比</th><th>売上高</th><th>売上高前年同期比</th></tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      ${metaLine}
+    `;
+  }
+
+  const editBtn = document.getElementById("fund-detail-edit-btn");
+  if (editBtn && !editBtn.disabled) {
+    editBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(code, name));
+  }
+  if (window.MinerviniFundamentalsUI) {
+    window.MinerviniFundamentalsUI.onSaved = () => renderStockFundamentals(code, name, reportGeneratedAt);
+  }
 }
 
 // Formats the hovered/crosshair date label as "MM/DD" (zero-padded). Chart

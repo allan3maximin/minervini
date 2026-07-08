@@ -349,6 +349,72 @@ def test_update_budget_exceeded_leaves_backlog(isolated_paths, monkeypatch):
     assert state["backlog"] == ["6758"]  # budget1本目で消化、2本目は持ち越し
 
 
+def test_update_priority_by_code_reorders_backlog_by_rank(isolated_paths, monkeypatch):
+    # 2026-07-08追加: priority_by_codeで渡したランク(P1=1〜P4=4)の昇順で
+    # backlogを並べ替える。P1が無くてもP2→P3→P4の順で優先されることを確認。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001", "6758": "E002", "9024": "E003"},
+        "codemap_date": today,
+        "last_events_date": today,  # events窓が空なのでevents呼び出しはスキップ
+        "backlog": ["9024", "6758", "7203"],  # 検出順(=ランクとは無関係)
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    cfg = {"edinetdb": {"enabled": True, "requests_per_day": 2, "earnings_limit": 8,
+                        "codemap_refresh_days": 30, "max_quarters_keep": 12}}
+    # P1が存在しない(9024=P3, 6758=P2, 7203=P4)状態でもP2→P3の順で優先されるはず。
+    ed.update_fundamentals_auto(
+        ["7203", "6758", "9024"], cfg,
+        priority_by_code={"9024": 3, "6758": 2, "7203": 4})
+
+    state = json.loads(state_path.read_text())
+    # 予算2本: ランク順(6758=P2, 9024=P3)が先に消化され、最下位の7203(P4)が残る。
+    assert state["backlog"] == ["7203"]
+
+
+def test_update_priority_by_code_unlisted_codes_sort_last(isolated_paths, monkeypatch):
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001", "6758": "E002"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": ["7203", "6758"],  # 7203はランク未指定(=99扱い)、6758はP1
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    cfg = {"edinetdb": {"enabled": True, "requests_per_day": 1, "earnings_limit": 8,
+                        "codemap_refresh_days": 30, "max_quarters_keep": 12}}
+    ed.update_fundamentals_auto(["7203", "6758"], cfg, priority_by_code={"6758": 1})
+
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == ["7203"]  # ランク未指定の7203が後回しになる
+
+
+def test_update_priority_by_code_none_leaves_backlog_order_unchanged(isolated_paths, monkeypatch):
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001", "6758": "E002"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": ["7203", "6758"],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    cfg = {"edinetdb": {"enabled": True, "requests_per_day": 1, "earnings_limit": 8,
+                        "codemap_refresh_days": 30, "max_quarters_keep": 12}}
+    ed.update_fundamentals_auto(["7203", "6758"], cfg)  # priority_by_code未指定
+
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == ["6758"]  # 従来通り検出順(=backlog順)で消化
+
+
 def test_update_events_all_fail_does_not_advance_last_events_date(isolated_paths, monkeypatch):
     store_path, state_path = isolated_paths
     today = date.today().isoformat()

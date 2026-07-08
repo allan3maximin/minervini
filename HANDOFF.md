@@ -77,7 +77,7 @@ data/                       中間データ (universe.json, prices/*.parquet, in
                             trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
                             ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
-tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含む)
+tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, test_pipeline.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -207,6 +207,23 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
      (`test_update_code_missing_from_codemap_stays_in_backlog`)。
   5. `/events` が全滅した日は `last_events_date` を進めない(取りこぼし防止、
      `test_update_events_all_fail_does_not_advance_last_events_date`)。
+- **backlog優先順位付け(2026-07-08追加)**: `update_fundamentals_auto(..., priority_by_code=None)`。
+  backlog消化(上記3)の直前で `priority_by_code: dict[code, rank]`(rank=P1=1〜P4=4、
+  未指定コードは99)の昇順にbacklog全体を並べ替える(`list.sort()`の安定性を利用し、
+  同ランク内の相対順序=検出順は維持)。二値(優先/非優先)ではなくランクそのもので
+  比較するため、P1銘柄が無くてもP2→P3→P4の順で優先される。budget自体は変えないため、
+  優先銘柄がその日の予算に収まる保証はないが、同じ予算内での消化順を変える。
+  呼び出し元は `pipeline.py` — 機能A(P1〜P4)のプライオリティ評価 `priority_by_code`
+  (トレンドテンプレート直後、EDINET DB呼び出しより前に確定)から
+  `priority_rank_by_code = {code: ev["priority"] for code, ev in priority_by_code.items()}`
+  を作って渡す。P1〜P4ランクは技術指標(価格・出来高等)のみで決まりファンダメンタル
+  取得結果に依存しないため、鶏と卵問題は発生しない(前回report.jsonを参照する迂回策は
+  不要 — 当初はfund_coverage由来の〔候補〕tierで実装し、その回避策として前回report.json
+  を使っていたが、ユーザーの意図はP1〜P4ランク順だったため設計変更)。テスト:
+  `test_update_priority_by_code_reorders_backlog_by_rank`,
+  `test_update_priority_by_code_unlisted_codes_sort_last`,
+  `test_update_priority_by_code_none_leaves_backlog_order_unchanged`(edinetdb.py側)、
+  `test_run_daily_passes_priority_rank_to_edinetdb`(pipeline.py側)。
 - **YTD差分の四半期化**: J-Quants(`fundamentals_auto.json`)を `base_store` として渡し、直前四半期までの
   YTD値との差分から単四半期値を導出する(`derive_with_base`)。Q1はYTDそのまま。前四半期が
   base側に無い/欠損している場合はそのレコードごと破棄する(半端な値を出さない)。
@@ -228,8 +245,9 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   monthly_yoy は従来どおり手動のみ。checked_date は manual があれば manual、無ければ auto と
   tanshin の新しい方(ISO日付文字列の辞書順比較)。
 - pipeline.py での呼び出し: J-Quantsブロックの直後に
-  `tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config, base_store=auto_by_code)`
-  (try/exceptで失敗を無視)を追加し、
+  `tanshin_by_code = edinetdb_mod.update_fundamentals_auto(codes, config, base_store=auto_by_code,
+  priority_by_code=priority_rank_by_code)`(try/exceptで失敗を無視、`priority_rank_by_code`の
+  由来は上記「backlog優先順位付け」参照)を追加し、
   `merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)` に変更。
 - 効果: EDINET DBで直近四半期が入った銘柄も quarters が非空になり `fund_coverage_tier` が
   "confirmed" を返す → 〔本命〕昇格が最大12週早まる。
@@ -376,6 +394,8 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   - セクター強度の文字色: `.sector-strength-strong`(accent) / `-mid`(text-dim) / `-weak`(danger)。
   - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(view-stockへ遷移させない)。
   - 行クリックは `window.location.hash = "stock/" + code` で view-stock へ遷移(旧: `stock.html?code=...`)。
+  - 「ファンダ入力/編集」ボタン列は2026-07-08にview-stockへ移設し撤去済み(下記「個別株」節参照)。
+    fund_status列(fund_stale/fund_coverageの表示)自体はダッシュボードに残っている。
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
@@ -426,11 +446,29 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   `cloneNode(true)` + `replaceWith` でDOM要素ごと差し替え、前回分のイベントリスナーが積み上がらないようにしている。
   `rs-card` (RSラインの無い銘柄では非表示) は以前 `remove()` していたが、RS無し→有りの銘柄に切り替えた時に
   戻せなくなるため `hidden` 切り替えに変更。
+- **ファンダメンタルズ (2026-07-08 追加、`#fund-detail-card` / `#fund-detail-body`)**: 「ファンダ入力/編集」
+  ボタンはダッシュボードのtier table列から撤去し、この個別株画面のみに移設(`renderStockFundamentals`)。
+  `docs/data/fundamentals_public.json` (3ソースマージ済み、`{code: {quarters: [{fiscal_quarter, eps,
+  revenue}], monthly_yoy, checked_date}}`、四半期は昇順) を `cache: "no-store"` でfetchし、四半期降順
+  (直近が先頭) の表を描画。列: 会計四半期 / EPS / EPS前年同期比 / 売上高(億円換算) / 売上高前年同期比。
+  前年同期比は `shiftFiscalQuarterYoy` で1年前の同ラベル("2025Q1"→"2024Q1")を引き `growthPct` で算出、
+  プラスは `.yoy-positive`(accent)、マイナスは `.yoy-negative`(danger) で色分け。Q4はFY(通期)扱いという
+  既存の四半期規約をそのまま踏襲。
+  ボタンのクラス名は `fund-edit-btn` のまま維持しているため、既存の `applyLockState()`
+  (`.fund-edit-btn` をクラス名で一括querySelectorAll)による🔓解錠状態の活性/非活性トグルがページを
+  跨いでもそのまま効く。保存後は `window.MinerviniFundamentalsUI.onSaved` をこの画面の再描画関数に
+  差し替えて更新(ダッシュボード側の同名フックより後に評価されるため、個別株画面側が優先)。
+  `fundamentals-modal.js` 自体は無改修(`openFundamentalsModal(code, name)` が元々ページ非依存の
+  汎用実装だったため呼び出し元を変えるだけで再利用できた)。
+  **既知の注意**: `fundamentals_public.json` の最古の `XXXXQ4` はJ-Quants由来で通期(累計)値が
+  混じっているケースがあり、翌年の同 `Q4` とのYoY比較が実態より歪む場合がある(データ層の既知の癖、
+  UI側は現状未対処)。
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-08時点:
-app.js v=11 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=11 (index.htmlのみ),
-heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7, batch.js v=2, webauthn-vault.js v=5(今回未変更)。
+app.js v=12 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=12 (index.htmlのみ),
+heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
+webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
 
 ## 8. GitHub Actions
@@ -489,7 +527,8 @@ node --check docs/assets/app.js   # JS構文チェック
 - tests/test_pipeline.py の `wired` fixture は全外部I/Oをmonkeypatchでモック。
   **pipelineに新モジュールを足したら必ずここにもモックを追加**
   (例: `monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})`、
-  `monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", lambda codes, config, base_store=None: {})`)。
+  `monkeypatch.setattr(pipeline.edinetdb_mod, "update_fundamentals_auto", lambda codes, config, base_store=None,
+  priority_by_code=None: {})`)。
 - tests/test_jquants.py: record_to_point / derive_quarters / _refetch_incomplete / ストア / merge_fundamentals をカバー。
 - tests/test_edinetdb.py: record_to_point / derive_with_base / update_fundamentals_auto(backlog/budget/events失敗系) / state・storeの永続化をカバー。
 - フロントは自動テスト無し。手動確認 or node で DOM stub を書いて smoke。
