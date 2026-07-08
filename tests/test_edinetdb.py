@@ -365,7 +365,9 @@ def test_update_prints_sample_when_records_fetched_but_none_usable(isolated_path
     assert store.get("7203") is None
     out = capsys.readouterr().out
     assert "fetched 1 earnings record(s) but 0 were usable" in out
-    assert "'period': 'Q1'" in out
+    # 第5弾: 1フィールド1行方式に変更したので "key = value" 形式で出る。
+    assert "'period' = 'Q1'" in out
+    assert "'eps_value' = 10.0" in out
 
 
 # ---------------------------------------------------------------------------

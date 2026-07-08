@@ -526,19 +526,18 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
         elif recs and not printed_empty_sample:
             printed_empty_sample = True
             sample = recs[0]
-            # 2026-07-08の実地確認(第4弾): 1件のprintに全フィールドをまとめて
-            # 出力すると、GitHub Actionsのログ表示/コピペで長い行が途中で切れて
-            # 肝心のフィールド名(quarter/eps/revenue相当)が見えないことが判明した。
-            # (1)必ず全部見えるキー一覧だけの行、(2)関連しそうなキーだけに絞った
-            # 値付きの行、の2本立てにして途切れても実害が出にくくする。
-            print(f"EDINET DB: {code} sample record keys ({len(sample)}): {sorted(sample.keys())}")
-            keywords = ("quarter", "period", "fiscal", "eps", "revenue", "sales",
-                        "income", "type", "label", "year", "date")
-            candidates = {k: v for k, v in sample.items() if any(kw in k.lower() for kw in keywords)}
+            # 2026-07-08の実地確認(第5弾): 1行にまとめて出す方式は、フィールド数が
+            # 68件もある実レコードだと2行に分けてもキー一覧だけでまだ途中で切れる
+            # ことが分かった(GitHub Actionsのログ行長制限と思われる)。1フィールド
+            # 1行に徹底的に分割すれば、行が多くなっても各行は必ず短く収まり、
+            # 途中で打ち切られても既に出力済みの行は失われない。
             print(f"EDINET DB: {code} fetched {len(recs)} earnings record(s) but 0 were usable "
                   f"after record_to_point/derive_with_base (quarter field guessed as 'quarter', "
                   f"eps/revenue keys, fy_start candidates {_FY_START_FIELD_CANDIDATES} -- one of "
-                  f"these likely doesn't match); candidate fields: {candidates}")
+                  f"these likely doesn't match). Dumping all {len(sample)} sample fields "
+                  f"one per line below:")
+            for k in sorted(sample.keys()):
+                print(f"EDINET DB:   {code}.{k!r} = {sample[k]!r}")
         processed += 1
 
     state["backlog"] = remaining_backlog

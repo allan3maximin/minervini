@@ -274,6 +274,20 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   レコードは取れたのに0件しか採用できなかった場合にサンプルレコードの生データをprintする診断を
   追加**(次回実行で実際のフィールド名が判明する見込み)。フィールド名が判明したら
   `record_to_point`/`_QUARTER_TO_N`/`_FY_START_FIELD_CANDIDATES`の実データ対応がまだ必要。
+  - **診断print、第4弾(2行分割)〜第5弾(1フィールド1行)**: 第3弾の1行dump診断を本番実行したところ
+    発火はしたが、`sample record: {...}`の1行がGitHub Actionsのログ表示/コピペで長すぎて途中
+    (`disclosure_date`付近)で切れ、知りたかった`quarter`/`eps`/`revenue`相当のフィールドが
+    見えなかった。第4弾として「全キー一覧のみの行」+「候補キーワードで絞った値付きの行」の
+    2行に分割したが、これも両方とも途中(キー一覧は`'inte...`、候補フィールドは
+    `'forecast_operating_inco...`)で切れた — GitHub Actionsのログ行長制限は68キー分の
+    リストやdict reprでもまだ超える水準らしい。この2回の切断までに確認できた実フィールド:
+    `eps`(バレキーで存在、値805.05)、`fiscal_year_end`(FY末日、例`'2026-09-30'` —
+    `_FY_START_FIELD_CANDIDATES`のどれとも不一致)、`disclosure_date`はRFC2822形式
+    (`'Thu, 14 May 2026 00:00:00 GMT'`、ISO形式ではない)。`quarter`相当のフィールドは
+    アルファベット順で`inte...`より後ろにあるはずだが未確認。第5弾として、診断printを
+    「1フィールド1行」方式(`for k in sorted(sample.keys()): print(f"... {k!r} = {v!r}")`)に
+    変更 — レコードの総フィールド数に関わらず各行は短くなるため、途中で打ち切られても
+    それまでの行は残る。次回daily.yml実行で今度こそ68フィールド全部の確認が取れる見込み。
 - **2026-07-08(バグ修正2件目): `/companies`/`/events`は上記対応で本番動作確認済み(3830社中3829社
   マッチ、997銘柄backlog投入)だったが、`/companies/{edinet_code}/earnings`だけ複数銘柄で
   「no list field at all; top-level keys: ['data', 'meta']」が続いていた。1回目の対応として

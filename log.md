@@ -2,6 +2,37 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (13): (12)の2行診断もまだ途中で切れた → 1フィールド1行方式に変更
+
+### 経緯
+- (12)のfixを本番実行したところ、2行に分けてもまだ途中で切れた。
+  - 1行目(全キー一覧, `sorted(sample.keys())`): `'inte` の途中で切断。
+  - 2行目(候補フィールドのみ): `'forecast_operating_inco` の途中で切断。
+  - つまりGitHub Actionsのログ行長制限は、68キーのリストや候補フィールドのdict reprでも
+    まだ長すぎる(1000〜2000文字程度でも切れる)水準らしい。ただしこの2回の切断で以下は
+    確認できた: `eps`(バレキー、値805.05で存在)、`fiscal_year_end`(FY末日、例
+    `'2026-09-30'` — `_FY_START_FIELD_CANDIDATES`のどれとも一致しない)、`disclosure_date`
+    がRFC2822形式(`'Thu, 14 May 2026 00:00:00 GMT'`、ISO形式ではない)。
+    `quarter`相当のフィールドはまだ未確認(アルファベット順で`inte...`より後ろにあるはず)。
+
+### 修正
+- `src/data/edinetdb.py` `update_fundamentals_auto`: 診断printを1フィールド1行方式に変更。
+  `for k in sorted(sample.keys()): print(f"EDINET DB:   {code}.{k!r} = {sample[k]!r}")`。
+  レコードの総フィールド数(68件など)に関わらず、各行は必ず短くなるので途中で打ち切られる
+  ことがなくなる(打ち切られても、それまでに出力済みの行は失われない)。
+- `tests/test_edinetdb.py`: `test_update_prints_sample_when_records_fetched_but_none_usable`の
+  アサーションを`"'period': 'Q1'" in out`(dict repr形式)から`"'period' = 'Q1'"`
+  (新フォーマット)に修正、`eps_value`の行も追加確認。フルスイート163件全パス。
+
+### 次にやること
+- ユーザーにコミット/push依頼 → daily.yml再実行 → 今度こそ68フィールド全部を1行1件で確認 →
+  `quarter`相当のフィールド名、`eps`/`revenue`が単一四半期かYTD累積か、fy_start相当の
+  フィールド(なければ`fiscal_year_end`から逆算する方式に切替検討)、`disclosure_date`の
+  RFC2822パース方法を確定 → `record_to_point`/`_QUARTER_TO_N`/`_FY_START_FIELD_CANDIDATES`を
+  実データに合わせて本修正。
+
+---
+
 ## 2026-07-08 (12): 診断printがログ表示で途中切れて実フィールド名が見えなかった件を修正
 
 ### 経緯
