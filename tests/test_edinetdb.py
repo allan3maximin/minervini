@@ -177,6 +177,32 @@ def test_fetch_earnings_wraps_single_dict_record(monkeypatch):
                       "disclosure_date": "2026-05-10", "fiscal_year_start": "2026-01-01"}]
 
 
+def test_extract_list_finds_nested_list_in_wrapper_dict(capsys):
+    # 2026-07-08の実地確認(第2弾): /earnings の実際の形は "data" 直下が単一
+    # レコードではなく {"count":N, "edinet_code":..., "earnings":[...]} という
+    # ラッパーdictで、本当のリストはさらに1階層下 (data.earnings) にある。
+    body = {
+        "data": {"count": 3, "edinet_code": "E01542",
+                  "earnings": [{"quarter": "Q1", "eps": 10}, {"quarter": "Q2", "eps": 12}]},
+        "meta": {"page": 1},
+    }
+    out = ed._extract_list_of_dicts(body, ("data", "earnings", "results", "items"), "ctx")
+    assert out == [{"quarter": "Q1", "eps": 10}, {"quarter": "Q2", "eps": 12}]
+    assert "found nested list at 'data.earnings'" in capsys.readouterr().out
+
+
+def test_fetch_earnings_finds_nested_list_in_wrapper_dict(monkeypatch):
+    monkeypatch.setattr(ed, "_get", lambda *a, **kw: {
+        "data": {"count": 1, "edinet_code": "E01542",
+                  "earnings": [{"quarter": "Q1", "eps": 10, "revenue": 100,
+                                 "disclosure_date": "2026-05-10", "fiscal_year_start": "2026-01-01"}]},
+        "meta": {"page": 1},
+    })
+    recs = ed.fetch_earnings("KEY", {}, "E01542")
+    assert recs == [{"quarter": "Q1", "eps": 10, "revenue": 100,
+                      "disclosure_date": "2026-05-10", "fiscal_year_start": "2026-01-01"}]
+
+
 # ---------------------------------------------------------------------------
 # update_fundamentals_auto
 # ---------------------------------------------------------------------------

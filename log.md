@@ -2,6 +2,42 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (9): EDINET DB `/earnings` のネストレスポンス解析バグを修正(1回目の修正が誤診断だった件)
+
+### 経緯
+- (8)の修正で `/companies`・`/events` は本番で正常動作を確認(3830社中3829社マッチ、997銘柄backlog投入)。
+  一方 `/companies/{edinet_code}/earnings` は複数銘柄で「no list field at all; top-level keys: ['data', 'meta']」
+  というログが出続けていた。`_extract_list_of_dicts()`に「known_keysのdict値を単一レコードとして[dict]で
+  ラップする」フォールバックを追加してコミット(527e629)・push・本番実行までしたが、ユーザーが貼った
+  次回実行ログで誤診断が判明:
+  ```
+  EDINET DB: /companies/E01542/earnings 'data' was a single dict, not a list
+  (wrapping as one record; keys: ['count', 'earnings', 'edinet_code'])
+  ```
+  ラップされた「レコード」のキーが `count`/`earnings`/`edinet_code` になっており、これは単一レコードでは
+  なく**ラッパーdict**だった。本当のリストはさらに1階層下の `data.earnings` にある。
+  `record_to_point()`は`rec.get("quarter")`を見るため、ラッパーdictをそのままレコード扱いすると
+  quarterキーが無く黙って`None`(=取りこぼし)になる。エラーにはならないので気づきにくい不具合だった。
+
+### 修正
+- `src/data/edinetdb.py`: `_extract_list_of_dicts()`に新しいフォールバック階層を追加。
+  「単一レコードとしてラップする」より前に、known_keysの値がdictならその中身も
+  known_keys→自動検出の順で再探索し、ネストしたlistが見つかればそれを返すようにした
+  (例: `data.earnings`)。見つからない場合のみ、従来通り「単一レコードとしてラップ」にフォールバック。
+- `tests/test_edinetdb.py`: 実際の`/earnings`形状(`{"data": {"count":N, "edinet_code":..., "earnings":[...]}}`)
+  を再現したテストを2件追加(`_extract_list_of_dicts`本体・`fetch_earnings`経由)。
+  既存の「単一dictラップ」テスト2件(真にフラットな1件レスポンス用)は非list値のみのdictなので
+  そのまま通ることを確認済み。
+- `pytest tests/test_edinetdb.py` 30件全パス、フルスイート162件全パス確認済み。
+
+### 次にやること
+- ユーザーにコミット/push依頼(サンドボックスからは直接pushしない方針。ローカルmac側でgit操作)。
+- 次回daily実行後、`EDINET DB: X codes processed, Y left in backlog.`および
+  `data/edinetdb_auto.json`の中身を確認し、実際にquarterデータが登録されているか検証。
+- 動作確認が済んだらdaily.ymlの「当日実行済みスキップ」ガードを元に戻す((8)から持ち越し、未着手)。
+
+---
+
 ## 2026-07-08 (8): EDINET DB「0 codes processed」バグ調査・修正(ユーザー指摘「直近ファんだにデータ入ってない」)
 
 ### 経緯

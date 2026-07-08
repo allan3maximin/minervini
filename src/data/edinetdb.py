@@ -149,10 +149,27 @@ def _extract_list_of_dicts(body, known_keys: tuple[str, ...], context: str) -> l
                   f"(none of {known_keys} matched; response top-level keys: {list(body.keys())})")
             return val
 
-    # 2026-07-08の実地確認で判明: /companies/{edinet_code}/earnings はlimit/
-    # include_nullsを渡してもリストではなく単一レコードのdictを "data" 直下に
-    # 返すケースがある(複数期間ではなく直近1件のみ)。known_keysのいずれかが
-    # 空でないdictならそれを単一レコードとして[dict]でラップして救う。
+    # 2026-07-08の実地確認で判明(第2弾): /companies/{edinet_code}/earnings は
+    # "data" 直下が単一レコードではなく {"count":N, "earnings":[...], "edinet_code":...}
+    # という「ラッパーdict」で、実際のリストはさらに1階層下 (data.earnings) にある。
+    # known_keysのいずれかがdictなら、その中を既知キー→自動検出の順で再探索する。
+    for key in known_keys:
+        val = body.get(key)
+        if isinstance(val, dict) and val:
+            for inner_key in known_keys:
+                inner_val = val.get(inner_key)
+                if isinstance(inner_val, list):
+                    print(f"EDINET DB: {context} found nested list at '{key}.{inner_key}' "
+                          f"(wrapper keys: {list(val.keys())})")
+                    return inner_val
+            for inner_key, inner_val in val.items():
+                if isinstance(inner_val, list) and (not inner_val or isinstance(inner_val[0], dict)):
+                    print(f"EDINET DB: {context} found nested list at auto-detected '{key}.{inner_key}' "
+                          f"(wrapper keys: {list(val.keys())})")
+                    return inner_val
+
+    # ネストしたリストが見つからない場合のみ、単一レコードのdictそのものを
+    # [dict]でラップして救う (真にフラットな1件だけのレスポンス用の最終フォールバック)。
     for key in known_keys:
         val = body.get(key)
         if isinstance(val, dict) and val:

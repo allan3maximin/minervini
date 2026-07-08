@@ -262,6 +262,22 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   (`_COMPANY_CODE_KEYS`/`_EVENT_CODE_KEYS`/`_FY_START_FIELD_CANDIDATES`)までは救えない。
   もし次回実行でも0件が続くなら、追加された診断printで実際のフィールド名を確認し、該当の
   `_*_KEYS`/`_FY_START_FIELD_CANDIDATES` 定数を実地確認1〜5に沿って更新すること。
+- **2026-07-08(バグ修正2件目): `/companies`/`/events`は上記対応で本番動作確認済み(3830社中3829社
+  マッチ、997銘柄backlog投入)だったが、`/companies/{edinet_code}/earnings`だけ複数銘柄で
+  「no list field at all; top-level keys: ['data', 'meta']」が続いていた。1回目の対応として
+  「known_keysのdict値を単一レコードとして`[dict]`でラップする」フォールバックを追加・pushしたが、
+  これは誤診断だった: 実際のログで確認したところ、ラップされた「レコード」のキーが
+  `count`/`earnings`/`edinet_code`であり、`/earnings`の実際の形は
+  `{"data": {"count": N, "edinet_code": "...", "earnings": [...]}, "meta": {...}}` という
+  **ラッパーdict**で、本当のレコード配列はさらに1階層下の `data.earnings` にあった。
+  `record_to_point()`は`rec.get("quarter")`を見るため、ラッパーdictをそのままレコード扱いすると
+  quarterキーが存在せず黙って`None`(取りこぼし)になる — エラーにならないため発覚が遅れた。
+  対策として `_extract_list_of_dicts()` に新しいフォールバック階層を追加: 「単一レコードとして
+  ラップする」より前に、known_keysの値がdictであればその中身も known_keys→自動検出の順で
+  再探索し、ネストしたlistが見つかればそれを返す(例: `data.earnings`)。ネストが見つからない
+  場合のみ、従来通り「単一レコードとしてラップ」にフォールバックする(真にフラットな1件だけの
+  レスポンス用の最終防衛線として維持)。`tests/test_edinetdb.py`に実際の`/earnings`形状を再現した
+  テストを2件追加、フルスイート162件全パス確認済み。
 
 ### 制約(ユーザー了解済み)
 - EDINET DBの決算短信データは2026-01-01以降のみ存在(バックフィル不可)。
