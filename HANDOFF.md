@@ -262,6 +262,18 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   (`_COMPANY_CODE_KEYS`/`_EVENT_CODE_KEYS`/`_FY_START_FIELD_CANDIDATES`)までは救えない。
   もし次回実行でも0件が続くなら、追加された診断printで実際のフィールド名を確認し、該当の
   `_*_KEYS`/`_FY_START_FIELD_CANDIDATES` 定数を実地確認1〜5に沿って更新すること。
+- **2026-07-08(バグ修正3件目・未解決): ネスト抽出fix後も`data/edinetdb_auto.json`が0件のまま**。
+  `/earnings`のリスト取り出し自体(`data.earnings`)は直ったが、その先の
+  `record_to_point()`が見ている`quarter`/`eps`/`revenue`/`disclosure_date`/
+  `_FY_START_FIELD_CANDIDATES`は全て実地未検証の推測フィールド名で、実レコードと噛み合っていない
+  可能性が高い(黙ってNoneを返すだけでエラーにならないため発覚しにくい)。加えて
+  `update_fundamentals_auto`内の`record_to_point(rec, code)`呼び出しに`fiscal_year_end_month`を
+  渡していないため、`_estimate_fy_start`フォールバックも機能しない。この結果、
+  `docs/data/fundamentals_public.json`にEDINET DB分が一切載らず、ダッシュボードの
+  「ファンダ入力/編集」モーダルにも表示されない状態が続いていた。**対策として、backlogループで
+  レコードは取れたのに0件しか採用できなかった場合にサンプルレコードの生データをprintする診断を
+  追加**(次回実行で実際のフィールド名が判明する見込み)。フィールド名が判明したら
+  `record_to_point`/`_QUARTER_TO_N`/`_FY_START_FIELD_CANDIDATES`の実データ対応がまだ必要。
 - **2026-07-08(バグ修正2件目): `/companies`/`/events`は上記対応で本番動作確認済み(3830社中3829社
   マッチ、997銘柄backlog投入)だったが、`/companies/{edinet_code}/earnings`だけ複数銘柄で
   「no list field at all; top-level keys: ['data', 'meta']」が続いていた。1回目の対応として

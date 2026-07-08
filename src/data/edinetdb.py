@@ -477,6 +477,15 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
     # 3. backlog消化: 残り予算の範囲で /earnings を叩き、ストアへ反映。
     processed = 0
     remaining_backlog: list[str] = []
+    # 2026-07-08の実地確認(第3弾)で判明: /earnings のリスト取り出し自体は直った
+    # (found nested list at 'data.earnings')のに data/edinetdb_auto.json が0件の
+    # まま、という新たな不具合が発生した。原因はrecord_to_point/_resolve_fy_start
+    # 内の個別フィールド名(quarter/eps/revenue/disclosure_date/
+    # _FY_START_FIELD_CANDIDATES)が未検証の推測のままで、実レコードと噛み合って
+    # いないと黙って処理対象0件になる(record_to_pointがNoneを返すだけでエラーに
+    # ならない)ため。原因追跡用に、レコードは取れたのに1件も採用できなかった
+    # 銘柄について、最初の1件だけサンプルのキー/値をprintする。
+    printed_empty_sample = False
     for code in backlog:
         if budget <= 0:
             remaining_backlog.append(code)
@@ -514,6 +523,13 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
         if derived:
             checked = max(checked_dates) if checked_dates else today.isoformat()
             _merge_into_store(store, code, derived, checked, max_keep)
+        elif recs and not printed_empty_sample:
+            printed_empty_sample = True
+            sample = recs[0]
+            print(f"EDINET DB: {code} fetched {len(recs)} earnings record(s) but 0 were usable "
+                  f"after record_to_point/derive_with_base (quarter field guessed as 'quarter', "
+                  f"eps/revenue keys, fy_start candidates {_FY_START_FIELD_CANDIDATES} -- one of "
+                  f"these likely doesn't match); sample record: {sample}")
         processed += 1
 
     state["backlog"] = remaining_backlog

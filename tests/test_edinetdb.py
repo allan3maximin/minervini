@@ -340,6 +340,34 @@ def test_update_success_stores_derived_quarter(isolated_paths, monkeypatch):
     assert json.loads(store_path.read_text())["7203"]["quarters"] == quarters
 
 
+def test_update_prints_sample_when_records_fetched_but_none_usable(isolated_paths, monkeypatch, capsys):
+    # 2026-07-08の実地確認(第3弾): /earningsのリスト取り出しは直ったのに
+    # data/edinetdb_auto.jsonが0件のまま、という不具合が発生した。record_to_point
+    # 内の個別フィールド名(quarter/eps/revenue等)が実レコードと噛み合わないと
+    # 黙って0件になる。原因追跡用の診断printが出ることを確認する。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E02144"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": ["7203"],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+
+    def fake_earnings(api_key, config, edinet_code):
+        # 未知のフィールド名 (quarterではなくperiod) -- record_to_pointがNoneを返す。
+        return [{"period": "Q1", "eps_value": 10.0}]
+
+    monkeypatch.setattr(ed, "fetch_earnings", fake_earnings)
+    store = ed.update_fundamentals_auto(["7203"], _CFG, base_store={})
+
+    assert store.get("7203") is None
+    out = capsys.readouterr().out
+    assert "fetched 1 earnings record(s) but 0 were usable" in out
+    assert "'period': 'Q1'" in out
+
+
 # ---------------------------------------------------------------------------
 # state / store persistence round-trip
 # ---------------------------------------------------------------------------

@@ -2,6 +2,46 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (11): EDINET DB `/earnings` レコードが取れても0件のまま(ユーザー指摘「ファンダ入力/編集に出てこない」)
+
+### 経緯
+- (9)(10)のfix適用後、daily.ymlはpushまで正常完了(`generated_at`更新確認済み)。ネストリスト
+  抽出も`found nested list at 'data.earnings'`で動いている。しかしユーザーが「ダッシュボードの
+  『ファンダ入力/編集』モーダルにEDINET DB分のデータが出てこない」と報告。
+- 調査: 「ファンダ入力/編集」(`docs/assets/fundamentals-modal.js` `openFundamentalsModal`)は
+  `docs/data/fundamentals_public.json`をprefillに使う設計(`fundamentals.py write_public_json`が
+  `merge_fundamentals`の結果=CSV/J-Quants/EDINET DBの3ソース統合済みデータを書き出す)。配線自体は
+  正しい(`pipeline.py`で`merge_fundamentals(auto_by_code, csv, tanshin_by_code=tanshin_by_code)`
+  → `write_public_json`)。
+- origin masterの`data/edinetdb_auto.json`を直接確認したところ **`total codes: 0`**。つまり
+  `/earnings`のリスト取り出しは直ったのに、その先で全レコードが黙って捨てられていた。
+  `update_fundamentals_auto`のbacklogループには、`recs`は取れたのに`derived`が0件になった場合の
+  診断出力が一切無かった(サイレント消滅)。
+- 疑わしい箇所: `record_to_point(rec, code)`が見ている`quarter`/`eps`/`revenue`/
+  `disclosure_date`/`_FY_START_FIELD_CANDIDATES`はすべて実地未検証の推測フィールド名
+  (HANDOFF.md「実地確認について」参照)。`/companies`・`/events`のトップレベルキーと同様、
+  レコード内の個別フィールド名も外れている可能性が高い。さらに`record_to_point`呼び出し時に
+  `fiscal_year_end_month`を渡していないため、`_estimate_fy_start`フォールバックも機能しない
+  (fy_start解決がフィールド名一致に完全依存している)。
+
+### 修正
+- `src/data/edinetdb.py` `update_fundamentals_auto`: backlogループで`recs`が非空なのに
+  `derived`が0件だった場合、**その日の最初の1件だけ**サンプルレコードの生データをprintする
+  診断出力を追加(`EDINET DB: {code} fetched N earnings record(s) but 0 were usable ...`)。
+  これで次回実行時、実際のフィールド名が判明する。
+- `tests/test_edinetdb.py`: 未知フィールド名(`period`/`eps_value`)のレコードを与えて診断printが
+  出ることを確認するテストを1件追加。フルスイート163件全パス。
+
+### 次にやること
+- ユーザーにコミット/push依頼 → daily.yml再実行 → 新しい診断printで実際の`/earnings`レコードの
+  フィールド名(quarter/eps/revenue/disclosure_date相当のキー)を確認。
+- 判明したら`record_to_point`/`_QUARTER_TO_N`/`_FY_START_FIELD_CANDIDATES`を実データに合わせて
+  修正(これが直れば`fundamentals_public.json`にEDINET DB分が載り、「ファンダ入力/編集」にも
+  出るようになるはず)。
+- 引き続き未着手: daily.ymlの「当日実行済みスキップ」ガードを元に戻す((8)から持ち越し)。
+
+---
+
 ## 2026-07-08 (10): daily.ymlのpush競合でjob全体失敗→ダッシュボード未更新の件を修正
 
 ### 経緯
