@@ -514,6 +514,7 @@ async function initStockPage(codeOverride) {
 
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
+  if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
 
   if (!chart) {
     const chartContainer = document.getElementById("chart-container");

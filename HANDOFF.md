@@ -465,8 +465,8 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   UI側は現状未対処)。
 
 ### キャッシュバスター
-**docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-08時点:
-app.js v=12 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=12 (index.htmlのみ),
+**docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-09時点:
+app.js v=13 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=12 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
 webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
