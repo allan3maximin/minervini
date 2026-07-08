@@ -74,7 +74,12 @@ const COLUMNS = [
     key: "fund_status",
     label: "ファンダ状態",
     value: fundStatusLabel,
-    sortValue: (s) => (s.fund_stale ? -1 : s.fund_coverage === "full" ? 2 : s.fund_coverage === "partial" ? 1 : 0),
+    sortValue: (s) =>
+      s.fund_stale ? -1
+      : s.fund_strong === false ? 0.5 // データありだが基準未達(ファンダ弱)は none と partial の間
+      : s.fund_coverage === "full" ? 2
+      : s.fund_coverage === "partial" ? 1
+      : 0,
   },
 ];
 
@@ -447,8 +452,15 @@ function formatClose(v) {
 
 function fundStatusLabel(s) {
   if (s.fund_stale) return "再確認推奨";
-  if (s.fund_coverage === "full") return "full";
-  if (s.fund_coverage === "partial") return "partial";
+  if (s.fund_coverage === "full" || s.fund_coverage === "partial") {
+    // fund_strong=false: データはあるが本命昇格基準(EPS YoY+25%/売上YoY+20%)未達。
+    // 旧report.json(fund_strongフィールドなし)は従来表示にフォールバック。
+    if (s.fund_strong === false) {
+      const eps = s.fund_eps_yoy != null ? `EPS ${s.fund_eps_yoy > 0 ? "+" : ""}${s.fund_eps_yoy}%` : "EPS 計算不能";
+      return `ファンダ弱 (${eps})`;
+    }
+    return s.fund_coverage;
+  }
   return "-";
 }
 
@@ -676,8 +688,8 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
 // ---------------------------------------------------------------------------
 
 const TIER_COPY_LABELS = {
-  confirmed: "本命 (ファンダ確認済み)",
-  pool: "候補プール (テクニカルのみ・VCPセットアップあり)",
+  confirmed: "本命 (ファンダ強度確認済み: EPS YoY+25%/売上YoY+20%以上)",
+  pool: "候補プール (VCPセットアップあり・ファンダ未確認または基準未達)",
   watchlist: "候補 (トレンドテンプレート8条件合格・セットアップ形成待ち)",
 };
 
@@ -803,6 +815,12 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
     L.push("- ファンダデータなし");
   }
   L.push(`- カバレッジ: ${stock.fund_coverage ?? "-"}${stock.fund_stale ? " (古いデータ・再確認推奨)" : ""}`);
+  if (stock.fund_strong != null) {
+    const yoyParts = [];
+    if (stock.fund_eps_yoy != null) yoyParts.push(`直近EPS YoY ${stock.fund_eps_yoy > 0 ? "+" : ""}${stock.fund_eps_yoy}%`);
+    if (stock.fund_rev_yoy != null) yoyParts.push(`売上YoY ${stock.fund_rev_yoy > 0 ? "+" : ""}${stock.fund_rev_yoy}%`);
+    L.push(`- ファンダ強度判定: ${stock.fund_strong ? "合格" : "不合格"} (基準: EPS YoY≥+25%かつ売上YoY≥+20%${yoyParts.length ? ` / 実績: ${yoyParts.join("、")}` : ""})`);
+  }
   L.push("");
 
   L.push("## 市況コンテキスト");

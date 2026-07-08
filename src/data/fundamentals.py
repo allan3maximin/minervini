@@ -15,7 +15,13 @@ from datetime import date, datetime
 import pandas as pd
 
 from src.config import REPO_ROOT, load_config
-from src.screener.trend_template import compute_accel_slope, compute_full_score, quarter_sort_key, technical_score
+from src.screener.trend_template import (
+    compute_accel_slope,
+    compute_full_score,
+    latest_yoy_growth,
+    quarter_sort_key,
+    technical_score,
+)
 
 DEFAULT_CSV_PATH = REPO_ROOT / "manual" / "fundamentals.csv"
 AUTO_PATH = REPO_ROOT / "data" / "fundamentals_auto.json"
@@ -183,15 +189,43 @@ def write_public_json(fundamentals_by_code: dict, path=None) -> None:
         json.dump(out, f, ensure_ascii=False, indent=1)
 
 
-def fund_coverage_tier(code: str, fundamentals_by_code: dict) -> dict:
-    """"full" (EPS acceleration computable) / "partial" (rows exist but not
-    enough for acceleration) / "none" (no rows) -> confirmed/confirmed/pool."""
+def fund_coverage_tier(code: str, fundamentals_by_code: dict, config: dict | None = None) -> dict:
+    """Coverage ("full"=EPS acceleration computable / "partial"=rows exist but
+    not enough / "none"=no rows) + strength-based tier determination.
+
+    〔本命〕(confirmed) はデータの存在だけでは不十分で、Minervini Code 33 準拠の
+    強度基準を要求する: 直近EPS YoY >= confirmed_eps_yoy_min かつ 売上YoY >=
+    confirmed_rev_yoy_min (config.yaml fundamentals節)。YoYが計算不能(前年の
+    比較対象なし・前年値<=0)な場合は強度未確認として pool 止まり。
+
+    J-Quants自動取得で全銘柄に quarters が入るようになり「データあり=confirmed」
+    では減益銘柄まで〔本命〕に上がってしまったための改定 (2026-07-09)。
+    """
+    config = config or load_config()
     data = fundamentals_by_code.get(code)
     if not data or not data.get("quarters"):
-        return {"fund_coverage": "none", "tier": "pool"}
-    eps_slope = compute_accel_slope(data["quarters"], "eps")
+        return {"fund_coverage": "none", "tier": "pool", "fund_strong": None,
+                "fund_eps_yoy": None, "fund_rev_yoy": None}
+
+    quarters = data["quarters"]
+    eps_slope = compute_accel_slope(quarters, "eps")
     coverage = "full" if eps_slope is not None else "partial"
-    return {"fund_coverage": coverage, "tier": "confirmed"}
+
+    fcfg = config["fundamentals"]
+    eps_yoy = latest_yoy_growth(quarters, "eps")
+    rev_yoy = latest_yoy_growth(quarters, "revenue")
+    strong = (
+        eps_yoy is not None and rev_yoy is not None
+        and eps_yoy >= fcfg["confirmed_eps_yoy_min"]
+        and rev_yoy >= fcfg["confirmed_rev_yoy_min"]
+    )
+    return {
+        "fund_coverage": coverage,
+        "tier": "confirmed" if strong else "pool",
+        "fund_strong": strong,
+        "fund_eps_yoy": round(eps_yoy, 1) if eps_yoy is not None else None,
+        "fund_rev_yoy": round(rev_yoy, 1) if rev_yoy is not None else None,
+    }
 
 
 def compute_fund_stale(checked_date: str | None, today: date, config: dict | None = None) -> bool:
@@ -208,7 +242,7 @@ def get_fundamentals_for_code(
 ) -> dict:
     config = config or load_config()
     today = today or datetime.now().date()
-    tier_info = fund_coverage_tier(code, fundamentals_by_code)
+    tier_info = fund_coverage_tier(code, fundamentals_by_code, config)
     data = fundamentals_by_code.get(code)
 
     if not data:
@@ -241,6 +275,9 @@ def score_stock(
         "tech_score": technical_score(latest_row, config),
         "tier": info["tier"],
         "fund_coverage": info["fund_coverage"],
+        "fund_strong": info.get("fund_strong"),
+        "fund_eps_yoy": info.get("fund_eps_yoy"),
+        "fund_rev_yoy": info.get("fund_rev_yoy"),
         "fund_stale": info["fund_stale"],
         "fund_checked_date": info["fund_checked_date"],
         "full_score": None,
@@ -248,7 +285,11 @@ def score_stock(
         "rev_accel_slope": None,
     }
 
-    if info["tier"] == "confirmed":
+    # full_score/加速slopeはファンダデータがあれば tier に関係なく計算する
+    # (強度基準未達で pool に落ちた銘柄でも個別株画面・コピー機能で見たいため)。
+    # confirmed のランキングにだけ full_score が使われる点は従来どおり
+    # (build_site.assemble_stock_record 側の分岐)。
+    if info["fund_coverage"] != "none":
         full = compute_full_score(
             latest_row,
             eps_quarters=info["quarters"],

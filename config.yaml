@@ -87,6 +87,11 @@ fundamentals:
   min_quarters_for_full: 7
   recommended_quarters: 8
   stale_days: 120
+  # 〔本命〕昇格に必要なファンダ強度 (Minervini Code 33 準拠)。
+  # 直近EPS YoY と 売上YoY の両方がこの閾値以上で初めて confirmed。
+  # YoYが計算不能(前年比較対象なし/前年値<=0)な銘柄は強度未確認として pool 止まり。
+  confirmed_eps_yoy_min: 25
+  confirmed_rev_yoy_min: 20
 
 # J-Quants API (ファンダメンタル自動取得。Freeプランで運用中)
 jquants:

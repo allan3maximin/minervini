@@ -2,6 +2,36 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-09 (18): 〔本命〕昇格基準を「データ存在」から「ファンダ強度合格」に改定
+
+### 要望(ユーザー原文)
+> ファンだ確認済み の基準を見直して欲しい。いま確認済みのものを見て ファンだ別に強くないけどなんでここにいるんだろう
+
+### 原因
+- 旧 `fund_coverage_tier`: quarters が1件でもあれば confirmed。J-Quants自動取得で全997銘柄に
+  データが入った結果、事実上の全員confirmed化。実例: 8418 山口FG が直近EPS YoY **-57.4%**・
+  eps_accel_slope -30.6 なのに〔本命〕にいた。
+
+### 変更内容 (AskUserQuestionで確認: 基準=本家準拠、弱い銘柄=候補プールに「ファンダ弱」表示)
+- `config.yaml` fundamentals節: `confirmed_eps_yoy_min: 25` / `confirmed_rev_yoy_min: 20` 追加。
+- `src/data/fundamentals.py :: fund_coverage_tier`: 直近EPS YoY≥+25% **かつ** 売上YoY≥+20%
+  (latest_yoy_growth使用)で初めて confirmed。YoY計算不能(前年比較なし/前年値≤0)は pool。
+  戻り値に `fund_strong` / `fund_eps_yoy` / `fund_rev_yoy` 追加。
+- `score_stock`: full_score/加速slopeは tier ではなく `fund_coverage != "none"` で計算
+  (pool落ちした銘柄でも個別株画面・コピーで見えるように)。
+- `src/report/build_site.py :: assemble_stock_record`: fund_strong/fund_eps_yoy/fund_rev_yoy をreport.jsonへ。
+- `docs/assets/app.js`: fundStatusLabel が基準未達を「ファンダ弱 (EPS -57.4%)」表示。
+  コピー機能に「ファンダ強度判定: 合格/不合格」行を追加。TIER_COPY_LABELS文言更新。
+- `docs/index.html`: 本命/候補のtier-note文言更新、`app.js?v=14→15`。
+- `skills/minervini-analysis/SKILL.md`: ティアの意味を新基準に更新。
+- テスト更新+回帰テスト追加(減益銘柄はfull coverageでもpool)。tests 173 passed
+  (test_indices 1 failは砂箱のpyarrow欠如で無関係)。
+
+### 検証
+- 実データで 8418 → `{tier: pool, fund_strong: False, fund_eps_yoy: -57.4, fund_rev_yoy: 42.9}` を確認。
+- 新基準ならファンダ保有997銘柄中 confirmed資格は104銘柄(10%)。
+- 反映は次回バッチ実行後(report.json再生成が必要)。
+
 ## 2026-07-09 (17): 個別株画面に「分析用データをコピー」ボタン + minervini-analysisスキル追加
 
 ### 要望(ユーザー原文)

@@ -75,10 +75,14 @@ def test_load_fundamentals_csv_missing_file_returns_empty(tmp_path):
 def test_no_csv_rows_yields_pool_tier():
     fundamentals_by_code = build_fundamentals_by_code(pd.DataFrame(columns=["code", "fiscal_quarter"]))
     tier_info = fund_coverage_tier("9999", fundamentals_by_code)
-    assert tier_info == {"fund_coverage": "none", "tier": "pool"}
+    assert tier_info["fund_coverage"] == "none"
+    assert tier_info["tier"] == "pool"
+    assert tier_info["fund_strong"] is None
 
 
-def test_eight_quarters_yields_confirmed_full_tier(tmp_path):
+def test_eight_quarters_strong_growth_yields_confirmed_full_tier(tmp_path):
+    # 直近2025Q4 eps=25 vs 前年2024Q4 eps=10 -> EPS YoY +150%(売上=eps*10で同率)。
+    # 強度基準(EPS>=+25% かつ 売上>=+20%)を満たすので confirmed。
     csv_text = "code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date\n" + _quarters_csv_rows(
         "7134", [10, 10, 10, 10, 12, 15, 19, 25]
     )
@@ -88,10 +92,32 @@ def test_eight_quarters_yields_confirmed_full_tier(tmp_path):
     fundamentals_by_code = build_fundamentals_by_code(df)
 
     tier_info = fund_coverage_tier("7134", fundamentals_by_code)
-    assert tier_info == {"fund_coverage": "full", "tier": "confirmed"}
+    assert tier_info["fund_coverage"] == "full"
+    assert tier_info["tier"] == "confirmed"
+    assert tier_info["fund_strong"] is True
+    assert tier_info["fund_eps_yoy"] == 150.0
+    assert tier_info["fund_rev_yoy"] == 150.0
 
 
-def test_few_quarters_yields_confirmed_partial_tier(tmp_path):
+def test_weak_growth_yields_pool_despite_full_coverage(tmp_path):
+    # 減益トレンド(直近2025Q4 eps=5 vs 2024Q4 eps=10 -> -50%)はデータが
+    # 揃っていても本命に昇格させない(2026-07-09基準改定の回帰テスト)。
+    csv_text = "code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date\n" + _quarters_csv_rows(
+        "8418", [10, 10, 10, 10, 9, 8, 6, 5]
+    )
+    path = _write_csv(tmp_path, csv_text)
+    df, _ = load_fundamentals_csv(path)
+    fundamentals_by_code = build_fundamentals_by_code(df)
+
+    tier_info = fund_coverage_tier("8418", fundamentals_by_code)
+    assert tier_info["fund_coverage"] == "full"
+    assert tier_info["tier"] == "pool"
+    assert tier_info["fund_strong"] is False
+    assert tier_info["fund_eps_yoy"] == -50.0
+
+
+def test_few_quarters_unverifiable_strength_yields_pool_partial_tier(tmp_path):
+    # 2四半期のみ -> 前年同期比が計算できない -> 強度未確認として pool 止まり
     csv_text = "code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date\n" + _quarters_csv_rows(
         "7134", [10, 11]
     )
@@ -100,7 +126,10 @@ def test_few_quarters_yields_confirmed_partial_tier(tmp_path):
     fundamentals_by_code = build_fundamentals_by_code(df)
 
     tier_info = fund_coverage_tier("7134", fundamentals_by_code)
-    assert tier_info == {"fund_coverage": "partial", "tier": "confirmed"}
+    assert tier_info["fund_coverage"] == "partial"
+    assert tier_info["tier"] == "pool"
+    assert tier_info["fund_strong"] is False
+    assert tier_info["fund_eps_yoy"] is None
 
 
 def test_fund_stale_true_after_120_days():
@@ -122,7 +151,9 @@ def test_partial_full_score_renormalizes_to_100(tmp_path):
     fundamentals_by_code = build_fundamentals_by_code(df)
 
     result = score_stock("7134", BASELINE_LATEST, fundamentals_by_code, today=date(2026, 7, 3), config=CONFIG)
-    assert result["tier"] == "confirmed"
+    # 2四半期のみ: 強度未確認なので tier は pool 落ちだが、full_score は
+    # データがある限り計算される(個別株画面・コピー機能用)
+    assert result["tier"] == "pool"
     assert result["fund_coverage"] == "partial"
     assert result["full_score"] is not None
     assert 0 <= result["full_score"] <= 100

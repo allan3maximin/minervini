@@ -99,9 +99,12 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 11. `build_report` (docs/data/report.json) + `update_breadth` (docs/data/breadth.json)
 
 ### ティアとフロント表示の対応
-- `tier: "confirmed"` → 〔本命〕ファンダ確認済み (ファンダquartersが1件でもあれば confirmed)
-- `tier: "pool"` → 〔候補プール〕テクニカルのみ (VCPセットアップあり、ファンダなし)
+- `tier: "confirmed"` → 〔本命〕ファンダ強度確認済み。**データの存在だけでは昇格しない** (2026-07-09改定):
+  直近EPS YoY ≥ +25% **かつ** 売上YoY ≥ +20% (config.yaml `fundamentals.confirmed_eps_yoy_min`/`confirmed_rev_yoy_min`、Minervini Code 33準拠)。
+  YoY計算不能(前年比較対象なし/前年値≤0)は強度未確認として pool 止まり。判定は `fund_coverage_tier` (src/data/fundamentals.py)。
+- `tier: "pool"` → 〔候補プール〕VCPセットアップあり、ファンダなし **または強度基準未達** (`fund_strong: false` → フロントで「ファンダ弱」表示)
 - `tier: "watchlist"` → 〔候補〕トレンドテンプレート8条件合格 (セットアップ形成待ち)
+- 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。confirmed のランキングにのみ full_score を使う点は従来どおり。
 
 ### P1〜P4について(重要な経緯)
 - バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
@@ -151,7 +154,8 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 - `merge_fundamentals(auto_by_code, manual_by_code)` — 同一 (code, fiscal_quarter) は**手動CSVが勝ち**。
   monthly_yoy は手動のみ(自動には無い)。checked_date は手動優先、無ければ自動。
 - pipeline.py での呼び出し: `fundamentals_by_code = merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df))`
-- 効果: J-Quantsデータが入った銘柄は quarters が存在する → `fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格。
+- 効果: J-Quantsデータが入った銘柄は quarters が存在する → ~~`fund_coverage_tier` が "confirmed" を返す → 〔本命〕へ自動昇格~~
+  **(2026-07-09改定)** データ存在だけでは昇格せず、強度基準(EPS YoY≥+25%かつ売上YoY≥+20%)合格で初めて confirmed。
 
 ### フロントエンドへの公開 (docs/data/fundamentals_public.json) — 2026-07-07 追加
 - **バグ**: 「ファンダ入力欄にバッチで取得したはずのデータが表示されない」と報告あり。原因は
@@ -250,8 +254,8 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
   priority_by_code=priority_rank_by_code)`(try/exceptで失敗を無視、`priority_rank_by_code`の
   由来は上記「backlog優先順位付け」参照)を追加し、
   `merge_fundamentals(auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)` に変更。
-- 効果: EDINET DBで直近四半期が入った銘柄も quarters が非空になり `fund_coverage_tier` が
-  "confirmed" を返す → 〔本命〕昇格が最大12週早まる。
+- 効果: EDINET DBで直近四半期が入った銘柄も quarters が非空になり、強度基準の判定材料
+  (直近EPS/売上YoY)が最大12週早く揃う(2026-07-09以降、confirmed昇格には強度基準合格も必要)。
 
 ### 実地確認について
 - サンドボックス環境からは `edinetdb.jp` へのネットワークアクセスがブロックされており
@@ -478,7 +482,7 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-09時点:
-app.js v=14 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=13 (index.htmlのみ),
+app.js v=15 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=13 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
 webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**
@@ -520,7 +524,7 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
   stocks: [ { code, name, close, tier("confirmed"|"pool"|"watchlist"),
     rs, total_score, tech_score, full_score, footprint,
     pivot, buy_stop, stop_loss, risk_pct, entry_status,
-    fund_coverage("full"|"partial"|"none"), fund_stale, fund_checked_date,
+    fund_coverage("full"|"partial"|"none"), fund_strong(bool|null), fund_eps_yoy, fund_rev_yoy, fund_stale, fund_checked_date,
     priority(1-4), unmet_conditions, high_dist, ma_dev系, sector33, sector_strength, sector_direction,
     has_chart, new_breakout_today?, market_guard_warning? } ] }
 ```
