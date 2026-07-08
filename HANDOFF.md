@@ -244,6 +244,24 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   `data/edinetdb_auto.json` の値(特にrevenue単位・fiscal_quarterラベル)が決算短信の実際の数値と
   一致しているか、初回実行分は必ず目視確認すること。差異があれば `record_to_point` /
   `_estimate_fy_start` の修正が必要になる可能性がある。
+- **2026-07-08(バグ修正): `fetch_events()`/`fetch_companies_map()`/`fetch_earnings()` がAPIレスポンスの
+  トップレベルキー名を `body.get("data") or body.get("events") or []` のように決め打ちで推測していたため、
+  実際のキー名が違う場合に**エラーも出さず無言で空リストを返す**バグがあった。有効化後の初回daily実行で
+  `EDINET DB: 0 codes processed, 0 left in backlog.` のみが出力され、他の診断出力が一切無いログから発覚。
+  対策として `_extract_list_of_dicts(body, known_keys, context)` ヘルパーを追加し、
+  (1) known_keysで見つからなければ「値がlist[dict]である最初のトップレベルキー」を自動検出して使い、
+  (2) それも無ければ `EDINET DB: {context} response had no list field at all; top-level keys: [...]` の形で
+  実際のトップレベルキー一覧をprintするようにした。`fetch_companies_map`/`fetch_events`/`fetch_earnings`と
+  `update_fundamentals_auto`のeventsループを全てこのヘルパー経由に書き換え済み(`tests/test_edinetdb.py`に
+  fallback/自動検出/全滅ケースのテスト6件追加、既存152件+新規6件=158件全パス)。
+  併せて `data/edinetdb_state.json` を `{}` にリセット(`last_events_date` が誤って2026-07-08まで
+  進んでいたため、直すと2026-07-09以降しか再スキャンされず1〜7月分の開示を恒久的に取りこぼす所だった)。
+  `.github/workflows/daily.yml` の「当日実行済みチェック」ガードは**動作確認のため一時的に無効化**
+  (常に`skip=false`)。確認が済んだら元のgit log判定に戻すこと。
+  なお、このヘルパーは「キー名の推測ミス」は救えるが、**行内の個別フィールド名の推測ミス**
+  (`_COMPANY_CODE_KEYS`/`_EVENT_CODE_KEYS`/`_FY_START_FIELD_CANDIDATES`)までは救えない。
+  もし次回実行でも0件が続くなら、追加された診断printで実際のフィールド名を確認し、該当の
+  `_*_KEYS`/`_FY_START_FIELD_CANDIDATES` 定数を実地確認1〜5に沿って更新すること。
 
 ### 制約(ユーザー了解済み)
 - EDINET DBの決算短信データは2026-01-01以降のみ存在(バックフィル不可)。
@@ -462,6 +480,8 @@ node --check docs/assets/app.js   # JS構文チェック
    既存ストアを返すだけで補完が効かないだけ、なので気付きにくい)。初回実行後は
    `data/edinetdb_auto.json` の値(revenue単位・fiscal_quarterラベル)を決算短信の実際の数値と
    突き合わせて確認するのが望ましい(§5「実地確認について」参照)。
+   → 同日、`0 codes processed` バグを発見・修正(§5「実地確認について」の追記参照)。
+   **daily.yml のガードを一時無効化中** — 動作確認が済んだら元に戻すこと(要フォローアップ)。
 
 ## 13. 変更時のチェックリスト (Sonnet向け)
 

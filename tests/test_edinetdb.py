@@ -112,6 +112,52 @@ def test_derive_with_base_partial_field_completeness():
 
 
 # ---------------------------------------------------------------------------
+# _extract_list_of_dicts / fetch_companies_map / fetch_events -- 未知スキーマ耐性
+# (2026-07-08の初回稼働で既知キー名が外れて0件になった不具合の再発防止)
+# ---------------------------------------------------------------------------
+
+def test_extract_list_known_key():
+    body = {"data": [{"a": 1}]}
+    assert ed._extract_list_of_dicts(body, ("data", "events"), "ctx") == [{"a": 1}]
+
+
+def test_extract_list_bare_list_body():
+    body = [{"a": 1}]
+    assert ed._extract_list_of_dicts(body, ("data",), "ctx") == [{"a": 1}]
+
+
+def test_extract_list_falls_back_to_auto_detected_key(capsys):
+    body = {"meta": {"count": 1}, "results": [{"a": 1}]}
+    out = ed._extract_list_of_dicts(body, ("data", "events"), "ctx")
+    assert out == [{"a": 1}]
+    assert "auto-detected key 'results'" in capsys.readouterr().out
+
+
+def test_extract_list_returns_empty_when_nothing_matches(capsys):
+    body = {"meta": {"count": 0}}
+    out = ed._extract_list_of_dicts(body, ("data", "events"), "ctx")
+    assert out == []
+    assert "no list field at all" in capsys.readouterr().out
+
+
+def test_fetch_companies_map_uses_fallback_key(monkeypatch):
+    # /companies の実レスポンスがdata/companies以外のキーで返ってきても拾える。
+    monkeypatch.setattr(ed, "_get", lambda *a, **kw: {
+        "results": [{"security_code": "72030", "edinet_code": "E02144"}]
+    })
+    result = ed.fetch_companies_map("KEY", {})
+    assert result == {"7203": "E02144"}
+
+
+def test_fetch_events_uses_fallback_key(monkeypatch):
+    monkeypatch.setattr(ed, "_get", lambda *a, **kw: {
+        "disclosures": [{"security_code": "72030"}]
+    })
+    events = ed.fetch_events("KEY", {}, date(2026, 1, 1), date(2026, 7, 8))
+    assert events == [{"security_code": "72030"}]
+
+
+# ---------------------------------------------------------------------------
 # update_fundamentals_auto
 # ---------------------------------------------------------------------------
 

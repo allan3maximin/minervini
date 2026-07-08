@@ -54,8 +54,11 @@ EARLIEST_DATA_DATE = "2026-01-01"  # 決算短信データの提供開始日。�
 _QUARTER_TO_N = {"Q1": 1, "Q2": 2, "Q3": 3, "FY": 4}
 
 # /companies レスポンスの想定フィールド名候補 (要実地確認1)。
-_COMPANY_CODE_KEYS = ("security_code", "securities_code", "code")
-_COMPANY_EDINET_KEYS = ("edinet_code", "edinetCode")
+_COMPANY_CODE_KEYS = ("security_code", "securities_code", "code", "stock_code", "sec_code")
+_COMPANY_EDINET_KEYS = ("edinet_code", "edinetCode", "edinet_cd")
+
+# /events 内の各イベントの証券コードフィールド候補 (要実地確認4)。
+_EVENT_CODE_KEYS = ("security_code", "securities_code", "code", "stock_code", "sec_code")
 
 # /earnings レスポンスの会計年度フィールド候補 (要実地確認2)。
 _FY_START_FIELD_CANDIDATES = ("fiscal_year_start", "fy_start", "period_start", "current_period_start")
@@ -119,23 +122,60 @@ def _normalize_code(raw) -> str:
     return s[:4] if len(s) >= 5 else s
 
 
+def _extract_list_of_dicts(body, known_keys: tuple[str, ...], context: str) -> list[dict]:
+    """レスポンスbodyから配列部分を取り出す。
+
+    2026-07-08の初回稼働で `/companies`・`/events` とも既知キー名 (要実地確認1/4)
+    が外れて0件になる不具合を確認したため、既知キーが尽きたらトップレベル
+    dictの値からlist[dict]を自動検出するフォールバックを追加した。これにより
+    キー名の予想さえ外れなければ実データを取りこぼさない。それでも見つから
+    ない場合は原因追跡用にトップレベルのキー名をprintする。
+    """
+    if isinstance(body, list):
+        return body
+    if not isinstance(body, dict):
+        print(f"EDINET DB: {context} response is neither dict nor list "
+              f"(type={type(body).__name__}); treating as empty")
+        return []
+
+    for key in known_keys:
+        val = body.get(key)
+        if isinstance(val, list):
+            return val
+
+    for key, val in body.items():
+        if isinstance(val, list) and (not val or isinstance(val[0], dict)):
+            print(f"EDINET DB: {context} used auto-detected key '{key}' "
+                  f"(none of {known_keys} matched; response top-level keys: {list(body.keys())})")
+            return val
+
+    print(f"EDINET DB: {context} response had no list field at all; top-level keys: {list(body.keys())}")
+    return []
+
+
 def fetch_companies_map(api_key: str, config: dict) -> dict[str, str]:
     """GET /companies?per_page=5000 (1リクエスト) -> {証券コード4桁: edinet_code}。
     ユニバース外も含め全社分を返す (呼び出し側でユニバースにfilterする)。"""
     body = _get(api_key, config, "/companies", {"per_page": 5000})
-    rows = body.get("data") if isinstance(body, dict) else None
-    if rows is None and isinstance(body, dict):
-        rows = body.get("companies")
-    if rows is None:
-        rows = body if isinstance(body, list) else []
+    rows = _extract_list_of_dicts(body, ("data", "companies", "results", "items", "list"), "/companies")
 
     result: dict[str, str] = {}
+    unmatched_sample: dict | None = None
     for row in rows:
         raw_code = next((row.get(k) for k in _COMPANY_CODE_KEYS if row.get(k)), None)
         edinet_code = next((row.get(k) for k in _COMPANY_EDINET_KEYS if row.get(k)), None)
         if not raw_code or not edinet_code:
+            if unmatched_sample is None:
+                unmatched_sample = row
             continue
         result[_normalize_code(raw_code)] = str(edinet_code).strip()
+
+    if rows:
+        print(f"EDINET DB: /companies returned {len(rows)} rows, matched {len(result)} "
+              f"to known field names {_COMPANY_CODE_KEYS + _COMPANY_EDINET_KEYS}.")
+        if not result:
+            print(f"EDINET DB: /companies sample unmatched row keys: "
+                  f"{list(unmatched_sample.keys()) if unmatched_sample else '?'}")
     return result
 
 
@@ -153,7 +193,7 @@ def fetch_events(api_key: str, config: dict, since: date, until: date) -> list[d
             "limit": limit,
             "offset": offset,
         })
-        batch = body.get("data") or body.get("events") or []
+        batch = _extract_list_of_dicts(body, ("data", "events", "results", "items", "disclosures"), "/events")
         events.extend(batch)
         if len(batch) < limit:
             return events
@@ -165,7 +205,8 @@ def fetch_earnings(api_key: str, config: dict, edinet_code: str) -> list[dict]:
     limit = _ed_cfg(config).get("earnings_limit", 8)
     body = _get(api_key, config, f"/companies/{edinet_code}/earnings",
                 {"limit": limit, "include_nulls": "true"})
-    return body.get("data") or body.get("earnings") or []
+    return _extract_list_of_dicts(
+        body, ("data", "earnings", "results", "items"), f"/companies/{edinet_code}/earnings")
 
 
 # ---------------------------------------------------------------------------
@@ -378,14 +419,29 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
         try:
             events = fetch_events(api_key, config, since, today)
             budget -= 1
+            extracted = 0
+            matched = 0
+            unmatched_sample: dict | None = None
             for ev in events:
-                raw_code = ev.get("security_code") or ev.get("securities_code") or ev.get("code")
+                raw_code = next((ev.get(k) for k in _EVENT_CODE_KEYS if ev.get(k)), None)
                 if raw_code is None:
+                    if unmatched_sample is None:
+                        unmatched_sample = ev
                     continue
+                extracted += 1
                 code = _normalize_code(raw_code)
                 if code in code_set and code not in backlog_set:
                     backlog.append(code)
                     backlog_set.add(code)
+                    matched += 1
+            if events:
+                print(f"EDINET DB: /events returned {len(events)} events ({since}〜{today}), "
+                      f"{extracted} had a recognizable code field, {matched} matched our universe "
+                      f"and were queued.")
+                if extracted == 0:
+                    print(f"EDINET DB: /events sample unmatched event keys: "
+                          f"{list(unmatched_sample.keys()) if unmatched_sample else '?'} "
+                          f"(known code fields tried: {_EVENT_CODE_KEYS})")
             state["last_events_date"] = today.isoformat()
         except Exception as e:
             print(f"EDINET DB events fetch failed (state not advanced): {e}")

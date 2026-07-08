@@ -2,6 +2,46 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (8): EDINET DB「0 codes processed」バグ調査・修正(ユーザー指摘「直近ファんだにデータ入ってない」)
+
+### 経緯
+- edinetdb.enabled=true に切替後、dailyを回してもファンダが更新されないとユーザーから報告。
+  APIキー設定ミス・当日実行済みガードでのスキップ、両方を調査したが該当せず。ユーザーが実際の
+  pipeline実行ログ(`EDINET DB: 0 codes processed, 0 left in backlog.`のみで他の診断出力なし)を
+  貼ってくれたことで原因を特定できた。
+
+### 原因
+- `fetch_events()`/`fetch_companies_map()`/`fetch_earnings()` がAPIレスポンスの配列フィールドを
+  `body.get("data") or body.get("events") or []` のように決め打ちのキー名で取り出していた。
+  実際のトップレベルキー名がこれと違うと、エラーも出さず黙って空リストを返す。ログに他の診断
+  print が一切出ていない(=eventsループに入る前の時点で空)ことから、まさにこのパターンだと判断。
+
+### やったこと
+- `src/data/edinetdb.py`: `_extract_list_of_dicts(body, known_keys, context)` ヘルパーを新設。
+  known_keysで見つからなければ「値がlist[dict]の最初のトップレベルキー」を自動検出し、それも無ければ
+  実際のトップレベルキー一覧をprintして原因究明できるようにした。`fetch_companies_map`/`fetch_events`/
+  `fetch_earnings`/`update_fundamentals_auto`のeventsループを全てこの経由に書き換え。
+- `tests/test_edinetdb.py`: `_extract_list_of_dicts`本体(known_key一致/bare list/fallback自動検出/
+  全滅ケース)と、`fetch_companies_map`/`fetch_events`のfallback経由テストを6件追加。
+  `pytest`フルスイート158件全パス確認済み(既存152 + 新規6)。
+- `data/edinetdb_state.json` を `{}` にリセット。`last_events_date`が誤って2026-07-08まで進んでいた
+  ため、直さないと次回実行が2026-07-09以降しか再スキャンせず1〜7月分の開示を恒久的に取りこぼす所だった。
+- `.github/workflows/daily.yml`: 「当日実行済みチェック」ガードを**一時的に無効化**(常に`skip=false`)。
+  ユーザーが動作確認のため当日中に複数回再実行したいとの指示のため。コメントで元に戻すべき旨を明記。
+- HANDOFF.md §5「実地確認について」・§12項目7 を更新。
+
+### 次にやること
+- ユーザーにコミット/push依頼(サンドボックスからはpush不可)。
+- daily.ymlを手動実行し、EDINET DBの診断printで実際のトップレベル/フィールドキー名を確認。
+  auto-detectで拾えていればOKだが、拾えていなければ`_COMPANY_CODE_KEYS`等の定数を実地確認して
+  修正が必要。
+- **動作確認が済んだらdaily.ymlのガードを元のgit log判定に戻すこと**(このままだと同日複数回
+  コミットされ得る)。
+- 初回成功分の `data/edinetdb_auto.json` の値(revenue単位・fiscal_quarterラベル)を決算短信の
+  実際の数値と目視で突き合わせ。
+
+---
+
 ## 2026-07-08 (6): ダッシュボード表のスティッキー列をrevert(ユーザー指摘「表の固定は無しで戻して」)
 
 - 前エントリ(5)で入れたコード・銘柄名列のsticky固定を撤去。個別株ページのSPA統合(view-stock)自体は維持。
