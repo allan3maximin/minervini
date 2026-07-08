@@ -68,8 +68,19 @@ jobs:
       # here, so `pull --rebase` can cleanly replay our new commit on top of
       # any commit that landed in the meantime (e.g. a manual CSV edit via
       # the dashboard) instead of failing outright on local changes.
+      #
+      # -X theirs: 2026-07-08、intraday-indices/手動pushとのレース条件で
+      # docs/data/*.json (fundamentals_public.json, heatmap.json, indices.json,
+      # report.json など、実行のたびに丸ごと再生成されるダッシュボード出力)が
+      # 高頻度に競合し、rebaseがconflictでjob全体失敗 → このrunの結果が一切push
+      # されずダッシュボードが更新されない事態が発生した。これらのファイルは
+      # 手編集される「ソース」ではなく毎回全体再生成される出力なので、行単位
+      # マージは無意味 -- コンフリクト時は「今回生成した新しい方(theirs = 直前に
+      # ローカルcommitした内容)」を採用してjob失敗を防ぐ。
+      # 注意: rebase中の ours/theirs はmergeと逆で、「ours」=rebase先(=origin)、
+      # 「theirs」=replayされる自分のコミット、という意味になる。
       - name: Pull latest and push
         if: steps.commit.outputs.has_changes == 'true'
         run: |
-          git pull --rebase origin ${{ github.ref_name }}
+          git pull --rebase -X theirs origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}

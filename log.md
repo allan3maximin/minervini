@@ -2,6 +2,35 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (10): daily.ymlのpush競合でjob全体失敗→ダッシュボード未更新の件を修正
+
+### 経緯
+- ユーザー報告: daily.ymlのActions実行ログで `git pull --rebase origin master` が
+  `docs/data/fundamentals_public.json`/`heatmap.json`/`indices.json`/`report.json`で
+  CONFLICT、job全体が`exit code 1`で失敗。フロントエンドにも新しいデータが反映されて
+  いなかった。
+- 原因: pipeline実行(数分〜数十分)中に、intraday-indices workflow(1〜2時間おきに
+  `docs/data/indices.json`だけ更新)や、この日はユーザーの手動push(`edinetdb`修正)も
+  重なり、daily.ymlがcommit後にpull--rebaseする時点でorigin側がかなり進んでいた。
+  `docs/data/*.json`はどれも実行のたびに丸ごと再生成される出力ファイルで行単位マージが
+  無意味なため、コンフリクトで即job失敗 → **そのrunの結果が一切pushされずダッシュボードが
+  更新されない**という事態になっていた。
+
+### 修正
+- `.github/workflows/daily.yml`: 最後のpushステップを
+  `git pull --rebase origin ...` → `git pull --rebase -X theirs origin ...` に変更。
+  rebase中の ours/theirs はmergeと意味が逆(ours=rebase先=origin、theirs=replayされる
+  自分の新規commit)なので、`-X theirs`で「今回生成した新しい方を採用」になる。
+  これでdocs/data/*.json競合時にjob失敗せず、常に最新runの結果が反映されるようになる。
+
+### 次にやること
+- ユーザーにコミット/push依頼。
+- push後、次回のdaily.yml実行(cronは7-11 UTC毎時リトライ中、または手動workflow_dispatch)で
+  pushが正常完了し、ダッシュボードに反映されるか確認。
+- 動作確認が済んだら「当日実行済みスキップ」ガード(§(8))を元に戻すこと(まだ未着手)。
+
+---
+
 ## 2026-07-08 (9): EDINET DB `/earnings` のネストレスポンス解析バグを修正(1回目の修正が誤診断だった件)
 
 ### 経緯
