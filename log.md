@@ -2,6 +2,53 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-08 (14): record_to_point本修正 -- 実データ68フィールドの全ダンプが取れた
+
+### 経緯
+- (13)の1フィールド1行診断を本番実行したところ、今度こそ68フィールド全件が途切れず
+  取得できた(code 9024の`quarter=4`の決算短信サンプル)。これで長年の推測フィールド名を
+  実データで確定できた。
+
+### 判明した実スキーマ(推測との差分)
+- `quarter`: 文字列("Q1"/"FY"等)ではなく**整数1〜4**(FY相当=4)。
+- `fiscal_year_start`相当のフィールドは**存在しない**。代わりに`fiscal_year_end`
+  (会計年度の期末日、例`'2026-03-31'`)のみ存在する。
+- `disclosure_date`は**RFC2822形式**(例`'Thu, 14 May 2026 00:00:00 GMT'`)。ISO形式
+  という当初の推測は誤り。
+- `eps`/`revenue`はバレキーで存在し、値は決算短信の通期/累計値と整合(revenue=513286は
+  百万円単位と解釈すると通期売上と一致 -- 単位換算×1,000,000の推測は正しかった)。
+
+### 修正
+- `src/data/edinetdb.py`:
+  - `_resolve_quarter_n(rec)`を新設。整数1〜4をそのまま採用し、文字列ラベル
+    ("Q1"〜"Q4"/"FY")にも後方互換で対応。
+  - `_fy_start_from_fy_end(fy_end)`を新設。`fiscal_year_end`から1年前+1日を算出して
+    fy_startとする(日本の決算短信は原則12ヶ月決算という前提)。
+  - `_resolve_fy_start`の優先順位を変更: ①`fiscal_year_end`系フィールドから逆算
+    (新規・最優先) → ②`fiscal_year_start`系フィールドの直接値(未確認だが将来の保険として
+    維持) → ③`_estimate_fy_start`による開示日からの推定(最終フォールバック)。
+  - `_parse_disclosure_date(raw)`を新設。RFC2822形式を`email.utils.parsedate_to_datetime`
+    でパースし、ISO日付文字列に正規化(ISO形式で来た場合の後方互換も維持)。
+  - `record_to_point`をこれら新ヘルパー経由に書き換え。
+  - `update_fundamentals_auto`内の調査用診断print(全フィールド1行ずつダンプ)は
+    役目を終えたため撤去し、軽量なキー一覧のみのフォールバック診断に戻した
+    (将来また噛み合わなくなった場合の気付き用として維持)。
+  - モジュール冒頭のdocstringを「未検証」から「実地確認ステータス」に更新、全項目
+    確認済みである旨を記載。
+- `tests/test_edinetdb.py`: 実スキーマ(整数quarter、fiscal_year_end、RFC2822
+  disclosure_date)を反映した新規テスト7件追加(`_fy_start_from_fy_end`/
+  `_parse_disclosure_date`/`_resolve_quarter_n`の単体テスト含む)、診断print
+  アサーションを新フォーマットに更新。フルスイート169件全パス。
+
+### 次にやること
+- コミット/push → daily.yml再実行 → `data/edinetdb_auto.json`に実際にデータが
+  入るか確認 → ダッシュボードの「ファンダ入力/編集」モーダルにEDINET DB分の
+  数値が表示されるか目視確認(revenue単位・eps値が決算短信の実際の数値と一致するか)。
+- 確認が取れたら、まだ保留中の「当日実行済みスキップ」ガード再有効化
+  (`.github/workflows/daily.yml`、現在`skip=false`固定)に着手する。
+
+---
+
 ## 2026-07-08 (13): (12)の2行診断もまだ途中で切れた → 1フィールド1行方式に変更
 
 ### 経緯

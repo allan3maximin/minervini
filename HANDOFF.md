@@ -262,7 +262,7 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
   (`_COMPANY_CODE_KEYS`/`_EVENT_CODE_KEYS`/`_FY_START_FIELD_CANDIDATES`)までは救えない。
   もし次回実行でも0件が続くなら、追加された診断printで実際のフィールド名を確認し、該当の
   `_*_KEYS`/`_FY_START_FIELD_CANDIDATES` 定数を実地確認1〜5に沿って更新すること。
-- **2026-07-08(バグ修正3件目・未解決): ネスト抽出fix後も`data/edinetdb_auto.json`が0件のまま**。
+- **2026-07-08(バグ修正3件目・解決済み): ネスト抽出fix後も`data/edinetdb_auto.json`が0件のまま**。
   `/earnings`のリスト取り出し自体(`data.earnings`)は直ったが、その先の
   `record_to_point()`が見ている`quarter`/`eps`/`revenue`/`disclosure_date`/
   `_FY_START_FIELD_CANDIDATES`は全て実地未検証の推測フィールド名で、実レコードと噛み合っていない
@@ -288,6 +288,21 @@ tests/                      pytest 152件 (test_jquants.py, test_edinetdb.py 含
     「1フィールド1行」方式(`for k in sorted(sample.keys()): print(f"... {k!r} = {v!r}")`)に
     変更 — レコードの総フィールド数に関わらず各行は短くなるため、途中で打ち切られても
     それまでの行は残る。次回daily.yml実行で今度こそ68フィールド全部の確認が取れる見込み。
+  - **第6弾(解決): 68フィールド全件の実データ取得に成功、`record_to_point`を本修正**。
+    確定した実スキーマ: `quarter`は整数1〜4(FY相当=4。文字列"Q1"等ではない)、
+    `fiscal_year_start`相当のフィールドは存在せず`fiscal_year_end`(期末日、例
+    `'2026-03-31'`)のみ存在、`disclosure_date`はRFC2822形式。`eps`/`revenue`は
+    バレキーで存在し、revenue=513286(百万円単位、×1,000,000換算)は決算短信の
+    通期売上と整合 — 単位換算の推測は正しかった。
+    `_resolve_quarter_n()`(整数優先・文字列後方互換)、`_fy_start_from_fy_end()`
+    (期末日の1年前+1日を算出)、`_parse_disclosure_date()`(RFC2822→ISO正規化)を
+    新設し`record_to_point`を書き換え。`_resolve_fy_start`の優先順位は
+    ①`fiscal_year_end`系(新規最優先) → ②`fiscal_year_start`系(未確認だが保険で維持)
+    → ③開示日からの推定(最終フォールバック)。調査用の全フィールドダンプ診断printは
+    撤去し、軽量なキー一覧のみの診断に戻した。`tests/test_edinetdb.py`に実スキーマ
+    ベースのテスト7件追加、フルスイート169件全パス。**未確認**: 次回daily.yml実行で
+    `data/edinetdb_auto.json`に実際にデータが入るか、ダッシュボードの数値が決算短信と
+    一致するかの本番目視確認がまだ残っている。
 - **2026-07-08(バグ修正2件目): `/companies`/`/events`は上記対応で本番動作確認済み(3830社中3829社
   マッチ、997銘柄backlog投入)だったが、`/companies/{edinet_code}/earnings`だけ複数銘柄で
   「no list field at all; top-level keys: ['data', 'meta']」が続いていた。1回目の対応として

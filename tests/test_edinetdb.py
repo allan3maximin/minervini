@@ -75,6 +75,88 @@ def test_record_to_point_none_when_fy_start_unresolvable():
 
 
 # ---------------------------------------------------------------------------
+# 2026-07-08の実地確認(第6弾): 本番の68フィールド実レコードに基づくケース。
+# quarterは整数(FY=4)、fiscal_year_startは無く代わりにfiscal_year_end(期末日)
+# のみ存在、disclosure_dateはRFC2822形式。
+# ---------------------------------------------------------------------------
+
+def test_record_to_point_real_schema_integer_quarter_and_fiscal_year_end():
+    rec = {
+        "quarter": 4,
+        "eps": 150.93,
+        "revenue": 513286,
+        "disclosure_date": "Thu, 14 May 2026 00:00:00 GMT",
+        "fiscal_year_end": "2026-03-31",
+    }
+    p = ed.record_to_point(rec, "9024")
+    assert p == {
+        "code": "9024",
+        "fy_start": "2025-04-01",
+        "n": 4,
+        "label": "2025Q4",
+        "eps": 150.93,
+        "revenue": 513286 * 1_000_000,
+        "disc_date": "2026-05-14",
+    }
+
+
+def test_record_to_point_real_schema_quarter_1_to_3():
+    rec = {
+        "quarter": 2,
+        "eps": 40.0,
+        "revenue": 200000,
+        "disclosure_date": "Fri, 07 Nov 2025 00:00:00 GMT",
+        "fiscal_year_end": "2026-03-31",
+    }
+    p = ed.record_to_point(rec, "9024")
+    assert p["n"] == 2
+    assert p["fy_start"] == "2025-04-01"
+    assert p["label"] == "2025Q2"
+    assert p["disc_date"] == "2025-11-07"
+
+
+def test_fy_start_from_fy_end_helper():
+    assert ed._fy_start_from_fy_end("2026-03-31") == "2025-04-01"
+    assert ed._fy_start_from_fy_end("2026-09-30") == "2025-10-01"
+    assert ed._fy_start_from_fy_end(None) is None
+    assert ed._fy_start_from_fy_end("") is None
+    assert ed._fy_start_from_fy_end("not-a-date") is None
+
+
+def test_parse_disclosure_date_handles_rfc2822_and_iso():
+    assert ed._parse_disclosure_date("Thu, 14 May 2026 00:00:00 GMT") == "2026-05-14"
+    assert ed._parse_disclosure_date("2026-05-14") == "2026-05-14"
+    assert ed._parse_disclosure_date(None) is None
+    assert ed._parse_disclosure_date("") is None
+
+
+def test_resolve_quarter_n_handles_int_and_string():
+    assert ed._resolve_quarter_n({"quarter": 4}) == 4
+    assert ed._resolve_quarter_n({"quarter": 1}) == 1
+    assert ed._resolve_quarter_n({"quarter": "Q3"}) == 3
+    assert ed._resolve_quarter_n({"quarter": "FY"}) == 4
+    assert ed._resolve_quarter_n({"quarter": 5}) is None
+    assert ed._resolve_quarter_n({"quarter": 0}) is None
+    assert ed._resolve_quarter_n({"quarter": None}) is None
+    assert ed._resolve_quarter_n({}) is None
+
+
+def test_record_to_point_fiscal_year_end_takes_priority_over_legacy_fy_start_field():
+    # fiscal_year_end (実データで確認済み) が有れば、fiscal_year_start (未確認の
+    # 旧フォールバック候補) より優先する。
+    rec = {
+        "quarter": 1,
+        "eps": 10.0,
+        "revenue": 100.0,
+        "disclosure_date": "2026-08-01",
+        "fiscal_year_end": "2027-03-31",
+        "fiscal_year_start": "1999-01-01",  # 万一存在しても無視されることを確認
+    }
+    p = ed.record_to_point(rec, "7203")
+    assert p["fy_start"] == "2026-04-01"
+
+
+# ---------------------------------------------------------------------------
 # derive_with_base
 # ---------------------------------------------------------------------------
 
@@ -365,9 +447,9 @@ def test_update_prints_sample_when_records_fetched_but_none_usable(isolated_path
     assert store.get("7203") is None
     out = capsys.readouterr().out
     assert "fetched 1 earnings record(s) but 0 were usable" in out
-    # 第5弾: 1フィールド1行方式に変更したので "key = value" 形式で出る。
-    assert "'period' = 'Q1'" in out
-    assert "'eps_value' = 10.0" in out
+    # 第6弾でrecord_to_pointの実データ対応は完了したので、診断printは軽量な
+    # キー一覧のみに戻した(全フィールドダンプは調査完了に伴い撤去)。
+    assert "sample record keys: ['eps_value', 'period']" in out
 
 
 # ---------------------------------------------------------------------------

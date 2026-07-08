@@ -22,15 +22,20 @@ Auth: 環境変数 EDINETDB_API_KEY を X-API-Key ヘッダで送る。キーが
 config.edinetdb.enabled が false ならネットワークに一切触れず既存ストアを返す
 だけ (jquants.py と同じ設計)。
 
-**注意**: 2026-07-07時点、EDINETDB_API_KEY未登録のため以下は未検証(ドキュメント
-ベースの実装):
-  - `/companies` の証券コード/EDINETコードのフィールド名 (実地確認1)
-  - `/earnings` のフルスキーマ、特に会計年度フィールドの有無 (実地確認2)
-  - revenue の単位換算 (百万円->円の ×1_000_000。実地確認3)
-  - `/events` のレスポンス形式 (実地確認4)
-  - 429/枠超過時の挙動 (実地確認5)
-DESIGN_EDINETDB.md 1節を参照し、キー入手後に実地確認 -> 差異があれば本ファイル
-を修正してから config.yaml の edinetdb.enabled を true にすること。
+**実地確認ステータス** (2026-07-08、本番運用で段階的に検証・修正済み):
+  - `/companies` の証券コード/EDINETコードのフィールド名 -> 確認済み
+    (`security_code`/`edinet_code`)。
+  - `/earnings` のフルスキーマ(68フィールド) -> 確認済み。会計年度は
+    `fiscal_year_end`(期末日)のみ実在、fy_start相当のフィールドは無いため
+    期末日から1年分逆算する(`_fy_start_from_fy_end`)。`quarter`は整数1〜4
+    (FY=4相当)。`disclosure_date`はRFC2822形式。
+  - revenue の単位換算(百万円->円の ×1_000_000) -> 確認済み(9024の通期
+    revenue=513286と実際の決算短信の整合を確認)。
+  - `/events` のレスポンス形式 -> 確認済み(`_extract_list_of_dicts`の
+    フォールバックで自動吸収)。
+  - 429/枠超過時の挙動 -> 本番で429発生を確認、既存の30秒待ち1回リトライで
+    運用上問題なし(バックログに残して翌日に持ち越す設計のため取りこぼしなし)。
+詳細な経緯は log.md および HANDOFF.md「実地確認について」参照。
 """
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ import json
 import os
 import time
 from datetime import date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -51,16 +57,25 @@ API_KEY_ENV = "EDINETDB_API_KEY"
 DEFAULT_API_URL = "https://edinetdb.jp/v1"
 EARLIEST_DATA_DATE = "2026-01-01"  # 決算短信データの提供開始日。初回runのevents開始日
 
-_QUARTER_TO_N = {"Q1": 1, "Q2": 2, "Q3": 3, "FY": 4}
+# 2026-07-08の実地確認(第6弾、初めて68フィールド全件の実データを確認)で判明:
+# `quarter` は既に整数 1〜4 (FY=4相当) で入っており、"Q1"/"FY"のような文字列
+# ラベルではなかった。文字列で来る変種にも後方互換で対応できるよう両対応にする。
+_QUARTER_TO_N = {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4, "FY": 4}
 
-# /companies レスポンスの想定フィールド名候補 (要実地確認1)。
+# /companies レスポンスの想定フィールド名候補 (実地確認1で確認済み: security_code/edinet_code)。
 _COMPANY_CODE_KEYS = ("security_code", "securities_code", "code", "stock_code", "sec_code")
 _COMPANY_EDINET_KEYS = ("edinet_code", "edinetCode", "edinet_cd")
 
 # /events 内の各イベントの証券コードフィールド候補 (要実地確認4)。
 _EVENT_CODE_KEYS = ("security_code", "securities_code", "code", "stock_code", "sec_code")
 
-# /earnings レスポンスの会計年度フィールド候補 (要実地確認2)。
+# /earnings レスポンスの会計年度末フィールド候補。2026-07-08の実地確認(第6弾)で
+# `fiscal_year_end` (例 '2026-03-31'、その決算短信が属する会計年度の期末日) の
+# 実在を確認した。fy_startそのものを返すフィールドは存在しないため、期末日から
+# 1年分逆算する (_fy_start_from_fy_end)。
+_FY_END_FIELD_CANDIDATES = ("fiscal_year_end", "fy_end", "period_end", "current_period_end")
+# 旧フォールバック: fy_startを直接持つフィールドがもし存在すればそれを優先する
+# (現行APIでは未確認だが、将来の互換性のため残す)。
 _FY_START_FIELD_CANDIDATES = ("fiscal_year_start", "fy_start", "period_start", "current_period_start")
 
 
@@ -255,6 +270,48 @@ def _num(raw) -> float | None:
         return None
 
 
+def _parse_disclosure_date(raw) -> str | None:
+    """disclosure_date をISO日付文字列(YYYY-MM-DD)に正規化する。
+
+    2026-07-08の実地確認(第6弾)で実データがRFC2822形式
+    (例 'Thu, 14 May 2026 00:00:00 GMT') であることを確認した(ISO形式という
+    当初の推測は誤り)。旧来のISO形式で来るケースにも後方互換で対応する。
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:
+        dt = parsedate_to_datetime(s)
+        if dt is not None:
+            return dt.date().isoformat()
+    except (TypeError, ValueError):
+        pass
+    try:
+        return date.fromisoformat(s[:10]).isoformat()
+    except ValueError:
+        return None
+
+
+def _fy_start_from_fy_end(fy_end: str) -> str | None:
+    """fiscal_year_end (例 '2026-03-31') から fy_start (例 '2025-04-01') を算出する。
+
+    2026-07-08の実地確認(第6弾)で `fiscal_year_end` フィールドの実在を確認した。
+    日本の決算短信は原則12ヶ月決算のため、期末日の1年前の翌日がfy_startになる。
+    """
+    if not fy_end:
+        return None
+    try:
+        end = date.fromisoformat(str(fy_end).strip()[:10])
+    except ValueError:
+        return None
+    try:
+        prev_end = end.replace(year=end.year - 1)
+    except ValueError:
+        # 2/29(うるう日)を含む期末日で、1年前が非うるう年の場合のフォールバック。
+        prev_end = end.replace(year=end.year - 1, day=28)
+    return (prev_end + timedelta(days=1)).isoformat()
+
+
 def _estimate_fy_start(disc_date: str, n: int, fiscal_year_end_month: int) -> str | None:
     """会計年度フィールドが無い場合のfy_start推定 (DESIGN_EDINETDB.md 3.3(b))。
 
@@ -295,13 +352,38 @@ def _estimate_fy_start(disc_date: str, n: int, fiscal_year_end_month: int) -> st
     return f"{fy_start_year:04d}-{fy_start_month_actual:02d}-01"
 
 
+def _resolve_quarter_n(rec: dict) -> int | None:
+    """quarter フィールドから四半期番号(1〜4、FY=4)を取り出す。
+
+    2026-07-08の実地確認(第6弾)で実データは整数 (例 `'quarter': 4`) だと確認
+    した。旧来の文字列ラベル("Q1"/"FY"等)で来る変種にも後方互換で対応する。
+    """
+    raw = rec.get("quarter")
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        return n if n in (1, 2, 3, 4) else None
+    s = str(raw or "").strip().upper()
+    return _QUARTER_TO_N.get(s)
+
+
 def _resolve_fy_start(rec: dict, disc_date: str, n: int, fiscal_year_end_month: int | None) -> str | None:
+    # 第一候補: fiscal_year_end (実地確認第6弾で実在確認済み) から1年分逆算。
+    for key in _FY_END_FIELD_CANDIDATES:
+        raw = rec.get(key)
+        if raw:
+            fy_start = _fy_start_from_fy_end(str(raw).strip())
+            if fy_start:
+                return fy_start
+    # 第二候補: fy_startを直接持つフィールドがもしあれば(未確認だが将来の保険)。
     for key in _FY_START_FIELD_CANDIDATES:
         raw = rec.get(key)
         if raw:
             s = str(raw).strip()
             if len(s) >= 10:
                 return s[:10]
+    # 最終フォールバック: 開示日からの逆算推定(fiscal_year_end_monthが渡された場合のみ)。
     if fiscal_year_end_month is not None:
         return _estimate_fy_start(disc_date, n, fiscal_year_end_month)
     return None
@@ -313,18 +395,18 @@ def record_to_point(rec: dict, code: str, fiscal_year_end_month: int | None = No
     戻り値: {"code", "fy_start", "n", "label", "eps", "revenue", "disc_date"}
     (eps/revenueはYTD累計)。対象外・fy_start不明ならNone。
     """
-    n = _QUARTER_TO_N.get(str(rec.get("quarter") or "").strip())
+    n = _resolve_quarter_n(rec)
     if n is None:
         return None
 
     eps = _num(rec.get("eps"))
     revenue = _num(rec.get("revenue"))
     if revenue is not None:
-        revenue *= 1_000_000  # 百万円 -> 円 (要実地確認3。ドキュメント記載の単位を信頼)
+        revenue *= 1_000_000  # 百万円 -> 円 (実地確認3で確認: 9024の通期revenue=513286はこの単位で整合)
     if eps is None and revenue is None:
         return None
 
-    disc_date = str(rec.get("disclosure_date") or "").strip()
+    disc_date = _parse_disclosure_date(rec.get("disclosure_date")) or ""
     fy_start = _resolve_fy_start(rec, disc_date, n, fiscal_year_end_month)
     if fy_start is None:
         return None
@@ -477,14 +559,12 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
     # 3. backlog消化: 残り予算の範囲で /earnings を叩き、ストアへ反映。
     processed = 0
     remaining_backlog: list[str] = []
-    # 2026-07-08の実地確認(第3弾)で判明: /earnings のリスト取り出し自体は直った
-    # (found nested list at 'data.earnings')のに data/edinetdb_auto.json が0件の
-    # まま、という新たな不具合が発生した。原因はrecord_to_point/_resolve_fy_start
-    # 内の個別フィールド名(quarter/eps/revenue/disclosure_date/
-    # _FY_START_FIELD_CANDIDATES)が未検証の推測のままで、実レコードと噛み合って
-    # いないと黙って処理対象0件になる(record_to_pointがNoneを返すだけでエラーに
-    # ならない)ため。原因追跡用に、レコードは取れたのに1件も採用できなかった
-    # 銘柄について、最初の1件だけサンプルのキー/値をprintする。
+    # 2026-07-08の実地確認(第3〜6弾)でrecord_to_pointの個別フィールド名
+    # (quarter/eps/revenue/disclosure_date/fiscal_year_end)を全て実データと
+    # 突き合わせて修正済み。ただし将来APIが変わって再び噛み合わなくなった場合に
+    # 気付けるよう、レコードは取れたのに1件も採用できなかった銘柄がいた場合は
+    # 最初の1件だけキー一覧を軽くprintする(以前のような全フィールド1行ずつの
+    # ダンプは調査完了に伴い撤去)。
     printed_empty_sample = False
     for code in backlog:
         if budget <= 0:
@@ -526,18 +606,10 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
         elif recs and not printed_empty_sample:
             printed_empty_sample = True
             sample = recs[0]
-            # 2026-07-08の実地確認(第5弾): 1行にまとめて出す方式は、フィールド数が
-            # 68件もある実レコードだと2行に分けてもキー一覧だけでまだ途中で切れる
-            # ことが分かった(GitHub Actionsのログ行長制限と思われる)。1フィールド
-            # 1行に徹底的に分割すれば、行が多くなっても各行は必ず短く収まり、
-            # 途中で打ち切られても既に出力済みの行は失われない。
             print(f"EDINET DB: {code} fetched {len(recs)} earnings record(s) but 0 were usable "
-                  f"after record_to_point/derive_with_base (quarter field guessed as 'quarter', "
-                  f"eps/revenue keys, fy_start candidates {_FY_START_FIELD_CANDIDATES} -- one of "
-                  f"these likely doesn't match). Dumping all {len(sample)} sample fields "
-                  f"one per line below:")
-            for k in sorted(sample.keys()):
-                print(f"EDINET DB:   {code}.{k!r} = {sample[k]!r}")
+                  f"after record_to_point/derive_with_base -- possible causes: quarter not in "
+                  f"1-4, both eps/revenue missing, or fy_start unresolved (no {_FY_END_FIELD_CANDIDATES} "
+                  f"field). sample record keys: {sorted(sample.keys())}")
         processed += 1
 
     state["backlog"] = remaining_backlog
