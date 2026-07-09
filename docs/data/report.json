@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-09T10:24:45.409657+00:00",
+  "generated_at": "2026-07-09T13:50:52.733151+00:00",
   "universe_size": 1000,
   "template_pass": 171,
   "priority_counts": {
@@ -24128,7 +24128,7 @@
         {
           "condition": "ma50_above_ma150",
           "penalty": 2,
-          "distance_pct": -0.8
+          "distance_pct": -0.58
         },
         {
           "condition": "rs_above_min",
@@ -24137,9 +24137,9 @@
         }
       ],
       "ma_deviation_pct": {
-        "ma50": 7.42,
-        "ma150": 6.57,
-        "ma200": 9.59
+        "ma50": 7.07,
+        "ma150": 6.45,
+        "ma200": 9.5
       },
       "high52w_distance_pct": 20.06,
       "sector33": "不動産業",
