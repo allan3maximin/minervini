@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=16">
+<link rel="stylesheet" href="assets/style.css?v=17">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -204,6 +204,26 @@
     <div id="score-breakdown"></div>
   </section>
 
+  <section class="detail-card" id="sizing-card">
+    <h2>ポジションサイジング</h2>
+    <div class="sizing-inputs">
+      <label class="sizing-field">
+        総資金(円)
+        <input type="number" id="sizing-capital" min="0" step="10000" inputmode="numeric" placeholder="例: 10000000">
+      </label>
+      <div class="sizing-field">
+        1トレードあたりリスク(%)
+        <div class="segmented" id="sizing-risk-toggle">
+          <button type="button" data-risk="0.5">0.5%</button>
+          <button type="button" data-risk="0.75">0.75%</button>
+          <button type="button" data-risk="1.0" class="active">1.0%</button>
+          <button type="button" data-risk="1.25">1.25%</button>
+        </div>
+      </div>
+    </div>
+    <div id="sizing-result"></div>
+  </section>
+
   <section class="detail-card">
     <h2>ファンダメンタルズ</h2>
     <div id="fund-detail-body"></div>
@@ -230,6 +250,6 @@
 <script src="assets/fundamentals-modal.js?v=7"></script>
 <script src="assets/heatmap.js?v=8"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=18"></script>
+<script src="assets/app.js?v=19"></script>
 </body>
 </html>

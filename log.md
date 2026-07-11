@@ -2,6 +2,40 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (25): ポジションサイジング計算機(個別株画面)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク7)
+
+### 変更内容
+- `docs/index.html`: view-stock内、ファンダメンタルズカードの直前に`#sizing-card`
+  (ポジションサイジング)を新設。入力: 総資金(円、`#sizing-capital`)、1トレードあたり
+  リスク%(プリセットボタン0.5/0.75/1.0/1.25%、`#sizing-risk-toggle`、既存`.segmented`流用)。
+  `app.js?v=18→19`, `style.css?v=16→17`。
+- `docs/assets/app.js`:
+  - `setupSizingCalculator(stock)`: `initStockPage`から`renderStockMeta`の直後に呼ぶ。
+    localStorage(`minervini_sizing_settings`)から総資金・リスク%を復元し入力欄に反映。
+    イベントリスナーはモジュール変数`sizingWired`でガードして1回だけ登録(SPAで銘柄切替の
+    たびに積み上がらない。settingsBtn.dataset.wiredと同じ発想)。
+  - `renderSizingResult(stock)`: `stock.buy_stop`/`stock.stop_loss`のどちらか欠損(watchlist銘柄等)
+    なら「セットアップ未確定のため計算不可」。riskPerShare = buy_stop - stop_loss、
+    許容損失額 = 総資金×リスク%、理論株数 = 許容損失額/riskPerShare、
+    発注株数 = floor(理論株数/100)*100(単元100株切り下げ)。100株未満なら
+    「リスク許容内で1単元買えません(1単元の損失=X円=資金のY%)」。それ以外は
+    投入額・資金比・実損失額を表示、資金比25%超で注意表示、50%超で強い警告色。
+  - `initStockPage`の先頭リセット処理に`#sizing-result`のクリアを追加。
+- `docs/assets/style.css`: `.sizing-inputs`/`.sizing-field`/`.sizing-output`/`.sizing-warn`
+  (`-strong`修飾子でdanger色)を新設。
+
+### 検証
+- preview_evalで buy_stop=2937, stop_loss=2797.44, 資金1000万円, リスク1% の計算例を確認:
+  riskPerShare=139.56, 発注株数=700株, 投入額=2,055,900円, 資金比=20.6%, 実損失=97,692円
+  (仕様書の期待値と完全一致)。スクリーンショットで表示も確認。
+  セットアップ未確定銘柄(buy_stop/stop_loss=null)で「計算不可」表示を確認。
+  リスクプリセット0.75%クリック→localStorage保存→別銘柄へのsetupSizingCalculator呼び出しで
+  総資金・リスク%が復元されることを確認(SPA銘柄切替をまたいだ永続化)。
+- `python -m pytest tests/ -q` 202 passed(純フロント機能のためバックエンドテストへの影響なし)。
+
 ## 2026-07-11 (24): ポジション管理(保有銘柄ビュー + 売りシグナル)
 
 ### 要望(ユーザー原文)

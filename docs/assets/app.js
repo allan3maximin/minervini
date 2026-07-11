@@ -595,10 +595,12 @@ async function initStockPage(codeOverride) {
   const scoreEl = document.getElementById("score-breakdown");
   const fundEl = document.getElementById("fund-detail-body");
   const copyBtn = document.getElementById("copy-stock-data-btn");
+  const sizingResultEl = document.getElementById("sizing-result");
   if (metaEl) metaEl.innerHTML = "";
   if (mustEl) mustEl.innerHTML = "";
   if (scoreEl) scoreEl.innerHTML = "";
   if (fundEl) fundEl.innerHTML = "";
+  if (sizingResultEl) sizingResultEl.innerHTML = "";
   if (copyBtn) copyBtn.hidden = true;
 
   if (!code) {
@@ -616,6 +618,7 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
+  setupSizingCalculator(stock);
   setupStockCopyButton(stock, chart, report);
 
   if (!chart) {
@@ -948,6 +951,129 @@ async function copyTextToClipboard(text) {
   ta.select();
   document.execCommand("copy");
   ta.remove();
+}
+
+// ---------------------------------------------------------------------------
+// ポジションサイジング計算機 (view-stock, 2026-07-11追加)。純フロント機能
+// (バックエンド変更なし)。総資金/リスク%はlocalStorageに保存し銘柄切替をまたいで復元する。
+// ---------------------------------------------------------------------------
+
+const SIZING_SETTINGS_KEY = "minervini_sizing_settings";
+
+let sizingStock = null;
+let sizingWired = false;
+
+function loadSizingSettings() {
+  try {
+    const raw = localStorage.getItem(SIZING_SETTINGS_KEY);
+    if (!raw) return { capital: null, riskPct: 1.0 };
+    const parsed = JSON.parse(raw);
+    return {
+      capital: typeof parsed.capital === "number" ? parsed.capital : null,
+      riskPct: typeof parsed.riskPct === "number" ? parsed.riskPct : 1.0,
+    };
+  } catch (e) {
+    return { capital: null, riskPct: 1.0 };
+  }
+}
+
+function saveSizingSettings(settings) {
+  try {
+    localStorage.setItem(SIZING_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {
+    // localStorageが使えない環境(プライベートモード等)は永続化を諦めるだけで致命的ではない
+  }
+}
+
+function renderSizingResult(stock) {
+  const el = document.getElementById("sizing-result");
+  if (!el) return;
+
+  if (!stock || stock.buy_stop == null || stock.stop_loss == null) {
+    el.innerHTML = '<p class="tier-note">セットアップ未確定のため計算不可</p>';
+    return;
+  }
+
+  const capitalInput = document.getElementById("sizing-capital");
+  const capital = Number(capitalInput ? capitalInput.value : NaN);
+  const activeBtn = document.querySelector("#sizing-risk-toggle button.active");
+  const riskPct = activeBtn ? Number(activeBtn.dataset.risk) : 1.0;
+
+  if (!capital || capital <= 0) {
+    el.innerHTML = '<p class="tier-note">総資金を入力してください</p>';
+    return;
+  }
+
+  const riskPerShare = stock.buy_stop - stock.stop_loss;
+  if (!(riskPerShare > 0)) {
+    el.innerHTML = '<p class="tier-note">逆指値/損切りのデータ不整合のため計算できません</p>';
+    return;
+  }
+
+  const allowedLoss = capital * (riskPct / 100);
+  const theoreticalShares = allowedLoss / riskPerShare;
+  const orderShares = Math.floor(theoreticalShares / 100) * 100;
+
+  if (orderShares < 100) {
+    const oneUnitLoss = riskPerShare * 100;
+    const oneUnitPct = (oneUnitLoss / capital) * 100;
+    el.innerHTML = `<p class="sizing-warn">リスク許容内で1単元買えません(1単元の損失 = ${Math.round(oneUnitLoss).toLocaleString("ja-JP")}円 = 資金の${oneUnitPct.toFixed(2)}%)</p>`;
+    return;
+  }
+
+  const investedAmount = orderShares * stock.buy_stop;
+  const capitalRatio = (investedAmount / capital) * 100;
+  const actualLoss = orderShares * riskPerShare;
+
+  let concentrationWarning = "";
+  if (capitalRatio > 50) {
+    concentrationWarning = '<p class="sizing-warn sizing-warn-strong">⚠ 1銘柄への集中が50%を超えます</p>';
+  } else if (capitalRatio > 25) {
+    concentrationWarning = '<p class="sizing-warn">⚠ 1銘柄への集中が25%を超えます</p>';
+  }
+
+  el.innerHTML = `
+    <div class="sizing-output">
+      <div><span>発注株数</span><strong>${orderShares.toLocaleString("ja-JP")}株</strong></div>
+      <div><span>投入額</span><strong>${Math.round(investedAmount).toLocaleString("ja-JP")}円</strong></div>
+      <div><span>資金比</span><strong>${capitalRatio.toFixed(1)}%</strong></div>
+      <div><span>実損失額</span><strong>${Math.round(actualLoss).toLocaleString("ja-JP")}円</strong></div>
+    </div>
+    ${concentrationWarning}
+  `;
+}
+
+function setupSizingCalculator(stock) {
+  sizingStock = stock || null;
+  const capitalInput = document.getElementById("sizing-capital");
+  const riskToggle = document.getElementById("sizing-risk-toggle");
+  if (!capitalInput || !riskToggle) return;
+
+  const settings = loadSizingSettings();
+  if (settings.capital != null) capitalInput.value = settings.capital;
+  riskToggle.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.risk) === settings.riskPct);
+  });
+
+  if (!sizingWired) {
+    sizingWired = true;
+    capitalInput.addEventListener("input", () => {
+      saveSizingSettings({
+        capital: Number(capitalInput.value) || null,
+        riskPct: Number(document.querySelector("#sizing-risk-toggle button.active")?.dataset.risk) || 1.0,
+      });
+      renderSizingResult(sizingStock);
+    });
+    riskToggle.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-risk]");
+      if (!btn) return;
+      riskToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      saveSizingSettings({ capital: Number(capitalInput.value) || null, riskPct: Number(btn.dataset.risk) });
+      renderSizingResult(sizingStock);
+    });
+  }
+
+  renderSizingResult(sizingStock);
 }
 
 function setupStockCopyButton(stock, chart, report) {

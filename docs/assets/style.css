@@ -613,6 +613,51 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--accent);
 }
 
+/* ---------------------------------------------- ポジションサイジング計算機 */
+
+.sizing-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.sizing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sizing-field input[type="number"] {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 14px;
+  width: 200px;
+}
+.sizing-output {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  font-size: 13px;
+}
+.sizing-output > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sizing-output span { color: var(--text-dim); font-size: 11px; }
+.sizing-output strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.sizing-warn {
+  margin-top: 8px;
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sizing-warn-strong { color: var(--danger); }
+
 /* ---------------------------------------------- 機能B: セクターヒートマップ */
 
 .hm-toolbar {
