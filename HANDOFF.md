@@ -697,8 +697,9 @@ node --check docs/assets/app.js   # JS構文チェック
    銀行・保険等の特殊業種は Sales が取れず NCSales にもフォールバックしない可能性 → 必要ならフィールド追加で対応。
 3. ~~style.css の未使用 .prio-badge / .prio-1〜4 の削除~~ → 2026-07-08、COLUMNS一本化に伴い削除済み。
 4. passkeyAuth (書き込み系UI) はキルスイッチOFFのまま。再有効化するなら config.js の passkeyAuthEnabled を true に。
-5. report.json から P2-P4 レコードの出力自体を止める軽量化(現状フロントで捨てているだけ)。
-   ※やる場合 breadth の p2-p4 カウント履歴と priority.py テストへの影響に注意。
+5. ~~report.json から P2-P4 レコードの出力自体を止める軽量化~~ → **2026-07-11完了**
+   (`src/pipeline.py`で`continue`のみに変更、`assemble_priority_record`削除。breadthの
+   p1_count〜p4_countはpriority_by_codeから独立集計のため無影響)。
 6. RSパーセンタイルの母集団はユニバース内銘柄(全市場ではない)— 既知の仕様。
 7. ~~EDINET DB実地確認~~ → 2026-07-08、ユーザー指示で `config.yaml: edinetdb.enabled: true` に切替済み。
    **daily.yml の `EDINETDB_API_KEY` Secret が未登録なら登録すること**(未登録でもエラーにはならず
@@ -708,6 +709,14 @@ node --check docs/assets/app.js   # JS構文チェック
    → 同日、`0 codes processed` バグを発見・修正(§5「実地確認について」の追記参照)。
    → ~~daily.yml のガードを一時無効化中~~ → **2026-07-11、元のgit log判定に復旧済み**
    (`.github/workflows/daily.yml`)。
+8. **2026-07-11新機能の次候補**:
+   - ポジション管理: 保有銘柄がユニバース外(流動性下位/新規上場直後等)だと`data_missing`に
+     なる既知の制約(§3「ポジション管理」節参照)。必要になったら保有銘柄をprices取得対象に
+     加える改修を検討。
+   - 簡易バックテスト: 現状はフェーズ1(週次グリッド近似)。精度を上げるなら全日付スキャン+
+     RSのより厳密なpoint-in-time化(フェーズ2、計算量が大きく増える点に注意)。
+   - 地合いシグナル: 現状は閾値ベースの単純合成。将来的に履歴(breadth.json)を使った
+     シグナルの精度検証(バックテストとの組み合わせ)が考えられる。
 
 ## 13. 簡易バックテストCLI (src/backtest.py) — 2026-07-11追加
 
