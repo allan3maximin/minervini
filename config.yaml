@@ -50,7 +50,11 @@ vcp:
   zigzag_min_pct: 0.03
   zigzag_atr_mult: 1.2
   contraction_count: [2, 6]
-  monotonic_tolerance: 1.0
+  # 2026-07-12: 1.0(許容ゼロ)→1.2。ZigZag測定ノイズ程度の深さ逆転で落選していたため緩和。
+  # バックテスト(400営業日)で緩和により追加されるセットアップの期待R 1.25 と現行合格組(0.82)より
+  # 良好なことを確認済み(data/backtest/vcp_tolerance_comparison_20260712.md)。
+  # なお swing_low_tolerance(V7)の緩和は同バックテストで質の劣化(期待R 0.33)が確認されたため見送り。
+  monotonic_tolerance: 1.2
   first_depth_max: 0.35
   last_depth_max: 0.10
   volume_dryup_ratio: 0.80
