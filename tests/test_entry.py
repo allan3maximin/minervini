@@ -82,6 +82,16 @@ def test_status_history_locked_pivot_and_new_breakout_detection():
     assert is_new_breakout(history, "7134", "BREAKOUT") is False  # yesterday already BREAKOUT
 
 
+def test_record_status_same_date_replaces_instead_of_appending():
+    history: dict = {}
+    history = record_status(history, "7134", "2026-06-25", "WATCH_A", 1000.0, 950.0, CONFIG)
+    history = record_status(history, "7134", "2026-06-25", "BREAKOUT", 1000.0, 950.0, CONFIG)
+
+    entries = history["7134"]
+    assert len(entries) == 1
+    assert entries[0]["status"] == "BREAKOUT"
+
+
 def test_extended_cooldown_ready_after_14_days():
     history: dict = {}
     for i in range(13):

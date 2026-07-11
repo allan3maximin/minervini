@@ -112,7 +112,7 @@ def record_status(
 ) -> dict:
     config = config or load_config()
     keep_days = config["entry"]["status_history_days"]
-    entries = history.setdefault(code, [])
+    entries = [e for e in history.get(code, []) if e.get("date") != date_str]
     entries.append({"date": date_str, "status": status, "pivot": pivot, "stop_ref_low": stop_ref_low})
     history[code] = entries[-keep_days:]
     return history

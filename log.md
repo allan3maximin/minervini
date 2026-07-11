@@ -2,6 +2,24 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (21): status_history.jsonの同日重複を解消(record_statusの同日replace)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク3)
+
+### 変更内容
+- `src/screener/entry.py :: record_status`: 同じ `date` のエントリを削除してからappendする
+  よう変更(1日1件を前提とする `extended_cooldown_ready`/`compute_breakout_success_rate`/
+  `keep_days=90`切り詰めの前提を守る)。
+- `tests/test_entry.py`: `test_record_status_same_date_replaces_instead_of_appending` 追加
+  (同日2回呼んでもエントリは1件、値は後勝ち)。
+- `data/status_history.json`: ガード無効化中の同日重複(1銘柄24件→ユニーク日付6件)を
+  ワンショットクリーンアップ(各codeで同一dateは最後のエントリのみ残す)。
+
+### 検証
+- `python -m pytest tests/test_entry.py -q` 23 passed。
+- クリーンアップ後、対象銘柄で `len(dates) == len(set(dates))` を確認。
+
 ## 2026-07-11 (20): breadth.jsonの同日重複エントリを解消(append → 同日replace)
 
 ### 要望(ユーザー原文)
