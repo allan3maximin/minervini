@@ -73,12 +73,25 @@
       "universe_size": 1000,
       "template_pass": 184,
       "template_pass_rate": 0.184,
-      "watch_count": 0,
+      "watch_count": 1,
       "breakout_success_rate": null,
       "p1_count": 184,
       "p2_count": 102,
       "p3_count": 143,
-      "p4_count": 162
+      "p4_count": 162,
+      "signal": "green",
+      "reasons": [
+        "TOPIXが50日線・200日線を上回り、200日線も上向き",
+        "200日線上抜け銘柄が67.1%(緑閾値50%以上)",
+        "新高値32件 > 新安値0件"
+      ],
+      "pct_above_ma200": 0.6714,
+      "pct_above_ma50": 0.622,
+      "new_high_count": 32,
+      "new_low_count": 0,
+      "index_above_ma50": true,
+      "index_above_ma200": true,
+      "index_ma200_slope_up": true
     }
   ]
 }
