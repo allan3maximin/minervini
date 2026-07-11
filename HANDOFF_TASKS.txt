@@ -1,0 +1,477 @@
+================================================================================
+ミネルヴィニ式スクリーナー 改善タスク申し送り (2026-07-11作成)
+実装担当: Sonnet / 発注者: ユーザー(唯一の利用者、本ツールで実トレード中)
+================================================================================
+
+■ このファイルの使い方
+- タスク1〜8を番号順に実施する。順番には依存関係の意味がある(1〜3はデータ健全性の
+  修正で、4以降の前提になる)。
+- 1タスク = 1コミット(タスク6のようにバックエンド/フロントで分けたければ2コミット可)。
+- 各タスクの「受け入れ基準」を満たしたことを確認してから次へ進む。
+- 途中で中断する場合も、完了したタスクまでは log.md に記録を残すこと(下記ルール)。
+
+■ 最初に必ず読むもの
+1. HANDOFF.md (リポジトリ直下) — プロジェクト全体像。特に §3(パイプラインの流れ)、
+   §7(フロントエンド詳細)、§11(サンドボックス環境のgit制約)、§13(変更時チェックリスト)。
+2. log.md (リポジトリ直下) — 進行状況ログ。新しい方が上。直近のエントリで最新状況を把握。
+3. config.yaml — 全パラメータ。
+
+■ 全タスク共通ルール
+- 【重要】作業開始前に必ず `git fetch` し、origin/master との乖離を確認すること。
+  GitHub Actions のbotが平日毎日 data/ と docs/data/ にコミットするため、ローカルは
+  すぐ古くなる。乖離があったら: 生成データ(data/, docs/data/)はリモート側が正、
+  ソースコードはローカル側が正。
+- 【log.md への追記(ユーザー指示)】各タスク完了ごとに、log.md の先頭(タイトル行
+  「# 進行状況ログ」とその注意書きの直後)に以下の形式でエントリを追記する。
+  既存エントリと同じ形式(新しい方が上、通し番号は直近エントリ+1):
+
+    ## YYYY-MM-DD (N): <タスクの短いタイトル>
+
+    ### 要望(ユーザー原文)
+    > 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスクM)
+
+    ### 変更内容
+    - 変更したファイルと内容を箇条書き
+
+    ### 検証
+    - 実行したテスト・確認結果
+
+- テスト: 変更のたびに `python -m pytest tests/ -q` 全パス +
+  (JSを触ったら) `node --check docs/assets/app.js` を確認。
+  ※サンドボックスでは pyarrow 欠如で tests/test_indices.py の1件が fail することが
+  ある(既知・無関係)。それ以外の fail は自分の変更が原因と考えること。
+- pipeline.py に外部I/Oを追加したら tests/test_pipeline.py の `wired` fixture に
+  モックを必ず追加(HANDOFF §10)。
+- docs/ の JS/CSS を変更したら docs/index.html の該当 `?v=N` を必ず+1する
+  (キャッシュバスター。現在値は index.html を直接確認)。
+- UI文言に「P1」「P2」「P3」「P4」という語を出さないこと(概念はUI廃止済み。HANDOFF §3)。
+- コミットメッセージは既存の流儀(feat:/fix:/chore: + 日本語OK)に合わせる。
+- push はユーザーが行う(サンドボックスからは不可)。
+
+================================================================================
+タスク1: daily.yml の「当日実行済みチェック」ガードを復旧する
+================================================================================
+【背景】2026-07-08、EDINET DB検証のためガードを一時無効化した(常に skip=false)。
+検証は完了済み(data/edinetdb_auto.json に456銘柄分のデータ投入を確認済み)なのに
+戻し忘れており、毎時cron(07:00-11:00 UTC の5回)のたびにパイプラインがフル実行され、
+タスク2・3のデータ重複問題を毎日悪化させている。
+
+【変更ファイル】.github/workflows/daily.yml
+
+【手順】
+1. "Check if already run today" ステップ(id: check)の run ブロックを、無効化前の
+   実装に差し替える。無効化前のコードは以下(git show 362f6bd:.github/workflows/daily.yml
+   でも確認できる):
+
+      - name: Check if already run today
+        id: check
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          if git log --format=%s -20 | grep -qF "chore: daily screener run ${TODAY}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Already ran today ($TODAY), skipping remaining steps."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+2. 無効化時に入れた「一時的にガードを無効化」のコメント(現在の29-33行目付近)を削除。
+3. checkout の fetch-depth: 0 はガードが git log を使うために必要なので残すこと。
+
+【受け入れ基準】
+- daily.yml のガードが git log 判定に戻っている。
+- YAMLとして妥当(python -c "import yaml,io;yaml.safe_load(io.open('.github/workflows/daily.yml',encoding='utf-8'))" が通る)。
+
+================================================================================
+タスク2: breadth.json の同日重複エントリを解消する(append → 同日replace)
+================================================================================
+【背景】src/report/build_site.py :: update_breadth() は実行のたびに history へ
+append する。ガード無効化中に1日最大5回実行された結果、2026-07-08 は同日12エントリ
+など重複だらけになった。keep_days=60 は「約60営業日」のつもりが実質25日分しかなく、
+ダッシュボードの地合いメーター履歴が歪んでいる。
+
+【変更ファイル】src/report/build_site.py、tests/test_build_site.py(該当テストファイル名は
+tests/ 内を grep で確認)、docs/data/breadth.json(既存データのクリーンアップ)
+
+【手順】
+1. update_breadth() を「同じ date のエントリが既にあれば置き換え、無ければ append」に
+   変更する。実装例:
+       breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
+       breadth["history"].append(entry)
+       breadth["history"] = breadth["history"][-keep_days:]
+   (置き換え位置は末尾でよい。同日再実行は最新値で上書きが正しい挙動)
+2. 既存の docs/data/breadth.json をワンショットでクリーンアップする:
+   同一 date は最後のエントリだけ残す(dateの昇順は維持)。
+   小さなPythonワンライナー/スクリプトで直接ファイルを書き換えてよい。
+   クリーンアップ後のファイルもコミットに含める。
+3. テスト追加: 「同じ日付で2回呼ぶと history は1件のまま・値は2回目のもの」を検証。
+
+【受け入れ基準】
+- update_breadth を同日2回呼んでも history の同日エントリは1件。
+- docs/data/breadth.json に重複 date が存在しない
+  (python で len(dates) == len(set(dates)) を確認)。
+- pytest 全パス。
+
+================================================================================
+タスク3: status_history.json の同日重複を解消する(record_status の同日replace)
+================================================================================
+【背景】src/screener/entry.py :: record_status() も実行のたびに append する。
+このファイルのエントリ数は「1日1件」前提で使われている:
+- extended_cooldown_ready(): 連続EXTENDED「件数」を日数とみなす
+- compute_breakout_success_rate() (build_site.py): 5エントリ後 = 5営業日後とみなす
+- keep_days=90 件切り詰め = 90日とみなす
+同日複数実行で全部狂う。
+
+【変更ファイル】src/screener/entry.py、tests/test_entry.py、data/status_history.json
+
+【手順】
+1. record_status() を「entries の中に同じ date があれば削除してから append」に変更:
+       entries = [e for e in entries if e.get("date") != date_str]
+       entries.append({...})
+       history[code] = entries[-keep_days:]
+2. 既存の data/status_history.json をワンショットでクリーンアップ
+   (各codeで同一dateは最後の1件だけ残す)。コミットに含める。
+3. テスト追加: 同日2回 record_status しても1件のまま・値は後勝ち。
+
+【受け入れ基準】
+- 同日2回の record_status でエントリが増えない。
+- data/status_history.json に code 内の重複 date が無い。
+- pytest 全パス。
+
+================================================================================
+タスク4: report.json の軽量化(P2〜P4レコード出力停止)+ データ鮮度警告バナー
+================================================================================
+【背景1】report.json の591銘柄中407件は P2〜P4 の軽量レコード(status: None)で、
+フロントの renderPriorityTier() は priority===1 || priority==null しか表示しない=
+受信して捨てているだけ(HANDOFF §12-5)。転送量の無駄。
+【背景2】過去に daily.yml のサイレント失敗でダッシュボードが1週間更新されない事故が
+あった。ユーザーは毎日これを見てトレードするので、「今日のデータではない」ことに
+気付ける仕組みが必要。
+
+【変更ファイル】src/pipeline.py、docs/assets/app.js、docs/index.html、
+tests/test_pipeline.py ほか影響テスト
+
+【手順(P2-P4出力停止)】
+1. src/pipeline.py の run_daily() 内、`if pr_eval["priority"] != 1:` ブロック
+   (現在150-160行付近)で assemble_priority_record を stock_records に append して
+   いる処理を削除し、`continue` だけにする。
+   ※ priority_counts(pr_counts)は priority_by_code から独立に計算されるので、
+   breadth.json の p1_count〜p4_count 記録には影響しない。ここは維持する。
+2. build_site.assemble_priority_record が完全に未使用になるか grep で確認。
+   未使用になるなら関数と対応テストを削除してよい(中途半端に残さない)。
+   attach_priority() は P1レコードで使用中なので残す。
+3. tests/test_pipeline.py で P2-P4 レコードが report に入ることを前提にした
+   アサーションがあれば「P1のみ出力」に合わせて更新。
+4. フロント(app.js renderPriorityTier)は priority===1||null フィルタのままで
+   動作に影響ないことを確認(変更不要のはず)。
+
+【手順(鮮度警告バナー)】
+5. docs/assets/app.js の initDashboard() で report.generated_at を読み、
+   「直近の平日(月〜金。土日はスキップ)の18:00 JSTを過ぎてもその平日の日付の
+   データがない」場合に警告バナーを表示する。実装方針:
+   - expected = 今日が平日なら今日、土曜なら金曜、日曜なら金曜
+   - 今 (JST) が expected の 21:00 より後、かつ generated_at の日付(JST) < expected
+     の日付なら警告。
+   - 祝日は考慮しない(祝日の翌朝に誤警告が出るのは許容。バナー文言に
+     「祝日明けは誤検知の場合あり」と書く)。
+   - 表示先: #p1-warning と同様のバナーを market-overview の上に新設
+     (index.html に <div id="staleness-warning" class="warning-banner" hidden> を追加。
+     既存の warning系クラスがあれば流用。無ければ style.css に追加)。
+   - 文言例: 「⚠ データが最新ではありません(最終更新: M/D HH:mm)。日次バッチが
+     失敗している可能性があります。バッチ実行ページから daily.yml の実行履歴を
+     確認してください。」
+6. index.html の app.js / style.css の ?v=N をインクリメント。
+
+【受け入れ基準】
+- ローカルで python -m src.pipeline を実行(またはテストで確認)し、report.json の
+  stocks が P1銘柄のみ(status が None のレコードが無い)になる。
+  ※フル実行は15分以上かかる。tests/test_pipeline.py の wired fixture 経由の検証でも可。
+- generated_at を過去日付に偽装した report.json でバナーが出る/今日の日付なら出ない
+  ことを手元で確認(ブラウザ or node での簡易確認でよい。確認方法を log.md に書く)。
+- pytest 全パス + node --check docs/assets/app.js。
+
+================================================================================
+タスク5: 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)
+================================================================================
+【背景】ユーザーの毎朝のルーティンは「地合い確認→銘柄チェック」。現在は指数カード・
+テンプレ通過率・セクターマップを目視で総合判断しているが、1000銘柄の日足指標を毎日
+計算しているのだから、ブレッドス指標を自動計算して信号機化できる。
+市場が弱いときに新規エントリーを控えるのは SEPA の根幹なので、これは最重要機能。
+
+【変更ファイル】src/report/build_site.py(または新規 src/report/market_signal.py を推奨)、
+src/pipeline.py、docs/assets/app.js、docs/index.html、docs/assets/style.css、
+tests/(新規テスト)、HANDOFF.md
+
+【設計】
+A. 毎日のパイプラインで以下のブレッドス指標を計算する(新規モジュール
+   src/report/market_signal.py を作り、pipeline から呼ぶ):
+
+   入力: latest_by_code (pipeline.run_daily 内で構築済み。各銘柄の最新行 dict で、
+   close / ma50 / ma150 / ma200 / high_52w / low_52w / high / low カラムを含む。
+   カラム定義は src/indicators.py を参照)
+
+   - pct_above_ma200: close > ma200 の銘柄比率 (ma200 が NaN の銘柄は分母から除外)
+   - pct_above_ma50:  close > ma50 の銘柄比率 (同上)
+   - new_high_count:  high >= high_52w の銘柄数 (high_52w は当日を含む rolling max
+     なので、等号成立 = 当日52週高値を付けた、とみなせる)
+   - new_low_count:   low <= low_52w の銘柄数 (同上の理屈)
+   ※ NaN 比較は False になるので pandas/純Python どちらでも素直に書けばよい。
+
+B. 指数トレンド判定: TOPIX の日足終値系列から
+   - src.data.indices の load_cache("topix") で parquet を読む(date, close のみ)。
+     キャッシュが無い/短い場合は判定不能として None を返す(絶対に例外で pipeline を
+     止めない)。
+   - index_above_ma50 (bool), index_above_ma200 (bool), index_ma200_slope_up (bool:
+     MA200の直近値 > 21営業日前の値) を計算。
+
+C. 合成シグナル(判定ルール。config.yaml に閾値を追加して調整可能にする):
+   config.yaml に新セクション:
+       market_signal:
+         green_pct_above_ma200: 0.50
+         red_pct_above_ma200: 0.30
+   判定:
+   - "red"(守り):   index_above_ma200 == False、または pct_above_ma200 < red閾値
+   - "green"(攻め): index_above_ma50 && index_above_ma200 && index_ma200_slope_up
+                     && pct_above_ma200 >= green閾値 && new_high_count > new_low_count
+   - "yellow"(中立): 上記以外
+   - 指数判定が None(データ欠損)の場合は "yellow" とし、reason に「指数データ欠損」を含める。
+   出力: {"signal": "green|yellow|red", "reasons": [人間可読の根拠文字列(日本語)],
+          "pct_above_ma200": .., "pct_above_ma50": .., "new_high_count": ..,
+          "new_low_count": .., "index_above_ma50": .., "index_above_ma200": ..,
+          "index_ma200_slope_up": ..}
+
+D. 保存先: update_breadth() の entry にこれらのフィールドをそのまま追加する
+   (breadth.json の history に日次で蓄積され、履歴として追える)。
+   update_breadth のシグネチャに market_signal: dict | None = None を追加し、
+   None でないとき entry.update(market_signal) する形が既存流儀に合う
+   (priority_counts と同じパターン)。
+
+E. pipeline.py への組み込み: heatmap ブロックの後、update_breadth 呼び出しの前に
+   try/except で計算(失敗しても本体を止めない。既存の heatmap/indices と同じ方針)。
+   tests/test_pipeline.py の wired fixture にモック追加を忘れずに。
+
+F. フロント(app.js):
+   - initDashboard で breadth.json の最新エントリから signal を読み、ダッシュボード
+     最上部(market-overview の上)に信号カードを表示:
+     ・green: 「攻め」アクセント色 / yellow: 「中立」 / red: 「守り」danger色
+     ・大きな色付きラベル + 根拠(reasons を箇条書き)+ 主要数値
+       (MA200上回り率 xx% / 新高値 xx vs 新安値 xx)
+     ・red のときは「新規エントリーは控えるのが原則」の注意文を出す
+   - index.html にカード用のコンテナ追加、style.css にスタイル追加、?v=N 更新。
+
+【テスト】
+- market_signal.py の単体テスト: green/yellow/red の境界、指数データ欠損時 yellow、
+  NaN銘柄の分母除外、new_high/new_low カウント。
+- pipeline 経由で breadth entry にフィールドが載ることのテスト。
+
+【受け入れ基準】
+- pytest 全パス。
+- breadth.json の新規エントリに signal / pct_above_ma200 等が含まれる
+  (wired fixture のテストで確認)。
+- ダッシュボードに信号カードが表示される(report/breadth をローカルで差し替えて
+  3色すべての表示を目視確認し、確認方法を log.md へ)。
+- HANDOFF.md に本機能の節を追記(§3 のパイプライン手順と §7 のフロント節)。
+
+================================================================================
+タスク6: ポジション管理(保有銘柄ビュー + 売りシグナル)
+================================================================================
+【背景】ツールは「エントリーするまで」しかカバーしておらず、エントリー後の保有銘柄
+(現在R倍数、ストップまでの距離、売りシグナル)をユーザーが手計算している。
+エグジット支援はワークフロー上いちばん大きい穴。
+
+【入力の設計 — manual/positions.csv(新規)】
+ファンダ手動入力(manual/fundamentals.csv)と同じ「手で編集するCSVをパイプラインが
+読む」パターンを踏襲する。書き込みUIは作らない(現在 passkeyAuthEnabled: false で
+書き込み系UIは全部killされている。ユーザーはGitHub web編集かローカル編集で行を足す)。
+
+CSVスキーマ(1行=1ポジション。ヘッダ行あり):
+    code,entry_date,entry_price,shares,initial_stop,current_stop,memo
+    7203,2026-07-15,3500,100,3325,3325,VCPブレイク
+- code: 証券コード(universe と同じ文字列型)
+- entry_date: YYYY-MM-DD
+- entry_price: 建値(円)
+- shares: 株数
+- initial_stop: 初期ストップ(R計算の分母。以後変更しない)
+- current_stop: 現在のストップ(トレール時にユーザーが手で更新)
+- memo: 自由記入(空可)
+クローズしたポジションは行を削除する(履歴管理はスコープ外。memo欄で運用)。
+サンプルとして manual/positions.csv をヘッダ行のみで新規作成しコミットする。
+
+【バックエンド — 新規 src/report/positions.py】
+1. load_positions_csv(): manual/positions.csv を読む。ファイルが無い/空なら [] を
+   返す。パース不能行は警告リストに載せてスキップ(fundamentals.py の
+   load_fundamentals_csv の流儀を参考に)。
+2. build_positions_report(positions, indicator_by_code, name_by_code) -> dict:
+   各ポジションについて、indicator_by_code[code] の最新行(close, ma50, ma200 等)から:
+   - close: 現在値、pl_pct: (close/entry_price - 1)*100
+   - pl_jpy: (close - entry_price) * shares
+   - r_multiple: (close - entry_price) / (entry_price - initial_stop)
+     (entry_price <= initial_stop の不正データは r_multiple: null にして警告)
+   - dist_to_stop_pct: (close - current_stop) / close * 100
+   - days_held: 営業日ではなく暦日でよい (today - entry_date).days
+   - sell_signals: 文字列の配列。該当するものを全部入れる:
+     ・"STOP_BREACH":  close < current_stop (ストップ割れ — 翌日成行で手仕舞い相当)
+     ・"MA50_BREAK":   close < ma50 (50日線終値割れ — ミネルヴィニの主要売りシグナル)
+     ・"MA200_BREAK":  close < ma200
+     ・"TAKE_PROFIT_ZONE": r_multiple >= 2.0 (2R到達 — 一部利確/ストップ引き上げ検討)
+     ・"BREAKEVEN_READY":  r_multiple >= 1.0 かつ current_stop < entry_price
+       (1R到達したのにストップがまだ建値未満 — 建値ストップへの引き上げ検討)
+   - code が universe/価格データに無い場合はレコードに "data_missing": true を付け
+     数値は null(上場廃止・ユニバース外れ対応)。
+3. 出力: docs/data/positions.json
+   {"generated_at": ..., "warnings": [...], "positions": [...]}
+4. pipeline.py への組み込み: indicator_by_code が完成した後(トレンドテンプレート
+   評価の後ろでよい)、try/except で呼ぶ。失敗しても本体を止めない。
+   ポジション銘柄がユニバース外でも indicator_by_code に無いだけなので安全。
+   wired fixture へのモック追加を忘れずに。
+   ※注意: indicator_by_code はユニバース銘柄のみ。ユニバースから外れた保有銘柄は
+   data_missing になる。これは既知の制約として HANDOFF に書く(必要になったら
+   将来、保有銘柄を prices 取得対象に加える改修をする)。
+
+【フロント — view-positions(新規ビュー)】
+5. index.html に <section id="view-positions" class="view-section" hidden> を追加し、
+   Dockナビ(#dock-nav)に保有ビューのボタンを追加(アイコンは bootstrap-icons から
+   bi-briefcase-fill 等適当に。title="保有")。
+   HANDOFF §7 の SPA構造(showView/initRouter, VIEWS 配列)に従い、app.js の VIEWS に
+   "positions" を追加、router から initPositionsView() を呼ぶ。
+6. initPositionsView(): docs/data/positions.json を cache:"no-store" で fetch し表を描画。
+   列: コード / 銘柄名 / 建値 / 現在値 / 損益% / R / ストップ / ストップまで% /
+       保有日数 / シグナル
+   - sell_signals は日本語バッジで表示(STOP_BREACH=「ストップ割れ」danger色、
+     MA50_BREAK=「50日線割れ」danger色、TAKE_PROFIT_ZONE=「2R到達」accent色、
+     BREAKEVEN_READY=「建値SL推奨」warn色、MA200_BREAK=「200日線割れ」danger色)
+   - シグナルありの行を上にソート。行クリックで #stock/CODE へ遷移(has_chartが
+     無い銘柄はクリック不可の既存流儀 .row-static に従う…がpositions.jsonには
+     has_chart情報が無いので、report.json との突合はせず全行クリック可でよい。
+     チャートJSONが無ければ view-stock 側が「データなし」を出す既存挙動に任せる)。
+   - ポジション0件なら「保有ポジションはありません。manual/positions.csv に行を
+     追加してください」+ GitHub編集画面へのリンク
+     (https://github.com/allan3maximin/minervini/edit/master/manual/positions.csv)。
+   - warnings があれば表の下に淡色で表示。
+7. ダッシュボード側にも導線: 保有銘柄に sell_signals が1つでもあれば、ダッシュボード
+   上部(タスク5の信号カードの下)に「⚠ 保有N銘柄に売りシグナル」バナーを出し、
+   クリックで #positions へ。
+8. style.css にバッジ/表スタイル追加。index.html の ?v=N 更新。
+
+【テスト】
+- positions.py 単体: CSVパース(欠損・不正行)、R計算、各 sell_signal の発火条件、
+  data_missing、entry_price==initial_stop の異常系。
+- pipeline 組み込み(wired で positions.json 生成が呼ばれること)。
+
+【受け入れ基準】
+- manual/positions.csv にダミー行を入れてパイプライン(またはテスト)を通すと
+  docs/data/positions.json が生成され、R・シグナルが正しい。
+- ダミー positions.json でフロントの保有ビュー表示を目視確認(確認方法を log.md へ)。
+- ダミーデータをコミットに残さないこと(positions.csv はヘッダのみで納品)。
+- pytest 全パス + node --check。HANDOFF.md 更新(§2 構成図・§3 手順・§7 フロント)。
+
+================================================================================
+タスク7: ポジションサイジング計算機(個別株画面)
+================================================================================
+【背景】セットアップごとに risk_pct(買値〜ストップの幅%)は出ているが、「資金の
+何%リスクで何株買うか」の最終計算をユーザーが暗算している。ここを自動化する。
+
+【変更ファイル】docs/assets/app.js、docs/index.html、docs/assets/style.css
+(バックエンド変更なし。純フロント機能)
+
+【手順】
+1. view-stock 内(#fund-detail-card の上あたり)に「ポジションサイジング」カードを新設:
+   入力: 総資金(円)、1トレードあたりリスク(%。プリセットボタン 0.5 / 0.75 / 1.0 / 1.25)
+   両方 localStorage("minervini_sizing_settings")に保存し次回から復元。
+2. 対象銘柄の report.json レコードから buy_stop(買い逆指値)と stop_loss を取得。
+   どちらか欠損(watchlist銘柄等)なら「セットアップ未確定のため計算不可」を表示。
+3. 計算(riskPerShare = buy_stop - stop_loss):
+   - 許容損失額 = 総資金 × リスク%
+   - 理論株数 = 許容損失額 / riskPerShare
+   - 発注株数 = floor(理論株数 / 100) * 100  ← 単元100株に切り下げ
+   - 100株未満になる場合は「リスク許容内で1単元買えません(1単元の損失 = X円 =
+     資金のY%)」と表示
+   - 投入額 = 発注株数 × buy_stop、資金比 = 投入額/総資金
+   - 資金比が25%超なら注意表示(ミネルヴィニの推奨ポジション上限20-25%。
+     「1銘柄への集中が25%を超えます」)。50%超なら強い警告色。
+   - 実損失額 = 発注株数 × riskPerShare も併記(切り下げでリスク%より小さくなる)
+4. 表示は入力変更のたびに即時再計算(input イベント)。SPAの銘柄切替でリスナーが
+   積み上がらないよう、既存流儀(btn.onclick 上書き or cloneNode差し替え。HANDOFF §7
+   「SPA化に伴う再初期化の後始末」参照)に従うこと。
+5. ?v=N 更新。
+
+【受け入れ基準】
+- buy_stop=2937, stop_loss=2797.44, 資金1000万円, リスク1% の場合:
+  riskPerShare=139.56, 理論株数=716.5..., 発注株数=700株, 投入額=2,055,900円,
+  実損失=97,692円 — この計算例で合っていることを確認。
+- セットアップ未確定銘柄で「計算不可」表示。localStorage 復元動作。
+- node --check 通過。目視確認内容を log.md へ。
+
+================================================================================
+タスク8: 簡易バックテスト(ブレイクアウト成功率の実績検証CLI)
+================================================================================
+【背景】rs_min 70 / breakout_vol_mult 1.4 / stop 5% 等のパラメータは一度も実績検証
+されていない。また breadth.json の breakout_success_rate はセットアップがほぼ出ない
+ため null が続いている(直近: 591銘柄中 actionable 1)。VCP検出が厳しすぎるのか
+地合いのせいなのかを切り分けたい。data/prices/ に520営業日分の日足キャッシュが
+あるので、過去データでイベントスタディができる。
+
+【スコープを絞ること(重要)】完全なウォークフォワード(RSパーセンタイルの
+point-in-time 再計算 + VCPの全日付スキャン)は計算量が膨大なので、フェーズ1として
+以下の簡易版に限定する。これで「セットアップ検出頻度」と「ブレイク後の成績」の
+実態が分かれば十分。
+
+【新規ファイル】src/backtest.py(CLI: python -m src.backtest)
+【変更ファイル】requirements.txt(追加不要のはず。pandas/numpyで完結させる)
+
+【手順】
+1. データロード: data/universe.json の銘柄について data/prices/{code}.parquet を読む
+   (prices.py にロード関数があれば流用。無ければ pd.read_parquet 直読み)。
+   ファイルが無い銘柄はスキップ。
+2. 各銘柄に indicators.compute_all を適用(ベンチマーク無しでよい。rs_line 不要)。
+3. RSの point-in-time 近似: 全銘柄の rs_raw を日付×銘柄の DataFrame にピボットし、
+   各日付の行で rank(pct=True) → RS 1-99 に変換(indicators.rs_percentile_rank と
+   同じ式をベクトル化)。これで「その日時点のRS」が全営業日分出る。
+4. 検証ウィンドウ: 直近400営業日(パラメータ --days で変更可)。
+5. VCPスキャンの近似: 全日付での evaluate_vcp 実行は重いので、週次(5営業日ごと)の
+   日付グリッドで、その時点までのデータ(df.iloc[:i+1])に vcp_mod.evaluate_vcp を
+   実行し、status=="WATCH_A" かつ contractions あり(=pivot 確定)のセットアップを
+   記録する。同一銘柄で pivot が同じ(±1%以内)セットアップは1件に統合。
+   ※トレンドテンプレート合格(その日のフラグ8条件、tt は latest 行でなく該当日の
+   行で判定する関数を trend_template.py から流用/再実装)かつ RS>=rs_min の銘柄のみ
+   スキャン対象にして計算量を削減する。
+6. ブレイク判定: セットアップ記録後の日足を前進走査し、
+   - close > pivot となった最初の日 = ブレイク日(60営業日以内に無ければ「不発」)
+   - ブレイク日の volume/vol_ma50 >= breakout_vol_mult なら「強ブレイク」else「弱」
+7. 成績測定: ブレイク日の翌日始値(無ければブレイク日終値)を仮エントリー価格とし、
+   - ストップ: entry*(1-stop_loss_pct) を下回ったら損切り(終値ベース)
+   - +5/+10/+20営業日後のリターン、最大ドローダウン、ストップ到達率
+8. 出力: 標準出力にサマリー + data/backtest/backtest_YYYYMMDD.md にレポート保存:
+   - セットアップ検出数(月別推移)← 「そもそもWATCH_Aが出ない」問題の定量化
+   - ブレイク発生率、強/弱別の +5/+10/+20日 平均・中央値リターン、勝率、
+     ストップ到達率、期待R
+   - 主要パラメータ(rs_min, breakout_vol_mult, stop_loss_pct)を変えた場合の感度を
+     見たいので、--rs-min/--vol-mult/--stop-pct をCLI引数化(既定値はconfig.yaml)
+9. 注意: ルックアヘッドバイアスに気をつける(セットアップ判定に未来のデータを
+   使わない。evaluate_vcp に渡す df は必ずその日までにスライス)。
+   ユニバース自体の生存者バイアス(現在のユニバースで過去を見る)は既知の限界として
+   レポート冒頭に明記する。
+10. GitHub Actions 化はしない(ローカル/手動実行のみ。実行時間は数十分想定)。
+    テストは軽量なユニットテスト(ブレイク判定・成績測定ロジックに合成データ)のみ
+    でよい。フルバックテストの実行はユーザーのマシンで行う。
+
+【受け入れ基準】
+- 合成データのユニットテストが通る(ブレイク検出、ストップ到達、リターン計算)。
+- 実データで少数銘柄に限定した実行(--limit 20 のような銘柄数制限引数を付けること)が
+  完走し、レポートが生成される。
+- pytest 全パス。実行方法と既知の限界を HANDOFF.md に追記。
+
+================================================================================
+最後に(全タスク完了後)
+================================================================================
+1. HANDOFF.md の「§12 未対応・次のタスク候補」を更新:
+   - ガード復旧(§12-7の要フォローアップ)→ 完了に
+   - §12-5(P2-P4出力停止)→ 完了に
+   - 新機能(地合いシグナル/ポジション管理/サイジング/バックテスト)の節を追加
+2. python -m pytest tests/ -q 全パス、node --check docs/assets/app.js 通過を最終確認。
+3. log.md に全タスクのエントリが揃っていることを確認。
+4. ユーザーに push を依頼(サンドボックスからは push 不可)。push 後、GitHub Pages の
+   実サイトで以下をユーザーに目視確認してもらう:
+   - ダッシュボード最上部に地合いシグナルカード
+   - Dockに保有ビュー、個別株画面にサイジング計算機
+   - 翌営業日の daily.yml が1日1回だけフル実行される(2回目以降はskip)こと
+================================================================================

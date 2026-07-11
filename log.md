@@ -2,6 +2,20 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (19): daily.ymlの「当日実行済みチェック」ガードを復旧
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク1)
+
+### 変更内容
+- `.github/workflows/daily.yml`: 「Check if already run today」ステップを、2026-07-08に
+  EDINET DB検証のため一時無効化していた `skip=false` 固定から、元の `git log --format=%s -20`
+  による当日コミット判定に復旧。無効化時のコメントも削除。
+- `fetch-depth: 0` はガードのgit log参照に必要なため変更なし。
+
+### 検証
+- `python -c "import yaml,io;yaml.safe_load(io.open('.github/workflows/daily.yml',encoding='utf-8'))"` OK。
+
 ## 2026-07-09 (18): 〔本命〕昇格基準を「データ存在」から「ファンダ強度合格」に改定
 
 ### 要望(ユーザー原文)

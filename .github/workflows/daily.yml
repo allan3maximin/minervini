@@ -28,10 +28,13 @@ jobs:
       - name: Check if already run today
         id: check
         run: |
-          # 2026-07-08: EDINET DBパース修正の動作確認のため、当日複数回の再実行を
-          # 試したいので一時的にガードを無効化(常にskip=false)。確認が終わったら
-          # 元のgit log判定に戻すこと。
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          TODAY=$(date -u +%Y-%m-%d)
+          if git log --format=%s -20 | grep -qF "chore: daily screener run ${TODAY}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Already ran today ($TODAY), skipping remaining steps."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
         if: steps.check.outputs.skip != 'true'
