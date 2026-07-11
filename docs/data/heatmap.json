@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-07-10T13:13:03.574750+00:00",
-  "date": "2026-07-10",
+  "generated_at": "2026-07-11T14:25:32.108168+00:00",
+  "date": "2026-07-11",
   "periods": [
     1,
     5,
@@ -13801,7 +13801,7 @@
           "returns": {
             "d1": 5.15,
             "d5": -8.76,
-            "d20": -3.01,
+            "d20": -3.42,
             "d60": 22.68
           },
           "priority": 2,
@@ -13814,13 +13814,13 @@
               {
                 "condition": "close_above_ma50",
                 "penalty": 1,
-                "distance_pct": -2.01
+                "distance_pct": -2.09
               }
             ],
             "ma_deviation_pct": {
-              "ma50": -2.01,
-              "ma150": 28.61,
-              "ma200": 46.16
+              "ma50": -2.09,
+              "ma150": 28.56,
+              "ma200": 46.12
             },
             "high52w_distance_pct": 19.22,
             "has_chart": false
@@ -25516,13 +25516,13 @@
       "returns": {
         "d1": -1.61,
         "d5": 3.25,
-        "d20": -3.33,
+        "d20": -3.35,
         "d60": -21.08
       },
       "rs": {
         "strength": "弱",
         "direction": "↑",
-        "rel_strength_pct": -7.7,
+        "rel_strength_pct": -7.72,
         "rel_direction_pct": 3.6
       },
       "p1_count": 0,
@@ -25682,7 +25682,7 @@
           "returns": {
             "d1": 0.87,
             "d5": -2.38,
-            "d20": -4.97,
+            "d20": -5.7,
             "d60": -26.63
           },
           "priority": 4,
@@ -25695,7 +25695,7 @@
               {
                 "condition": "close_above_ma50",
                 "penalty": 1,
-                "distance_pct": -9.23
+                "distance_pct": -9.35
               },
               {
                 "condition": "near_high52w",
@@ -25705,7 +25705,7 @@
               {
                 "condition": "ma50_above_ma150",
                 "penalty": 2,
-                "distance_pct": -5.91
+                "distance_pct": -5.83
               },
               {
                 "condition": "rs_above_min",
@@ -25714,9 +25714,9 @@
               }
             ],
             "ma_deviation_pct": {
-              "ma50": -9.23,
-              "ma150": -14.6,
-              "ma200": -9.15
+              "ma50": -9.35,
+              "ma150": -14.63,
+              "ma200": -9.18
             },
             "high52w_distance_pct": 34.11,
             "has_chart": false
