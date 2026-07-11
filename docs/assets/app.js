@@ -115,6 +115,7 @@ async function initDashboard() {
     : {};
 
   renderHeader(report);
+  renderStalenessWarning(report);
   renderMarketOverview(indices);
   renderBreadth(breadth, report);
   renderP1Warning(report);
@@ -332,6 +333,48 @@ function renderBreadth(breadth, report) {
     <span>直近ブレイク成功率: ${successRate}</span>
     ${prioLine}
   `;
+}
+
+// データ鮮度チェック: 直近の平日(月〜金、土日はFriday扱い)の21:00 JSTを過ぎても
+// その平日の日付のデータが無い場合に stale=true を返す。祝日は考慮しない
+// (祝日明けの誤検知は許容 -- バナー文言で注記)。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function getStalenessInfo(generatedAt, now) {
+  now = now || new Date();
+  const nowJstMs = now.getTime() + JST_OFFSET_MS;
+  const nowJst = new Date(nowJstMs);
+  const day = nowJst.getUTCDay(); // 0=Sun .. 6=Sat (JST calendar day, via shifted-clock trick)
+  const todayMidnightJstMs = Date.UTC(nowJst.getUTCFullYear(), nowJst.getUTCMonth(), nowJst.getUTCDate());
+
+  let expectedMidnightJstMs = todayMidnightJstMs;
+  if (day === 0) expectedMidnightJstMs -= 2 * 86400000; // Sunday -> Friday
+  else if (day === 6) expectedMidnightJstMs -= 1 * 86400000; // Saturday -> Friday
+
+  const thresholdMs = expectedMidnightJstMs + 21 * 3600000; // expected date 21:00 JST
+  if (nowJstMs <= thresholdMs) return { stale: false };
+
+  if (!generatedAt) return { stale: true };
+  const genJstMs = new Date(generatedAt).getTime() + JST_OFFSET_MS;
+  const genJst = new Date(genJstMs);
+  const genMidnightJstMs = Date.UTC(genJst.getUTCFullYear(), genJst.getUTCMonth(), genJst.getUTCDate());
+
+  return { stale: genMidnightJstMs < expectedMidnightJstMs };
+}
+
+function renderStalenessWarning(report) {
+  const el = document.getElementById("staleness-warning");
+  if (!el) return;
+  const info = getStalenessInfo(report.generated_at);
+  if (info.stale) {
+    const when = report.generated_at
+      ? new Date(report.generated_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "-";
+    el.textContent = `⚠ データが最新ではありません(最終更新: ${when})。日次バッチが失敗している可能性があります。バッチ実行ページから daily.yml の実行履歴を確認してください。(祝日明けは誤検知の場合あり)`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
 }
 
 // 8条件完全一致の銘柄が極端に少ない場合の弱地合い警告バナー。

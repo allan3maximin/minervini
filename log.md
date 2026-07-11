@@ -2,6 +2,41 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (22): report.jsonの軽量化(P2〜P4レコード出力停止)+ データ鮮度警告バナー
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク4)
+
+### 変更内容(P2-P4出力停止)
+- `src/pipeline.py`: `run_daily()` 内、`pr_eval["priority"] != 1` ブロックで
+  `assemble_priority_record` を呼んでいた処理を削除し `continue` のみに変更
+  (フロントは `priority===1||null` のP1銘柄しか表示しておらず、P2〜P4は受信して
+  捨てているだけだったため)。`priority_counts`(pr_counts)は `priority_by_code` から
+  独立に計算されるため breadth.json の p1_count〜p4_count には影響しない。
+- `src/report/build_site.py`: 完全に未使用になった `assemble_priority_record` を削除。
+  `attach_priority` はP1レコードで引き続き使用するため維持。
+
+### 変更内容(鮮度警告バナー)
+- `docs/assets/app.js`: `getStalenessInfo(generatedAt, now)` を新設。JSTシフト時計
+  トリック(`now.getTime() + 9h` を UTC getterで読む)で、直近の平日(土日はFriday扱い)の
+  21:00 JSTを過ぎてもその平日日付のデータが無い場合に `{stale: true}` を返す。
+  `renderStalenessWarning(report)` が `#staleness-warning` の表示/非表示と文言を制御
+  (`initDashboard` から `renderHeader` の直後に呼び出し)。祝日は考慮しない
+  (バナー文言に「祝日明けは誤検知の場合あり」と明記)。
+- `docs/index.html`: `#view-dashboard` 内、`#market-overview` の直前に
+  `<div id="staleness-warning" class="warning-banner" hidden></div>` を新設。
+  `app.js?v=15→16`, `style.css?v=13→14`。
+- `docs/assets/style.css`: `.warning-banner` クラス新設(danger色ボーダー/背景、
+  既存 `.p1-warning` は無改修)。
+
+### 検証
+- `python -m pytest tests/ -q` 176 passed(pyarrow欠如によるtest_indices失敗は今回発生せず)。
+- preview_evalで `getStalenessInfo` の境界値を確認: 平日21:00前は非stale、21:00後に
+  当日データ無しでstale、土曜日はFriday扱いでFridayデータありなら非stale・無ければstale。
+  `renderStalenessWarning({generated_at:"2026-07-01T10:00:00+09:00"})` でバナー実表示を
+  スクリーンショット確認(市場概況の上に赤枠で表示)。実データ(2026-07-10生成)では
+  バナー非表示を確認。
+
 ## 2026-07-11 (21): status_history.jsonの同日重複を解消(record_statusの同日replace)
 
 ### 要望(ユーザー原文)

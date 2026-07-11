@@ -113,32 +113,6 @@ def attach_priority(record: dict, priority_eval: dict | None) -> dict:
     return record
 
 
-def assemble_priority_record(
-    code: str,
-    name: str,
-    latest_row: dict,
-    priority_eval: dict,
-    tt_flags: dict | None = None,
-    has_chart: bool = False,
-) -> dict:
-    """機能A: P2〜P4銘柄(旧ウォッチリスト置き換え)の軽量レコード。
-
-    VCP/エントリー評価は行わないため、ピボット等は持たない。
-    """
-    record = {
-        "code": code,
-        "name": name,
-        "tier": "watchlist",
-        "status": None,
-        "close": latest_row.get("close"),
-        "rs": latest_row.get("rs"),
-        "total_score": None,
-        "has_chart": has_chart,
-        "must_flags": {"tt": tt_flags, "vcp": None},
-    }
-    return attach_priority(record, priority_eval)
-
-
 def _sort_key(stock: dict) -> tuple:
     tier_rank = TIER_ORDER.get(stock["tier"], 99)
     if stock["tier"] == "watchlist":

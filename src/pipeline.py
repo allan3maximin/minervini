@@ -148,15 +148,10 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         tt_result = tt_by_code[code]
 
         if pr_eval["priority"] != 1:
-            # P2〜P4: VCP/エントリー評価なしの軽量レコード(旧ウォッチリスト置き換え)。
-            record = build_site.assemble_priority_record(
-                code,
-                name_by_code.get(code, ""),
-                latest_by_code[code],
-                pr_eval,
-                tt_flags=tt_result["must_flags"],
-            )
-            stock_records.append(record)
+            # P2〜P4: フロントは priority===1||null のP1銘柄しか表示しないため、
+            # 2026-07-11以降 report.json への出力自体を止める(転送量削減)。
+            # priority_counts(pr_counts)はここより上の priority_by_code から独立に
+            # 計算済みなので、breadth.jsonのp1_count〜p4_count記録には影響しない。
             continue
 
         df_ind = indicator_by_code[code]
