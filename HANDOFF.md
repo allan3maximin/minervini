@@ -48,9 +48,10 @@ src/
     build_site.py           report.json / breadth.json / charts/*.json の生成
     heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
     market_signal.py        地合いシグナル (市場ブレッドス + TOPIXトレンド合成、breadth.json historyへ格納。2026-07-11追加)
+    positions.py             ポジション管理 (manual/positions.csv → docs/data/positions.json、R倍数/売りシグナル計算。2026-07-11追加)
 docs/                       GitHub Pages ルート
-  index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-batch/view-stock の
-                            5セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
+  index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-positions/view-batch/view-stock の
+                            6セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
                             view-stockのみDockナビにボタンが無いドリルダウン専用ビューで、hashは"stock/CODE"の形
                             (パラメータ付き)。Lightweight Charts CDNスクリプトもここに追加済み。
   stock.html                旧URL(?code=...)用リダイレクトスタブのみ(JSでindex.html#stock/CODEへ転送)。
@@ -72,14 +73,18 @@ docs/                       GitHub Pages ルート
     style.css               全スタイル (ダークテーマ, CSS変数 --bg/--text/--accent/--danger等)。Dockナビ/
                             view-section/invest-content/batch-cards等のSPA関連スタイルを追加、未使用だった
                             .prio-badge/.priority-* は削除済み。
-  data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json)
+  data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json,
+                            positions.json ※manual/positions.csvに行がある場合のみ)
 data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
                             status_history.json, sector_history.json, sector_map.json,
                             trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
                             ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
+manual/positions.csv        保有ポジション手動入力 (code,entry_date,entry_price,shares,initial_stop,current_stop,memo。
+                            2026-07-11追加。書き込みUI無し、GitHub web編集/ローカル編集で運用)
 skills/minervini-analysis/  「分析用データをコピー」の出力をSEPA手法で読み解くClaude用スキル (SKILL.md)
-tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, test_pipeline.py 含む)
+tests/                      pytest 202件 (test_jquants.py, test_edinetdb.py, test_pipeline.py, test_market_signal.py,
+                            test_positions.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -92,6 +97,9 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 6. `trend_template.screen_universe` → 8条件フラグ (debug: data/trend_template_debug.json)
 7. `priority_mod.evaluate_priority` — ハードフィルタ通過銘柄にP1〜P4付与。`p1_scarce` = P1数 < priority.p1_warn_threshold(3)
 8. **ファンダ**: `load_fundamentals_csv()` (手動CSV) + `jquants_mod.update_fundamentals_auto(codes, config)` (自動取得、try/exceptで失敗無視) → `merge_fundamentals(auto, manual)` (手動が勝ち)
+8.5. **ポジション管理 (2026-07-11追加)**: `positions_mod.load_positions_csv()` (manual/positions.csv) →
+   `positions_mod.build_positions_report(positions, indicator_by_code, name_by_code)` → `write_positions_json`
+   (docs/data/positions.json)。try/exceptで失敗しても本体は止めない。詳細は下記「ポジション管理」節。
 9. P1銘柄のみ: VCP評価 → エントリー評価 → `score_stock` → レコード組立 + チャートJSON出力
    - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B/EXTENDED + pivotあり) → confirmed/pool ティア
    - それ以外 → `tier_override="watchlist"` (=フロントの〔候補〕)
@@ -156,6 +164,48 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
   `signal`フィールドが無い(旧データ/計算失敗)場合はカードごと非表示。red時は
   「⚠ 新規エントリーは控えるのが原則です。」を追加表示。CSSは`.market-signal-card`と
   `.signal-green/-yellow/-red`修飾子(style.css)。
+
+### ポジション管理 (src/report/positions.py) — 2026-07-11追加
+
+ツールは従来「エントリーするまで」しかカバーしておらず、保有銘柄のR倍数・ストップ距離・
+売りシグナルをユーザーが手計算していた。エグジット支援としてこの機能を追加。
+
+- **入力** `manual/positions.csv`(手動編集、`manual/fundamentals.csv`と同じ「手で編集するCSVを
+  パイプラインが読む」パターン。書き込みUIは無い — `passkeyAuthEnabled: false`で書き込み系UIは
+  全部killされているため、GitHub web編集かローカル編集で行を足す運用)。スキーマ:
+  `code,entry_date,entry_price,shares,initial_stop,current_stop,memo`。クローズしたポジションは
+  行を削除する(履歴管理はスコープ外)。
+- **`load_positions_csv(path=None)`**: CSVをパースし `(positions: list[dict], warnings: list[str])`
+  を返す。code空・日付/数値パース不能な行はスキップして警告に載せる(load_fundamentals_csvと
+  同じ流儀)。
+- **`build_positions_report(positions, indicator_by_code, name_by_code, today=None)`**: 各ポジションに
+  ついて `indicator_by_code[code]`(日足指標付きDataFrame)の最新行から現在値・R倍数・売りシグナルを
+  計算:
+  - `pl_pct`/`pl_jpy`: 建値との差分
+  - `r_multiple = (close - entry_price) / (entry_price - initial_stop)`(`entry_price<=initial_stop`の
+    異常データはNoneにして警告)
+  - `dist_to_stop_pct = (close - current_stop) / close * 100`
+  - `days_held`: 暦日(営業日ではない)
+  - `sell_signals`(該当するもの全部): `STOP_BREACH`(close<current_stop)、`MA50_BREAK`
+    (close<ma50)、`MA200_BREAK`(close<ma200)、`TAKE_PROFIT_ZONE`(r_multiple>=2.0)、
+    `BREAKEVEN_READY`(r_multiple>=1.0 かつ current_stop<entry_price)
+  - `indicator_by_code`に無いcode(ユニバース外・上場廃止)は`data_missing: true`+数値null
+- **既知の制約**: `indicator_by_code`はユニバース銘柄のみなので、ユニバースから外れた保有銘柄は
+  必ず`data_missing`になる。将来的に保有銘柄をprices取得対象へ加える改修が必要になる可能性がある
+  (§12参照)。
+- **出力** `docs/data/positions.json`: `{generated_at, warnings, positions: [...]}`。
+  `write_positions_json`が書き出す。pipeline.pyは`load_positions_csv`の警告と
+  `build_positions_report`の警告(R計算異常等)を結合してから書き込む。
+- **フロント (view-positions, 2026-07-11追加)**: Dockナビに「保有」ボタン(bi-briefcase-fill)を
+  追加、`VIEWS`配列に`"positions"`を追加。`initPositionsView()`がpositions.jsonをfetchし表を描画:
+  コード/銘柄名/建値/現在値/損益%/R/ストップ/ストップまで%/保有日数/シグナル。
+  `sell_signals`は日本語バッジ(`SELL_SIGNAL_LABELS`、STOP_BREACH/MA50_BREAK/MA200_BREAKは
+  danger色、TAKE_PROFIT_ZONEはaccent色、BREAKEVEN_READYはwarn色)。シグナルありの行を上に
+  ソート。行クリックで`#stock/CODE`へ遷移(`data_missing`行は`.row-static`でクリック不可)。
+  0件なら「manual/positions.csvに行を追加してください」+ GitHub編集画面へのリンク。
+  ダッシュボード側にも導線: `renderPositionsWarningBanner`が保有銘柄に`sell_signals`が1つでも
+  あれば`#positions-warning`(市場概況の上)に「⚠ 保有N銘柄に売りシグナル」を表示、
+  クリックで`#positions`へ。
 
 ## 4. J-Quants 自動ファンダ取得 (src/data/jquants.py) — EDINETから移行済み
 
@@ -410,11 +460,12 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter を起動。initStockPage はrouterのshowViewから
 "stock/CODE" hashの時だけ呼ばれる)。stock.html は2026-07-08にリダイレクトスタブ化され、スクリプトを持たない。
 
-### SPA構造 (2026-07-08〜)
-- index.html は5つの `<section class="view-section" id="view-{dashboard|sectormap|invest|batch|stock}">` を持つ1ページ。
+### SPA構造 (2026-07-08〜、2026-07-11にview-positions追加)
+- index.html は6つの `<section class="view-section" id="view-{dashboard|sectormap|invest|positions|batch|stock}">` を持つ1ページ。
   初期状態は view-dashboard のみ表示、他は `hidden`。
-- 下部固定 `<nav class="dock-nav" id="dock-nav">` にmacOS Dock風の4ボタン(`.dock-btn[data-view=...]`)。
-  `view-stock` はドリルダウン専用でDockには出さない(ダッシュボード表の行クリックからのみ遷移)。
+- 下部固定 `<nav class="dock-nav" id="dock-nav">` にmacOS Dock風の5ボタン(`.dock-btn[data-view=...]`、
+  dashboard/sectormap/invest/positions/batch)。`view-stock` はドリルダウン専用でDockには出さない
+  (ダッシュボード表・保有ビューの行クリックからのみ遷移)。
 - ルーター (app.js): `showView(hash)` が `hash.split("/")` で `[name, param]` に分解し、対象セクションの
   `hidden` を切り替え、`.dock-btn.active` を付け替える(`name` がVIEWSに無ければ"dashboard"扱い)。
   `initRouter()` が dock ボタンの click → `location.hash` 変更、`hashchange` → `showView` の配線と、
@@ -535,7 +586,7 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 
 ### キャッシュバスター
 **docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-11時点:
-app.js v=17 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=15 (index.htmlのみ),
+app.js v=18 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=16 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
 webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**

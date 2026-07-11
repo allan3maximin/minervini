@@ -2,6 +2,49 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (24): ポジション管理(保有銘柄ビュー + 売りシグナル)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク6)
+
+### 変更内容
+- `manual/positions.csv` 新規(ヘッダのみ): `code,entry_date,entry_price,shares,initial_stop,current_stop,memo`。
+  書き込みUIは作らない方針(`passkeyAuthEnabled: false`と同じ思想。GitHub web編集/ローカル編集で運用)。
+- `src/report/positions.py` 新規:
+  - `load_positions_csv(path=None)`: CSVパース。code空/日付・数値パース不能な行はスキップして警告
+    (`load_fundamentals_csv`と同じ流儀)。
+  - `build_positions_report(positions, indicator_by_code, name_by_code, today=None)`: 各ポジションの
+    現在値・pl_pct/pl_jpy・`r_multiple = (close-entry_price)/(entry_price-initial_stop)`
+    (entry_price<=initial_stopは警告してNone)・`dist_to_stop_pct`・`days_held`(暦日)・
+    `sell_signals`(STOP_BREACH/MA50_BREAK/MA200_BREAK/TAKE_PROFIT_ZONE(2R到達)/
+    BREAKEVEN_READY(1R到達かつストップ未引き上げ))を計算。indicator_by_codeに無いcodeは
+    `data_missing: true`+数値null。
+  - `write_positions_json(report, path=None)`: docs/data/positions.json書き出し。
+- `src/pipeline.py`: indicator_by_code構築後、fundamentals処理の直後でtry/except実行
+  (失敗しても本体は止めない)。csv警告とbuild警告を結合してから書き込む。
+- `tests/test_positions.py` 新規14件: CSVパース(欠損/不正行/空memo)、R計算、各sell_signal発火条件、
+  data_missing、entry_price<=initial_stopの異常系をカバー。
+- `tests/test_pipeline.py`: `wired`フィクスチャにpositions_mod用モック追加。
+  `test_run_daily_writes_positions_report`追加(pipeline経由でpositions.json生成が呼ばれ、
+  R計算等が反映されることを確認)。
+- `docs/index.html`: `#view-positions`(保有ポジション表 + 空状態メッセージ + 警告表示)新設、
+  Dockナビに「保有」ボタン(bi-briefcase-fill)追加、`#positions-warning`バナー追加(market-overviewの上)。
+  `app.js?v=17→18`, `style.css?v=15→16`。
+- `docs/assets/app.js`: `VIEWS`に`"positions"`追加、router からの`initPositionsView()`呼び出し。
+  `initPositionsView()`がpositions.jsonを描画(列: コード/銘柄名/建値/現在値/損益%/R/ストップ/
+  ストップまで%/保有日数/シグナル、シグナルありの行を上にソート、data_missing行は`.row-static`で
+  クリック不可、0件時はGitHub編集画面へのリンク)。`SELL_SIGNAL_LABELS`で日本語バッジ化。
+  `renderPositionsWarningBanner(positionsData)`をinitDashboardから呼び、保有銘柄にsell_signalsが
+  1件でもあれば`#positions-warning`に「⚠ 保有N銘柄に売りシグナル」+ `#positions`へのリンクを表示。
+- `docs/assets/style.css`: `.sell-signal-badge` + `.signal-badge-danger/-warn/-accent`修飾子を新設。
+- `HANDOFF.md`: §2構成図・§3パイプライン手順・§7フロント(SPA構造/新設「ポジション管理」節)を更新。
+
+### 検証
+- `python -m pytest tests/ -q` 202 passed。
+- preview_evalで空状態(保有0件のメッセージ)、fetchモックによるダミー3件(通常/売りシグナル複数/
+  data_missing)の表表示、バッジ色分け、`.row-static`付与、ダッシュボードの警告バナー表示をそれぞれ
+  スクリーンショット確認。
+
 ## 2026-07-11 (23): 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)
 
 ### 要望(ユーザー原文)

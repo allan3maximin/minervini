@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ミネルヴィニ式スクリーナー</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=15">
+<link rel="stylesheet" href="assets/style.css?v=16">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -26,6 +26,7 @@
 
 <section id="view-dashboard" class="view-section">
   <div id="market-signal-card" class="market-signal-card" hidden></div>
+  <div id="positions-warning" class="warning-banner" hidden></div>
   <div id="staleness-warning" class="warning-banner" hidden></div>
 
   <section class="market-overview" id="market-overview" hidden>
@@ -138,6 +139,14 @@
   </div>
 </section>
 
+<section id="view-positions" class="view-section" hidden>
+  <h2>保有ポジション</h2>
+  <div id="positions-meta" class="meta-line"></div>
+  <p class="tier-note" id="positions-empty" hidden></p>
+  <div id="positions-table-wrap"></div>
+  <p class="tier-note" id="positions-warnings" hidden></p>
+</section>
+
 <section id="view-batch" class="view-section" hidden>
   <h2>バッチ実行</h2>
   <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
@@ -211,6 +220,7 @@
   <button type="button" class="dock-btn" data-view="dashboard" title="ダッシュボード" aria-label="ダッシュボード"><i class="bi bi-speedometer2 dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="sectormap" title="セクターマップ" aria-label="セクターマップ"><i class="bi bi-grid-3x3-gap-fill dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="invest" title="投資法" aria-label="投資法"><i class="bi bi-journal-text dock-icon"></i></button>
+  <button type="button" class="dock-btn" data-view="positions" title="保有" aria-label="保有"><i class="bi bi-briefcase-fill dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="batch" title="バッチ実行" aria-label="バッチ実行"><i class="bi bi-gear-fill dock-icon"></i></button>
 </nav>
 
@@ -220,6 +230,6 @@
 <script src="assets/fundamentals-modal.js?v=7"></script>
 <script src="assets/heatmap.js?v=8"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=17"></script>
+<script src="assets/app.js?v=18"></script>
 </body>
 </html>

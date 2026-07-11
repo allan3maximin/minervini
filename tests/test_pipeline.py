@@ -105,6 +105,9 @@ def wired(tmp_path, monkeypatch):
         lambda codes, config, base_store=None, priority_by_code=None: {})
     # 実リポジトリの docs/data/fundamentals_public.json を汚さない。
     monkeypatch.setattr(pipeline, "write_public_json", lambda fundamentals_by_code, path=None: None)
+    # ポジション管理: 実リポジトリの manual/positions.csv / docs/data/positions.json に触れない。
+    monkeypatch.setattr(pipeline.positions_mod, "load_positions_csv", lambda path=None: ([], []))
+    monkeypatch.setattr(pipeline.positions_mod, "write_positions_json", lambda report, path=None: None)
     # 地合いシグナルはTOPIXキャッシュの実ファイル読み込みに触れない固定値を返す。
     monkeypatch.setattr(
         pipeline.market_signal_mod, "compute_market_signal",
@@ -188,6 +191,27 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     assert codes_in_hm == {"1111", "2222", "3333"}
     assert "sector33" in report["stocks"][0]
     assert (tmp_path / "sector_history.json").exists()
+
+
+def test_run_daily_writes_positions_report(wired, monkeypatch):
+    tmp_path, codes = wired
+    monkeypatch.setattr(
+        pipeline.positions_mod, "load_positions_csv",
+        lambda path=None: ([{
+            "code": "1111", "entry_date": "2026-01-01", "entry_price": 900.0,
+            "shares": 100, "initial_stop": 800.0, "current_stop": 850.0, "memo": "",
+        }], []),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        pipeline.positions_mod, "write_positions_json",
+        lambda report, path=None: captured.setdefault("report", report),
+    )
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+    assert captured["report"]["positions"][0]["code"] == "1111"
+    assert captured["report"]["positions"][0]["data_missing"] is False
 
 
 def test_run_daily_skips_on_holiday(wired, monkeypatch):

@@ -589,6 +589,30 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--danger);
 }
 
+/* ---------------------------------------------- 保有ポジション (view-positions) */
+
+.sell-signal-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 1px 2px;
+  white-space: nowrap;
+}
+.signal-badge-danger {
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--danger);
+}
+.signal-badge-warn {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warn);
+}
+.signal-badge-accent {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--accent);
+}
+
 /* ---------------------------------------------- 機能B: セクターヒートマップ */
 
 .hm-toolbar {

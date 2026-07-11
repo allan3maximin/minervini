@@ -102,12 +102,14 @@ async function initDashboard() {
 
   // no-store: the daily bot commit refreshes these files; a heuristically
   // cached copy is exactly the "dashboard shows two-day-old data" failure.
-  const [report, breadth, indices] = await Promise.all([
+  const [report, breadth, indices, positionsData] = await Promise.all([
     fetch("data/report.json", { cache: "no-store" }).then((r) => r.json()),
     fetch("data/breadth.json", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ history: [] })),
     // indices.json only exists after the first pipeline run with the market
     // overview feature; render nothing (section stays hidden) until then.
     fetch("data/indices.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    // positions.json only exists once manual/positions.csv has at least one row.
+    fetch("data/positions.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
 
   pendingFund = window.MinerviniFundamentalsUI
@@ -116,6 +118,7 @@ async function initDashboard() {
 
   renderHeader(report);
   renderMarketSignal(breadth);
+  renderPositionsWarningBanner(positionsData);
   renderStalenessWarning(report);
   renderMarketOverview(indices);
   renderBreadth(breadth, report);
@@ -1431,6 +1434,129 @@ function renderScoreBreakdown(stock) {
 }
 
 // ---------------------------------------------------------------------------
+// 保有ポジション (view-positions, 2026-07-11追加): docs/data/positions.json を
+// 描画する。書き込みUIは無い(manual/positions.csvをGitHub web編集/ローカル編集で
+// 運用する前提。passkeyAuthEnabled: false と同じ思想)。
+// ---------------------------------------------------------------------------
+
+const SELL_SIGNAL_LABELS = {
+  STOP_BREACH: { label: "ストップ割れ", className: "signal-badge-danger" },
+  MA50_BREAK: { label: "50日線割れ", className: "signal-badge-danger" },
+  MA200_BREAK: { label: "200日線割れ", className: "signal-badge-danger" },
+  TAKE_PROFIT_ZONE: { label: "2R到達", className: "signal-badge-accent" },
+  BREAKEVEN_READY: { label: "建値SL推奨", className: "signal-badge-warn" },
+};
+
+function renderPositionsWarningBanner(positionsData) {
+  const el = document.getElementById("positions-warning");
+  if (!el) return;
+  const withSignals = (positionsData?.positions || []).filter((p) => (p.sell_signals || []).length > 0);
+  if (!withSignals.length) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = `⚠ 保有${withSignals.length}銘柄に売りシグナル。<a href="#positions">保有ビューを確認</a>`;
+}
+
+async function initPositionsView() {
+  const container = document.getElementById("positions-table-wrap");
+  const emptyEl = document.getElementById("positions-empty");
+  const warnEl = document.getElementById("positions-warnings");
+  const metaEl = document.getElementById("positions-meta");
+  if (!container) return;
+
+  let data = null;
+  try {
+    const res = await fetch("data/positions.json", { cache: "no-store" });
+    if (res.ok) data = await res.json();
+  } catch (e) {
+    data = null;
+  }
+
+  const positions = data && Array.isArray(data.positions) ? data.positions : [];
+
+  if (metaEl) {
+    metaEl.textContent = data && data.generated_at
+      ? `最終更新: ${new Date(data.generated_at).toLocaleString("ja-JP")}`
+      : "";
+  }
+
+  if (!positions.length) {
+    container.innerHTML = "";
+    if (warnEl) warnEl.hidden = true;
+    if (emptyEl) {
+      emptyEl.hidden = false;
+      emptyEl.innerHTML = '保有ポジションはありません。'
+        + '<a href="https://github.com/allan3maximin/minervini/edit/master/manual/positions.csv" target="_blank" rel="noopener">manual/positions.csv</a> に行を追加してください。';
+    }
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+
+  const sorted = [...positions].sort((a, b) => {
+    const aHas = (a.sell_signals || []).length > 0 ? 1 : 0;
+    const bHas = (b.sell_signals || []).length > 0 ? 1 : 0;
+    return bHas - aHas;
+  });
+
+  const rows = sorted
+    .map((p) => {
+      const badges = (p.sell_signals || [])
+        .map((sig) => {
+          const meta = SELL_SIGNAL_LABELS[sig] || { label: sig, className: "" };
+          return `<span class="sell-signal-badge ${meta.className}">${escapeHtml(meta.label)}</span>`;
+        })
+        .join(" ");
+      const signalsCell = badges || (p.data_missing ? "データなし" : "-");
+      const rowClass = p.data_missing ? "row-static" : "";
+      return `
+        <tr class="${rowClass}" data-code="${escapeHtml(p.code)}">
+          <td>${escapeHtml(p.code)}</td>
+          <td>${escapeHtml(p.name || "")}</td>
+          <td>${formatClose(p.entry_price)}</td>
+          <td>${p.close != null ? formatClose(p.close) : "-"}</td>
+          <td>${p.pl_pct != null ? p.pl_pct.toFixed(2) + "%" : "-"}</td>
+          <td>${p.r_multiple != null ? p.r_multiple.toFixed(2) : "-"}</td>
+          <td>${formatClose(p.current_stop)}</td>
+          <td>${p.dist_to_stop_pct != null ? p.dist_to_stop_pct.toFixed(2) + "%" : "-"}</td>
+          <td>${p.days_held}</td>
+          <td>${signalsCell}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="table-scroll">
+      <table class="positions-table">
+        <thead>
+          <tr>
+            <th>コード</th><th>銘柄名</th><th>建値</th><th>現在値</th><th>損益%</th>
+            <th>R</th><th>ストップ</th><th>ストップまで%</th><th>保有日数</th><th>シグナル</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  container.querySelectorAll("tr[data-code]").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      window.location.hash = "stock/" + tr.dataset.code;
+    });
+  });
+
+  if (warnEl) {
+    if (data.warnings && data.warnings.length) {
+      warnEl.hidden = false;
+      warnEl.innerHTML = data.warnings.map((w) => escapeHtml(w)).join("<br>");
+    } else {
+      warnEl.hidden = true;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SPA router (Dockナビ): index.htmlの5ビューをlocation.hashで切り替える。
 // セクターマップ/バッチ実行は表示のたびに再init(ヒートマップはコンテナが
 // 見えて初めてclientWidthが正しく取れるため、バッチ実行は履歴を毎回最新化
@@ -1438,7 +1564,7 @@ function renderScoreBreakdown(stock) {
 // (Dockメニューには出さない、ダッシュボードからのドリルダウン専用ビュー)。
 // ---------------------------------------------------------------------------
 
-const VIEWS = ["dashboard", "sectormap", "invest", "batch", "stock"];
+const VIEWS = ["dashboard", "sectormap", "invest", "positions", "batch", "stock"];
 
 function showView(hash) {
   const [rawName, param] = hash.split("/");
@@ -1456,6 +1582,9 @@ function showView(hash) {
   }
   if (name === "batch" && window.MinerviniBatch) {
     window.MinerviniBatch.initBatchView();
+  }
+  if (name === "positions") {
+    initPositionsView();
   }
   if (name === "stock") {
     initStockPage(param ? decodeURIComponent(param) : null);

@@ -29,6 +29,7 @@ from src.indicators import compute_all, rs_percentile_rank
 from src.report import build_site
 from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
+from src.report import positions as positions_mod
 from src.screener import entry as entry_mod
 from src.screener import priority as priority_mod
 from src.screener import trend_template
@@ -136,6 +137,17 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     fundamentals_by_code = merge_fundamentals(
         auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)
     write_public_json(fundamentals_by_code)
+
+    # ポジション管理: manual/positions.csv (保有銘柄) の現在値・R倍数・売りシグナルを計算。
+    # 失敗しても本体は止めない。ユニバース外の保有銘柄は indicator_by_code に無いだけなので安全
+    # (data_missing扱いになる。既知の制約 -- HANDOFF §12参照)。
+    try:
+        positions, positions_csv_warnings = positions_mod.load_positions_csv()
+        positions_report = positions_mod.build_positions_report(positions, indicator_by_code, name_by_code)
+        positions_report["warnings"] = positions_csv_warnings + positions_report["warnings"]
+        positions_mod.write_positions_json(positions_report)
+    except Exception as e:
+        print(f"Positions report update failed (ignored): {e}")
 
     history = entry_mod.load_status_history()
     previous_status_by_code = {code: entry_mod.previous_status(history, code) for code in codes}
