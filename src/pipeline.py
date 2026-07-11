@@ -28,6 +28,7 @@ from src.data.fundamentals import (
 from src.indicators import compute_all, rs_percentile_rank
 from src.report import build_site
 from src.report import heatmap as heatmap_mod
+from src.report import market_signal as market_signal_mod
 from src.screener import entry as entry_mod
 from src.screener import priority as priority_mod
 from src.screener import trend_template
@@ -235,6 +236,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     except Exception as e:
         print(f"Heatmap build failed (ignored): {e}")
 
+    # 地合いシグナル(市場ブレッドス + TOPIXトレンド合成)。失敗してもスクリーナー本体は止めない。
+    try:
+        signal_result = market_signal_mod.compute_market_signal(latest_by_code, config)
+    except Exception as e:
+        print(f"Market signal computation failed (ignored): {e}")
+        signal_result = None
+
     template_pass = sum(1 for r in tt_results if r["passed"])
     data_warnings = {
         "failed_tickers": price_result.failed_tickers,
@@ -250,7 +258,8 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         p1_scarce=p1_scarce,
     )
     build_site.update_breadth(
-        today_str, len(codes), template_pass, watch_count, history, priority_counts=pr_counts
+        today_str, len(codes), template_pass, watch_count, history,
+        priority_counts=pr_counts, market_signal=signal_result,
     )
 
     watchlist_count = len(stock_records) - actionable_count

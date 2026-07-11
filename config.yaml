@@ -115,3 +115,8 @@ edinetdb:
 scoring:
   phase1_weight: 0.5
   vcp_weight: 0.5
+
+# 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)
+market_signal:
+  green_pct_above_ma200: 0.50
+  red_pct_above_ma200: 0.30

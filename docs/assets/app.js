@@ -115,6 +115,7 @@ async function initDashboard() {
     : {};
 
   renderHeader(report);
+  renderMarketSignal(breadth);
   renderStalenessWarning(report);
   renderMarketOverview(indices);
   renderBreadth(breadth, report);
@@ -332,6 +333,46 @@ function renderBreadth(breadth, report) {
     <span>セットアップ数: ${latest.watch_count ?? "-"}</span>
     <span>直近ブレイク成功率: ${successRate}</span>
     ${prioLine}
+  `;
+}
+
+// 地合いシグナル(市場ブレッドス + TOPIXトレンド合成の攻め/中立/守り3段階)。
+// breadth.json の history最新エントリに signal/reasons/pct_above_ma200等が
+// 載っている前提(src/report/market_signal.py -> update_breadth)。旧データで
+// signalが無い場合はカード自体を隠す。
+const MARKET_SIGNAL_META = {
+  green: { label: "攻め", className: "signal-green" },
+  yellow: { label: "中立", className: "signal-yellow" },
+  red: { label: "守り", className: "signal-red" },
+};
+
+function renderMarketSignal(breadth) {
+  const el = document.getElementById("market-signal-card");
+  if (!el) return;
+  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
+  const latest = history.length ? history[history.length - 1] : null;
+  if (!latest || !latest.signal) {
+    el.hidden = true;
+    return;
+  }
+
+  const meta = MARKET_SIGNAL_META[latest.signal] || MARKET_SIGNAL_META.yellow;
+  el.hidden = false;
+  el.className = "market-signal-card " + meta.className;
+
+  const pct200 = latest.pct_above_ma200 != null ? (latest.pct_above_ma200 * 100).toFixed(1) + "%" : "-";
+  const newHigh = latest.new_high_count ?? "-";
+  const newLow = latest.new_low_count ?? "-";
+  const reasons = (latest.reasons || []).map((r) => `<li>${escapeHtml(r)}</li>`).join("");
+  const caution = latest.signal === "red"
+    ? '<p class="market-signal-caution">⚠ 新規エントリーは控えるのが原則です。</p>'
+    : "";
+
+  el.innerHTML = `
+    <div class="market-signal-label">${meta.label}</div>
+    <ul class="market-signal-reasons">${reasons}</ul>
+    <div class="market-signal-stats">MA200上回り率 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
+    ${caution}
   `;
 }
 

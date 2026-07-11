@@ -2,6 +2,50 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (23): 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク5)
+
+### 変更内容
+- `config.yaml`: `market_signal` セクション新設(`green_pct_above_ma200: 0.50`,
+  `red_pct_above_ma200: 0.30`)。
+- `src/report/market_signal.py` 新規:
+  - `compute_breadth_stats(latest_by_code)`: pct_above_ma200/pct_above_ma50(MAがNaNの銘柄は
+    分母から除外)、new_high_count/new_low_count(high>=high_52w / low<=low_52w)を計算。
+  - `compute_index_trend(index_df)`: TOPIX日足終値からMA50/MA200を計算し
+    index_above_ma50/index_above_ma200/index_ma200_slope_up(MA200が21営業日前より上向き)を
+    判定。221営業日未満のデータならNone(判定不能)。
+  - `compute_market_signal(latest_by_code, config, index_df=None)`: 上記を合成し
+    green(攻め)/yellow(中立)/red(守り)+ reasons(日本語根拠文字列)を返す。
+    index_df省略時は`indices_mod.load_cache("topix")`を読む。
+- `src/pipeline.py`: ヒートマップ生成後・update_breadth呼び出し前に
+  `market_signal_mod.compute_market_signal(latest_by_code, config)` をtry/except実行
+  (失敗しても本体は止めない)。結果を `update_breadth(..., market_signal=signal_result)` へ渡す。
+- `src/report/build_site.py :: update_breadth`: `market_signal: dict | None = None` 引数を追加、
+  Noneでなければ `entry.update(market_signal)`(priority_countsと同じパターン)。
+- `docs/assets/app.js`: `renderMarketSignal(breadth)` 新設。breadth.jsonのhistory最新エントリの
+  `signal`を読み `#market-signal-card` へ色付きラベル+根拠箇条書き+MA200上回り率/新高値/新安値を
+  描画。redの時は「⚠ 新規エントリーは控えるのが原則です。」を追加表示。`signal`フィールドが
+  無い(旧データ)場合はカード非表示。`initDashboard`から`renderHeader`直後に呼び出し。
+- `docs/index.html`: `#view-dashboard`内、`#market-overview`の直前に
+  `<div id="market-signal-card" class="market-signal-card" hidden></div>` を新設。
+  `app.js?v=16→17`, `style.css?v=14→15`。
+- `docs/assets/style.css`: `.market-signal-card` + `.signal-green/-yellow/-red` 修飾子を新設。
+- `tests/test_market_signal.py` 新規: green/yellow/red境界、指数データ欠損時yellow、
+  NaN銘柄の分母除外、new_high/new_low正しくカウント、を計11件でカバー。
+- `tests/test_pipeline.py`: `wired`フィクスチャに`market_signal_mod.compute_market_signal`の
+  固定値モックを追加(TOPIXキャッシュの実ファイルに触れないため)。end-to-endテストに
+  breadth entryへsignalフィールドが載ることのアサーションを追加。
+- `HANDOFF.md`: §3に地合いシグナルの節を追記、§7ダッシュボード節に
+  renderMarketSignal/renderStalenessWarningの説明を追記、§2リポジトリ構成に
+  market_signal.py追記、キャッシュバスター表を更新。
+
+### 検証
+- `python -m pytest tests/ -q` 187 passed。
+- preview_evalでgreen/yellow/red全3色+シグナル無し時のカード非表示をスクリーンショット確認
+  (市場概況カードの上に表示、redでは注意文言も表示)。
+
 ## 2026-07-11 (22): report.jsonの軽量化(P2〜P4レコード出力停止)+ データ鮮度警告バナー
 
 ### 要望(ユーザー原文)

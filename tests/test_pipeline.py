@@ -105,6 +105,16 @@ def wired(tmp_path, monkeypatch):
         lambda codes, config, base_store=None, priority_by_code=None: {})
     # 実リポジトリの docs/data/fundamentals_public.json を汚さない。
     monkeypatch.setattr(pipeline, "write_public_json", lambda fundamentals_by_code, path=None: None)
+    # 地合いシグナルはTOPIXキャッシュの実ファイル読み込みに触れない固定値を返す。
+    monkeypatch.setattr(
+        pipeline.market_signal_mod, "compute_market_signal",
+        lambda latest_by_code, config: {
+            "signal": "yellow", "reasons": ["テスト用固定値"],
+            "pct_above_ma200": 0.4, "pct_above_ma50": 0.5,
+            "new_high_count": 1, "new_low_count": 1,
+            "index_above_ma50": True, "index_above_ma200": True, "index_ma200_slope_up": True,
+        },
+    )
 
     return tmp_path, codes
 
@@ -160,6 +170,9 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
 
     breadth = json.loads((tmp_path / "breadth.json").read_text(encoding="utf-8"))
     assert breadth["history"][-1]["template_pass"] == 2
+    # 地合いシグナル: compute_market_signal の結果が breadth entry にそのまま載る
+    assert breadth["history"][-1]["signal"] == "yellow"
+    assert breadth["history"][-1]["pct_above_ma200"] == 0.4
 
     # 機能A: priority counts + scarcity flag flow into report and breadth
     assert report["priority_counts"] == {"p1": 2, "p2": 0, "p3": 0, "p4": 0}

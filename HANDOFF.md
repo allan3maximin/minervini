@@ -47,6 +47,7 @@ src/
   report/
     build_site.py           report.json / breadth.json / charts/*.json の生成
     heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
+    market_signal.py        地合いシグナル (市場ブレッドス + TOPIXトレンド合成、breadth.json historyへ格納。2026-07-11追加)
 docs/                       GitHub Pages ルート
   index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-batch/view-stock の
                             5セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
@@ -94,9 +95,17 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 9. P1銘柄のみ: VCP評価 → エントリー評価 → `score_stock` → レコード組立 + チャートJSON出力
    - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B/EXTENDED + pivotあり) → confirmed/pool ティア
    - それ以外 → `tier_override="watchlist"` (=フロントの〔候補〕)
-   - P2〜P4: `assemble_priority_record` の軽量レコード (VCP評価なし, tier="watchlist", has_chart無し)
+   - **P2〜P4は2026-07-11以降 report.jsonへ出力しない**(フロントは`priority===1||null`のP1銘柄
+     しか表示しておらず受信して捨てるだけだったため、`assemble_priority_record`ごと削除。
+     `priority_counts`はここより上の`priority_by_code`から独立集計されるため
+     breadth.jsonのp1_count〜p4_count記録には影響しない)
 10. ヒートマップ生成 (try/except) → 各レコードに sector33/sector_strength/sector_direction 付与
-11. `build_report` (docs/data/report.json) + `update_breadth` (docs/data/breadth.json)
+11. **地合いシグナル生成 (2026-07-11追加)**: `market_signal_mod.compute_market_signal(latest_by_code,
+    config)` (try/except、失敗しても本体は止めない)。市場ブレッドス(MA200/MA50上回り率、新高値/
+    新安値件数)+ TOPIXトレンド(MA50/MA200上抜け、MA200の21営業日前比較による上向き判定)を合成し
+    green(攻め)/yellow(中立)/red(守り)を判定(詳細は下記「地合いシグナル」節)。
+12. `build_report` (docs/data/report.json) + `update_breadth` (docs/data/breadth.json、
+    `market_signal`引数で上記シグナルのフィールドをhistoryエントリへマージ)
 
 ### ティアとフロント表示の対応
 - `tier: "confirmed"` → 〔本命〕ファンダ強度確認済み。**データの存在だけでは昇格しない** (2026-07-09改定):
@@ -108,10 +117,45 @@ tests/                      pytest 173件 (test_jquants.py, test_edinetdb.py, te
 
 ### P1〜P4について(重要な経緯)
 - バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
-- **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。P2〜P4レコードは受信するが表示しない。
+- **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。**2026-07-11以降 P2〜P4は report.json へ出力自体しない**(`src/pipeline.py`で`continue`するだけになり、軽量レコード組立関数`assemble_priority_record`ごと削除。転送量削減が目的)。
 - 弱地合い警告バナー(renderP1Warning)は残存。文言は「8条件完全一致の候補銘柄が◯件と極端に少ない…」(P1という語は使わない)。
 - 地合いメーターに「候補(8条件合格): N件」を表示 (renderBreadth)。
 - style.css の .prio-badge / .prio-1〜4 / .priority-table は2026-07-08に削除済み(対応するJSがCOLUMNS一本化で消えたため)。
+
+### 地合いシグナル (src/report/market_signal.py) — 2026-07-11追加
+
+ユーザーの毎朝のルーティン(地合い確認→銘柄チェック)を自動化する目的で、日次パイプラインが
+市場ブレッドス指標を計算し、攻め(green)/中立(yellow)/守り(red)の3段階シグナルとして
+ダッシュボード最上部に表示する機能。SEPAでは市場が弱い時に新規エントリーを控えるのが原則
+なので、地合い判定は最重要機能という位置づけ。
+
+- **ブレッドス指標** `compute_breadth_stats(latest_by_code)`: pipeline.run_daily内で構築済みの
+  `latest_by_code`(各銘柄の最新行、close/ma50/ma200/high/low/high_52w/low_52w を含む)から
+  `pct_above_ma200`/`pct_above_ma50`(close > MA の銘柄比率、MAがNaNの銘柄は分母から除外)、
+  `new_high_count`/`new_low_count`(high>=high_52w / low<=low_52w の銘柄数、52w高安が当日を
+  含むrolling集計であることを利用)を計算。
+- **指数トレンド** `compute_index_trend(index_df)`: `indices_mod.load_cache("topix")` の日足終値
+  からMA50/MA200を計算し、`index_above_ma50`/`index_above_ma200`(bool)と
+  `index_ma200_slope_up`(MA200の直近値が21営業日前より高いか)を判定。221営業日未満のデータ
+  しか無い場合(キャッシュ欠損含む)は`None`を返し、呼び出し側は絶対に例外にしない。
+- **合成シグナル** `compute_market_signal(latest_by_code, config, index_df=None)`:
+  `config.yaml: market_signal.green_pct_above_ma200`(既定0.50)/`red_pct_above_ma200`(既定0.30)
+  を閾値に、
+  - `red`: 指数がMA200割れ、またはpct_above_ma200が赤閾値未満
+  - `green`: 指数がMA50・MA200上抜けかつMA200上向き、かつpct_above_ma200が緑閾値以上、
+    かつ新高値>新安値
+  - それ以外は `yellow`(指数トレンド判定不能の場合も理由に「指数データ欠損」を添えてyellow)
+  を返す。`reasons`(日本語の根拠文字列リスト)も同時に返す。
+- **pipeline.py への組み込み**: ヒートマップ生成の後、`update_breadth`呼び出しの直前で
+  try/except実行(失敗しても本体は止めない、`market_signal_mod.compute_market_signal(latest_by_code,
+  config)`)。結果は`build_site.update_breadth(..., market_signal=signal_result)`経由で
+  breadth.jsonのhistoryエントリへそのままマージされる(`market_signal`がNoneなら何も追加しない)。
+- **フロント (app.js)**: `renderMarketSignal(breadth)` がbreadth.jsonのhistory最新エントリから
+  `signal`フィールドを読み、`#market-signal-card`(index.html、`#market-overview`の直前に配置)へ
+  色付きラベル(攻め/中立/守り)+ 根拠箇条書き + MA200上回り率/新高値/新安値の数値を描画。
+  `signal`フィールドが無い(旧データ/計算失敗)場合はカードごと非表示。red時は
+  「⚠ 新規エントリーは控えるのが原則です。」を追加表示。CSSは`.market-signal-card`と
+  `.signal-green/-yellow/-red`修飾子(style.css)。
 
 ## 4. J-Quants 自動ファンダ取得 (src/data/jquants.py) — EDINETから移行済み
 
@@ -404,6 +448,15 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
+- `renderMarketSignal(breadth)` (2026-07-11追加): breadth.jsonのhistory最新エントリの
+  `signal`(green/yellow/red)を`#market-signal-card`(market-overviewの直前)へ描画。
+  詳細はデータ生成側の「地合いシグナル」節(§3内)参照。
+- `renderStalenessWarning(report)` (2026-07-11追加): `getStalenessInfo(generatedAt, now)`が
+  直近の平日(土日はFriday扱い)21:00 JSTを過ぎてもその日のデータが無い場合を判定し、
+  `#staleness-warning`(market-overviewの直前)に警告文言を表示。JSTシフト時計トリック
+  (`now.getTime()+9h`をUTC getterで読む)でブラウザのローカルタイムゾーンに依存せず判定。
+  祝日は考慮しない(文言に「祝日明けは誤検知の場合あり」と明記)。過去のdaily.ymlサイレント
+  失敗事故(1週間ダッシュボード未更新)を受けた対策。
 - `renderBreadth`: テンプレ通過率 / セットアップ数 / ブレイク成功率 / 候補(8条件合格)件数
 - `renderMarketOverview`: indices.json → カード + SVGスパークライン
 - `startLiveIndices`: 指数カードの擬似リアルタイム更新。60秒間隔で indices.json を再fetch (`cache: "no-store"`) して
@@ -481,8 +534,8 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   イベントは`btn.onclick`上書き方式でSPAの銘柄切替でもリスナーが積み上がらない。
 
 ### キャッシュバスター
-**docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-09時点:
-app.js v=15 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=13 (index.htmlのみ),
+**docs のJS/CSSを変更したら参照している全HTMLの `?v=N` を必ずインクリメントする。2026-07-11時点:
+app.js v=17 (index.htmlのみ。stock.htmlはリダイレクトスタブ化されscriptタグ自体を持たない), style.css v=15 (index.htmlのみ),
 heatmap.js v=8, config.js v=6, github-api.js v=6, fundamentals-modal.js v=7(無改修のため据え置き), batch.js v=2,
 webauthn-vault.js v=5(今回未変更)。
 heatmap.html / stock.html は本文自体がリダイレクトスタブ化されたためscriptタグを持たない(対象外)。**

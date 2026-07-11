@@ -197,6 +197,7 @@ def update_breadth(
     status_history: dict,
     keep_days: int = 60,
     priority_counts: dict | None = None,
+    market_signal: dict | None = None,
 ) -> dict:
     breadth = load_breadth()
     entry = {
@@ -217,6 +218,8 @@ def update_breadth(
                 "p4_count": priority_counts.get("p4", 0),
             }
         )
+    if market_signal is not None:
+        entry.update(market_signal)
     breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
     breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]
