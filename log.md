@@ -2,6 +2,48 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (26): 簡易バックテスト(ブレイクアウト成功率の実績検証CLI)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク8)
+
+### 変更内容
+- `src/backtest.py` 新規(CLI: `python -m src.backtest [--days 400] [--limit N] [--rs-min N]
+  [--vol-mult N] [--stop-pct N]`)。GitHub Actions化はしない(ローカル/手動実行のみ)。
+  - `load_universe_frames(limit)`: data/universe.json の銘柄について data/prices/{code}.parquet
+    を読み `compute_all` で指標付与(RS_LOOKBACKS最大252に満たない銘柄はスキップ)。
+  - `build_rs_by_date(frames)`: 全銘柄のrs_rawを日付×銘柄でピボットし、各日付の行で
+    `rank(pct=True)`して1-99に変換(`indicators.rs_percentile_rank`と同じ式のpoint-in-time近似)。
+    ma/atr/52w高安/rs_rawは全てbackward-lookingなrolling計算のみのため、フルhistoryに対して
+    事前計算してからスライスしても未来データが混入しない性質を利用。
+  - `scan_setups`: 週次(5営業日ごと)グリッドで、トレンドテンプレート合格
+    (`trend_template.check_must_conditions`をその日の行に直接適用)かつRS>=rs_minの銘柄のみ
+    `vcp_mod.evaluate_vcp(df.iloc[:i+1], config)` を実行(計算量削減+ルックアヘッド対策)。
+    status=="WATCH_A"かつcontractionsありをセットアップとして記録、同一銘柄でpivotが近い
+    (±1%以内)ものは1件に統合。
+  - `find_breakout_index`: セットアップ後60営業日以内にcloseが最初にpivotを上抜けた行
+    (無ければ「不発」)。`is_strong_breakout`: 出来高/vol_ma50 >= breakout_vol_mult。
+  - `measure_performance`: ブレイク翌日始値(無ければブレイク日終値)を仮エントリー価格とし、
+    終値ベースのストップ到達で以降のリターンを固定。+5/+10/+20営業日リターン・最大ドロー
+    ダウン・R倍数(`(exit-entry)/(entry-stop)`)を算出。
+  - `run_backtest`/`build_report_markdown`/`write_report`: セットアップ検出数(月別)、
+    ブレイク発生率、強/弱ブレイク別の成績・勝率・ストップ到達率・期待Rをまとめ
+    `data/backtest/backtest_YYYYMMDD.md`に保存(標準出力にも表示)。レポート冒頭に
+    ユニバースの生存者バイアスを既知の限界として明記。
+- `tests/test_backtest.py` 新規8件: `find_breakout_index`(検出/不発/max_wait_days境界)、
+  `is_strong_breakout`(出来高倍率の閾値)、`measure_performance`(次日始値エントリー、
+  ストップ到達後のリターン固定、次日データが無い場合のフォールバック)を合成データでカバー。
+  仕様どおり`scan_setups`(VCP統合部分)は自動テスト対象外。
+- `HANDOFF.md`: §2構成図・§10テスト・新設§13(簡易バックテストCLI)を追記、
+  §12-7(daily.ymlガード)を完了済みに更新。
+
+### 検証
+- `python -m pytest tests/ -q` 210 passed。
+- 実データでの限定実行を2回確認: `--limit 8 --days 120`(0件検出、完走・レポート生成を確認)、
+  `--limit 150 --days 400`(約25秒で完走、8件のセットアップ・8件のブレイク発生・強/弱別の
+  成績が妥当な形でレポートに出力されることを確認)。生成された確認用レポートはコミットに
+  含めない(スモークテスト用に削除済み)。
+
 ## 2026-07-11 (25): ポジションサイジング計算機(個別株画面)
 
 ### 要望(ユーザー原文)

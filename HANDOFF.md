@@ -31,6 +31,7 @@ src/
   pipeline.py               日次パイプライン本体 (python -m src.pipeline [--universe-rebuild])
   universe.py               ユニバース構築 (JPX上場一覧→流動性上位1000→セクターmap/発行済株式数)
   indicators.py             MA50/150/200, MA200勾配日数, 52w高安, ATR, RS raw/percentile, RSライン
+  backtest.py               簡易バックテストCLI (python -m src.backtest。フェーズ1簡易版、GitHub Actions化なし。2026-07-11追加)
   data/
     prices.py               株価取得 (yfinanceチャンク→stooqフォールバック, parquetキャッシュ data/prices/)
     indices.py              市場指標7種 (日経/TOPIX/グロース250/JGB10y/USDJPY/NASDAQ/SOX) → docs/data/indices.json
@@ -83,8 +84,8 @@ manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,
 manual/positions.csv        保有ポジション手動入力 (code,entry_date,entry_price,shares,initial_stop,current_stop,memo。
                             2026-07-11追加。書き込みUI無し、GitHub web編集/ローカル編集で運用)
 skills/minervini-analysis/  「分析用データをコピー」の出力をSEPA手法で読み解くClaude用スキル (SKILL.md)
-tests/                      pytest 202件 (test_jquants.py, test_edinetdb.py, test_pipeline.py, test_market_signal.py,
-                            test_positions.py 含む)
+tests/                      pytest 210件 (test_jquants.py, test_edinetdb.py, test_pipeline.py, test_market_signal.py,
+                            test_positions.py, test_backtest.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -641,7 +642,7 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
 ## 10. テスト・検証
 
 ```bash
-python -m pytest tests/ -q        # 152件 (2026-07-08時点全パス)
+python -m pytest tests/ -q        # 210件 (2026-07-11時点全パス)
 node --check docs/assets/app.js   # JS構文チェック
 ```
 - tests/test_pipeline.py の `wired` fixture は全外部I/Oをmonkeypatchでモック。
@@ -651,7 +652,15 @@ node --check docs/assets/app.js   # JS構文チェック
   priority_by_code=None: {})`)。
 - tests/test_jquants.py: record_to_point / derive_quarters / _refetch_incomplete / ストア / merge_fundamentals をカバー。
 - tests/test_edinetdb.py: record_to_point / derive_with_base / update_fundamentals_auto(backlog/budget/events失敗系) / state・storeの永続化をカバー。
+- tests/test_market_signal.py: compute_breadth_stats / compute_index_trend / compute_market_signal の
+  green/yellow/red境界・NaN除外・指数データ欠損をカバー。
+- tests/test_positions.py: load_positions_csv(パース/警告) / build_positions_report(R倍数/売りシグナル/
+  data_missing)をカバー。
+- tests/test_backtest.py: find_breakout_index / is_strong_breakout / measure_performance を合成データで
+  カバー(scan_setupsとVCP統合部分はユニットテスト対象外、下記§14参照)。
 - フロントは自動テスト無し。手動確認 or node で DOM stub を書いて smoke。
+  (このセッションでは環境にnodeコマンドが無かったため、`preview_start`でdocs/を配信し
+  preview_console_logsでエラー無しを確認する代替手段を使った)。
 
 ## 11. 開発環境の注意 (Cowork/Claudeサンドボックス固有)
 
@@ -697,9 +706,47 @@ node --check docs/assets/app.js   # JS構文チェック
    `data/edinetdb_auto.json` の値(revenue単位・fiscal_quarterラベル)を決算短信の実際の数値と
    突き合わせて確認するのが望ましい(§5「実地確認について」参照)。
    → 同日、`0 codes processed` バグを発見・修正(§5「実地確認について」の追記参照)。
-   **daily.yml のガードを一時無効化中** — 動作確認が済んだら元に戻すこと(要フォローアップ)。
+   → ~~daily.yml のガードを一時無効化中~~ → **2026-07-11、元のgit log判定に復旧済み**
+   (`.github/workflows/daily.yml`)。
 
-## 13. 変更時のチェックリスト (Sonnet向け)
+## 13. 簡易バックテストCLI (src/backtest.py) — 2026-07-11追加
+
+rs_min / breakout_vol_mult / stop_loss_pct 等のパラメータが一度も実績検証されておらず、
+breadth.jsonのbreakout_success_rateもセットアップがほぼ出ないため常にnullに近い状態が
+続いていた(VCP検出が厳しすぎるのか地合いのせいなのか切り分けたい、という動機)。
+data/prices/ の520営業日分の日足キャッシュを使ったイベントスタディCLIを追加。
+
+- **実行**: `python -m src.backtest [--days 400] [--limit 20] [--rs-min N] [--vol-mult N]
+  [--stop-pct N]`。GitHub Actions化はしない(ローカル/手動実行のみ、想定所要時間は
+  対象銘柄数と検証日数に比例。手元smokeテストでは150銘柄・400営業日で約25秒)。
+- **スコープ(フェーズ1に限定、完全なウォークフォワードではない)**:
+  - RSはpoint-in-timeの厳密な再計算ではなく近似: 全銘柄のrs_rawを日付×銘柄でピボットし、
+    各日付の行で`rank(pct=True)`して1-99に変換する(`indicators.rs_percentile_rank`と同じ式)。
+    ma/atr/52w高安/rs_rawは全てbackward-lookingなrolling計算のみで構成されているため、
+    フルhistoryに対して`compute_all()`を1回走らせてから任意の日付でスライスしても
+    未来データは混入しない、という性質を利用している。
+  - VCPスキャンは全日付ではなく週次(5営業日ごと)の日付グリッドで、トレンドテンプレート
+    合格(`trend_template.check_must_conditions`をその日の行に対して直接呼ぶ)かつ
+    RS>=rs_minの銘柄のみを対象に`vcp_mod.evaluate_vcp(df.iloc[:i+1], config)`を実行
+    (計算量削減。`df.iloc[:i+1]`のスライドがルックアヘッド対策そのもの)。
+  - 同一銘柄でpivotが近い(±1%以内)セットアップは1件に統合(`scan_setups`)。
+- **ブレイク判定** `find_breakout_index`: セットアップ後60営業日以内にcloseが最初にpivotを
+  上抜けた行。無ければ「不発」扱い(None)。
+- **成績測定** `measure_performance`: ブレイク日の翌日始値(無ければブレイク日終値)を
+  仮エントリー価格とし、終値ベースでストップ(`entry_price*(1-stop_loss_pct)`)を下回ったら
+  その時点で建玉を閉じた扱いにする(以降のホライズンのリターンはストップ価格で固定)。
+  +5/+10/+20営業日リターン・最大ドローダウン・R倍数(`(exit-entry)/(entry-stop)`)を返す。
+- **出力**: 標準出力にMarkdownサマリーを表示 + `data/backtest/backtest_YYYYMMDD.md`に保存。
+  セットアップ検出数(月別)、ブレイク発生率、強/弱ブレイク別の+5/+10/+20日平均・中央値
+  リターン・勝率・ストップ到達率・期待R、使用パラメータを含む。レポート冒頭に
+  ユニバースの生存者バイアス(現在のユニバースで過去を見る)を既知の限界として明記。
+- **テスト**: `tests/test_backtest.py`は`find_breakout_index`/`is_strong_breakout`/
+  `measure_performance`を合成データでカバー(ブレイク検出・ストップ到達・リターン計算・
+  次日始値エントリーのフォールバック)。`scan_setups`(VCP統合部分)は実データでの
+  smoke実行(`--limit 8〜150`)で完走・レポート生成を確認済みだが、自動テストの対象外
+  (仕様上「フルバックテストの実行はユーザーのマシンで行う」ため、軽量ユニットテストのみ)。
+
+## 14. 変更時のチェックリスト (Sonnet向け)
 
 - [ ] docs/ の JS/CSS を触ったら index.html(唯一scriptタグ/linkタグを持つHTML)の `?v=N` を全部上げたか
       (stock.html/heatmap.htmlはリダイレクトスタブのみでアセット参照なし)
