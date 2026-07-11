@@ -5,6 +5,7 @@ from src.report.build_site import (
     build_chart_data,
     build_report,
     compute_breakout_success_rate,
+    update_breadth,
 )
 
 CONFIG_LATEST = {"close": 150.0, "rs": 85}
@@ -109,6 +110,21 @@ def test_compute_breakout_success_rate_counts_holds_above_pivot():
 def test_compute_breakout_success_rate_none_when_no_breakouts():
     history = {"7134": [{"status": "WATCH_A"}] * 10}
     assert compute_breakout_success_rate(history) is None
+
+
+def test_update_breadth_same_date_replaces_instead_of_appending(tmp_path, monkeypatch):
+    import src.report.build_site as bs
+
+    monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(bs, "BREADTH_PATH", tmp_path / "breadth.json")
+
+    update_breadth("2026-07-11", universe_size=1000, template_pass=50, watch_count=10, status_history={})
+    result = update_breadth("2026-07-11", universe_size=1000, template_pass=99, watch_count=20, status_history={})
+
+    same_date_entries = [h for h in result["history"] if h["date"] == "2026-07-11"]
+    assert len(same_date_entries) == 1
+    assert same_date_entries[0]["template_pass"] == 99
+    assert same_date_entries[0]["watch_count"] == 20
 
 
 def test_build_chart_data_includes_ma_and_markers():

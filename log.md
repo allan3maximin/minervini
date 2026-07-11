@@ -2,6 +2,23 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-11 (20): breadth.jsonの同日重複エントリを解消(append → 同日replace)
+
+### 要望(ユーザー原文)
+> 全部やりたい。(2026-07-11の改善提案タスク一括実施の一部。HANDOFF_TASKS.txt タスク2)
+
+### 変更内容
+- `src/report/build_site.py :: update_breadth`: appendの前に同じ `date` のエントリを
+  historyから除去するよう変更(同日再実行は最新値で上書き)。
+- `tests/test_build_site.py`: `test_update_breadth_same_date_replaces_instead_of_appending`
+  追加(同日2回呼んでもhistoryは1件、値は2回目のもの)。
+- `docs/data/breadth.json`: ガード無効化中の同日重複(24件→ユニーク日付6件)をワンショット
+  クリーンアップ(同一dateは最後のエントリのみ残し、date昇順で保存)。
+
+### 検証
+- `python -m pytest tests/test_build_site.py -q` 8 passed。
+- クリーンアップ後、`len(dates) == len(set(dates))` を確認(6件、重複無し)。
+
 ## 2026-07-11 (19): daily.ymlの「当日実行済みチェック」ガードを復旧
 
 ### 要望(ユーザー原文)
