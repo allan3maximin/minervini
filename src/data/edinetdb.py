@@ -636,8 +636,67 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
     return store
 
 
+# ---------------------------------------------------------------------------
+# Repair: stale codes re-queue
+# ---------------------------------------------------------------------------
+
+def requeue_stale(codes: list[str], config: dict | None = None,
+                  base_store: dict | None = None, stale_days: int | None = None,
+                  today: date | None = None) -> list[str]:
+    """直近開示が古い(またはデータ皆無の)ユニバース銘柄をbacklogへ再投入する。
+
+    backlog消化は「取得はできたが1件も採用できなかった」銘柄も消費済みとして
+    落とすため(無限リトライ防止)、パース不具合等で成果ゼロのまま消化されると
+    その銘柄は日次runでは二度と再取得されない。2026-07-08の初回稼働時に約450
+    銘柄がこの穴に落ちた(log.md参照)。このリペアはその一般形: J-Quants+自
+    ストアの最新checked_dateがstale_days日より古い銘柄を要再取得とみなして
+    再キューする。ネットワークには触れず、実取得は以後の日次runが
+    requests_per_day/日ずつ優先度順に消化する。
+    """
+    config = config or load_config()
+    base_store = base_store or {}
+    if stale_days is None:
+        stale_days = config["fundamentals"]["stale_days"]
+    today = today or datetime.now().date()
+
+    store = load_store()
+    state = load_state()
+    backlog: list[str] = list(dict.fromkeys(state.get("backlog") or []))
+    backlog_set = set(backlog)
+
+    requeued: list[str] = []
+    for code in codes:
+        if code in backlog_set:
+            continue
+        checked = [
+            s.get(code, {}).get("checked_date") for s in (base_store, store)
+        ]
+        checked = [c for c in checked if c]
+        latest = max(checked) if checked else None
+        is_stale = latest is None or (today - date.fromisoformat(latest)).days > stale_days
+        if is_stale:
+            backlog.append(code)
+            backlog_set.add(code)
+            requeued.append(code)
+
+    state["backlog"] = backlog
+    save_state(state)
+    print(f"EDINET DB requeue: {len(requeued)} stale codes queued "
+          f"(threshold {stale_days}d, backlog now {len(backlog)}).")
+    return requeued
+
+
 def main() -> None:
+    import argparse
+
     from src.universe import load_universe
+
+    parser = argparse.ArgumentParser(description="EDINET DB fundamentals fetcher")
+    parser.add_argument("--requeue-stale", action="store_true",
+                        help="開示鮮度が古い銘柄をbacklogに再投入する(ネットワーク不使用)")
+    parser.add_argument("--stale-days", type=int, default=None,
+                        help="requeue-staleの鮮度閾値(日)。省略時はconfig fundamentals.stale_days")
+    args = parser.parse_args()
 
     config = load_config()
     universe = load_universe()
@@ -645,7 +704,10 @@ def main() -> None:
     # 単独実行時はJ-Quantsストア(data/fundamentals_auto.json)をbaseに使う
     # (pipeline実行時にjquants_mod.update_fundamentals_autoの戻り値を渡すのと同じ基準)。
     base_store = load_auto_store()
-    update_fundamentals_auto(codes, config, base_store=base_store)
+    if args.requeue_stale:
+        requeue_stale(codes, config, base_store=base_store, stale_days=args.stale_days)
+    else:
+        update_fundamentals_auto(codes, config, base_store=base_store)
 
 
 if __name__ == "__main__":

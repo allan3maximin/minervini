@@ -542,3 +542,71 @@ def test_load_state_missing_file_returns_empty(tmp_path):
 
 def test_load_store_missing_file_returns_empty(tmp_path):
     assert ed.load_store(path=tmp_path / "missing.json") == {}
+
+
+# ---------------------------------------------------------------------------
+# requeue_stale -- 成果ゼロのままbacklogから落ちた銘柄のリペア再投入
+# (2026-07-08の初回稼働でパース不具合期間に約450銘柄が消化され穴になった件)
+# ---------------------------------------------------------------------------
+
+_REQUEUE_CFG = {
+    "edinetdb": {"enabled": True},
+    "fundamentals": {"stale_days": 120},
+}
+
+
+def test_requeue_stale_queues_old_and_missing_codes(isolated_paths):
+    store_path, state_path = isolated_paths
+    today = date(2026, 7, 12)
+    # 7203: J-Quantsのchecked_dateが2月 (>120日) -> stale
+    # 6758: EDINET DB側が5月に取得済み (<120日) -> fresh
+    # 9984: どちらのストアにも無い -> stale扱い
+    base_store = {
+        "7203": {"quarters": [], "checked_date": "2026-02-06"},
+        "6758": {"quarters": [], "checked_date": "2026-02-05"},
+    }
+    store_path.write_text(json.dumps({
+        "6758": {"quarters": [], "checked_date": "2026-05-11", "source": "edinetdb"},
+    }))
+    state_path.write_text(json.dumps({"backlog": [], "last_events_date": "2026-07-11"}))
+
+    requeued = ed.requeue_stale(["7203", "6758", "9984"], _REQUEUE_CFG,
+                                base_store=base_store, today=today)
+    assert requeued == ["7203", "9984"]
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == ["7203", "9984"]
+    assert state["last_events_date"] == "2026-07-11"  # 他のstateは保持
+
+
+def test_requeue_stale_keeps_existing_backlog_and_dedups(isolated_paths):
+    store_path, state_path = isolated_paths
+    today = date(2026, 7, 12)
+    state_path.write_text(json.dumps({"backlog": ["7203"]}))
+
+    requeued = ed.requeue_stale(["7203", "9984"], _REQUEUE_CFG, base_store={}, today=today)
+    assert requeued == ["9984"]  # 7203は既にbacklogに居るので二重投入しない
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == ["7203", "9984"]
+
+
+def test_requeue_stale_uses_newest_checked_date_across_stores(isolated_paths):
+    store_path, state_path = isolated_paths
+    today = date(2026, 7, 12)
+    # J-Quants側は古いがEDINET DB側が新しい -> fresh (最新の方で判定)
+    base_store = {"7203": {"quarters": [], "checked_date": "2026-02-06"}}
+    store_path.write_text(json.dumps({
+        "7203": {"quarters": [], "checked_date": "2026-06-30", "source": "edinetdb"},
+    }))
+
+    assert ed.requeue_stale(["7203"], _REQUEUE_CFG, base_store=base_store, today=today) == []
+
+
+def test_requeue_stale_threshold_override(isolated_paths):
+    store_path, state_path = isolated_paths
+    today = date(2026, 7, 12)
+    base_store = {"7203": {"quarters": [], "checked_date": "2026-06-30"}}  # 12日前
+
+    assert ed.requeue_stale(["7203"], _REQUEUE_CFG, base_store=base_store,
+                            stale_days=10, today=today) == ["7203"]
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == ["7203"]

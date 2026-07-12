@@ -324,6 +324,14 @@ tests/                      pytest 210件 (test_jquants.py, test_edinetdb.py, te
   `test_update_priority_by_code_unlisted_codes_sort_last`,
   `test_update_priority_by_code_none_leaves_backlog_order_unchanged`(edinetdb.py側)、
   `test_run_daily_passes_priority_rank_to_edinetdb`(pipeline.py側)。
+- **リペアCLI `--requeue-stale`(2026-07-12追加)**: `python -m src.data.edinetdb --requeue-stale
+  [--stale-days N]`。backlog消化は「取得できたが1件も採用できなかった」銘柄も消費済みとして
+  落とす(無限リトライ防止)ため、パース不具合の期間に消化された銘柄は成果ゼロのまま二度と
+  再取得されない穴になる — 2026-07-08の初回稼働時に約450銘柄がこれに該当し、5月開示の
+  本決算(2025Q4)がJ-Quants 85日遅延窓にもEDINET DBにも入らない状態が発生した。
+  `requeue_stale` は J-Quants+EDINET DB両ストアの最新 `checked_date` が閾値(省略時
+  `fundamentals.stale_days`=120日)より古い銘柄をbacklogへ再投入する(ネットワーク不使用・
+  実取得は以後の日次runが90req/日ずつ優先度順に消化)。テスト: `test_requeue_stale_*` 4件。
 - **YTD差分の四半期化**: J-Quants(`fundamentals_auto.json`)を `base_store` として渡し、直前四半期までの
   YTD値との差分から単四半期値を導出する(`derive_with_base`)。Q1はYTDそのまま。前四半期が
   base側に無い/欠損している場合はそのレコードごと破棄する(半端な値を出さない)。
