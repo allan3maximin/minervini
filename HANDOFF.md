@@ -538,10 +538,34 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - `startLiveIndices`: 指数カードの擬似リアルタイム更新。60秒間隔で indices.json を再fetch (`cache: "no-store"`) して
   `renderMarketOverview` を再実行するだけ(ページリロード不要)。バックグラウンドタブ (`document.hidden`) では止める。
   データ自体の更新頻度は intraday-indices.yml 側の15分間隔が上限 (静的サイトなのでティック単位の真のリアルタイムではない)。
-- WebAuthn/書き込み系: `passkeyAuthEnabled: false` (config.js) のキルスイッチで現在**全部非表示**。
+- WebAuthn/書き込み系: `passkeyAuthEnabled` (config.js) のキルスイッチ。**2026-07-12に有効化済み**。
   対象は `.passkey-gated` クラスを持つ全要素(旧: id固定リストの `hidePasskeyAuthUi`。ヘッダーのボタンに加え
   view-batch の実行カードも同クラスで一括隠蔽できるよう、2026-07-08にクラスベースへ変更)。
   有効化すると: 解錠ボタン(WebAuthn PRF→PAT復号)→ファンダ入力モーダル/バッチ実行ボタンが活性化。
+
+### アクセス制御: データ暗号化 + 起動時パスキーゲート (2026-07-12追加)
+- **動機**: 公開リポジトリ+Pagesでは画面をロックしてもJSONのURL直アクセスで中身が見える。
+  そこで docs/data/*.json 自体を暗号化し、「アクセス=復号鍵の所持」にした。
+- **書き出し側** (`src/report/secure_io.py`): env `DASHBOARD_DATA_KEY`(GitHub Secret、base64の32バイト)が
+  あると `write_docs_json` が AES-256-GCM封筒 `{"__enc__":"aesgcm-v1","iv","ct"}` で書く。**鍵未設定なら平文**
+  (ローカル開発・テストは従来どおり)。対象: report/breadth/charts/fundamentals_public/heatmap/indices/positions。
+  読み戻し(load_breadth)は `read_docs_json`(封筒なら復号、鍵無しで封筒に当たると明示エラー)。
+  リカバリCLI: `python -m src.report.secure_io --decrypt <file>` / `--encrypt <file>`(鍵はenv)。
+  ワークフロー: daily.yml / intraday-indices.yml が Secrets から `DASHBOARD_DATA_KEY` を渡す。
+- **読み出し側** (`docs/assets/secure-fetch.js` = `window.MinerviniData`): `fetchJson(path,{optional})` が
+  封筒/平文を自動判別して復号。データ鍵はメモリのみ。`setDataKey()` 成功時に `minervini-unlocked`
+  イベントを発火(起動ゲートを閉じる合図)。**data/*.json のfetchは必ずこれを通すこと**(素のfetchだと
+  暗号化時に壊れる)。
+- **起動ゲート** (`app.js ensureDataAccess` + index.html `#lock-screen`): report.jsonが封筒なら全ビュー
+  初期化前にロック画面を表示。「パスキーで解錠」→ vault解錠(PRF)→ dataKey注入 → ゲート解除+書き込み系も
+  同時解錠。平文なら素通し(=暗号化を有効にした時点でゲートが自動的に立ち上がる。ロールバックも
+  Secretを消して1回再生成するだけ)。
+- **保管庫v2** (`webauthn-vault.js`): 平文ペイロードが `{"pat","dataKey"}` のJSONに(v1=生PAT文字列も
+  解錠のみ後方互換)。セットアップモーダル(fundamentals-modal.js)にデータ鍵入力欄を追加。
+  データ鍵は GitHub Secret `DASHBOARD_DATA_KEY` と同じ値を入れる。
+- **既知の限界**: リポジトリ自体が公開のため、ソース・log.md・manual/positions.csv(保有ポジション!)・
+  data/配下の中間データは暗号化対象外で公開のまま。**本気で隠すならリポジトリをprivateにするのが正道**
+  (Pagesは動き続けるが、github-api.jsの未認証 listWorkflowRuns はPAT必須になる)。
 
 ### 投資法ページ (view-invest)
 - 静的コンテンツ(fetch無し)。SEPAの基本サイクル、トレンドテンプレート8条件、VCP(V1〜V7)、

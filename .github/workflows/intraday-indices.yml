@@ -39,6 +39,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Refresh indices only
+        env:
+          # docs/data/indices.json の暗号化鍵 (daily.ymlと同じ)。未設定なら平文出力。
+          DASHBOARD_DATA_KEY: ${{ secrets.DASHBOARD_DATA_KEY }}
         run: python -m src.data.indices
 
       - name: Commit results

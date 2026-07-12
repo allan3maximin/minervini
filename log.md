@@ -2,6 +2,46 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-12 (33): パスキー必須化 — docs/dataの暗号化 + 起動時ゲート(アクセス制御の実体化)
+
+### 要望(ユーザー原文)
+> パスキー機能を実装して。
+> 入力だけでなく、アクセス自体をパスキー必須にして
+
+### 設計判断
+- 公開リポジトリ+Pagesでは「画面ロック」だけだとJSONのURL直叩きで中身が見えるため、
+  **docs/data/*.json 自体をAES-256-GCMで暗号化**し、復号鍵を既存のWebAuthn PRF保管庫
+  (vault.json)にPATと一緒に格納する方式にした(パスキー→データ鍵→復号の2段構え)。
+- 詳細は HANDOFF.md「アクセス制御: データ暗号化 + 起動時パスキーゲート」参照。
+
+### 変更内容
+- `src/report/secure_io.py` 新設 + 全docs/data writerの差し替え(report/breadth/charts/
+  fundamentals_public/heatmap/indices/positions)。鍵はenv `DASHBOARD_DATA_KEY`(未設定なら平文)。
+  load_breadthの読み戻しも復号対応。リカバリCLI付き。requirements.txt に cryptography 追加。
+- daily.yml / intraday-indices.yml に Secret `DASHBOARD_DATA_KEY` を配線。
+- フロント: `secure-fetch.js`(封筒自動判別fetch層)新設、**全data fetchを置き換え**
+  (app.js×8箇所, heatmap.js, fundamentals-modal.js)。起動時ゲート(`ensureDataAccess`+
+  `#lock-screen`)。保管庫v2({pat, dataKey}、v1後方互換)。セットアップモーダルに
+  データ鍵入力欄。`passkeyAuthEnabled: true` に変更(解錠/設定/バッチ実行ボタン表示)。
+- テスト: tests/test_secure_io.py 10件。**pytest 257件全パス**。
+- 検証: テスト鍵でローカル暗号化→preview実機確認(ロック画面表示・背後の初期化停止・
+  鍵注入後にダッシュボード/個別銘柄/暗号化チャートまで全描画・コンソールエラー無し)。
+  検証後にローカルファイルは平文へ復元済み(テスト鍵の暗号文は未コミット)。
+
+### 有効化手順(ユーザー作業、これをやるまでは平文のまま動く)
+1. 鍵生成: `python -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"`
+2. GitHub → Settings → Secrets and variables → Actions → New repository secret:
+   Name `DASHBOARD_DATA_KEY`、Value に1の出力。**この値は再セットアップ時にも使うので安全な場所に控える**。
+3. push後、dailyワークフローを1回実行(以後の出力が暗号化され、ダッシュボードにロック画面が出る)。
+4. ダッシュボードのロック画面 →「初回セットアップ」→ PAT + データ鍵(1と同じ値)を入力
+   → パスキー登録。以後のアクセスは毎回 Face ID/Touch ID で解錠。
+- ロールバック: Secretを削除してdailyを1回回す(平文に戻りゲート消滅)。緊急時の中身確認:
+  `DASHBOARD_DATA_KEY=<鍵> python -m src.report.secure_io --decrypt docs/data/report.json`
+
+### 既知の限界(HANDOFF.mdにも記載)
+- リポジトリ自体は公開のまま: ソース・log.md・**manual/positions.csv(保有ポジション)**・data/配下は
+  暗号化対象外。本気で隠すならリポジトリのprivate化が正道(要ユーザー判断)。
+
 ## 2026-07-12 (32): サマリー情報の厚み増強A/B/C(会社予想+進捗率・決算発表予定日・時価総額/市場区分)
 
 ### 要望(ユーザー原文)

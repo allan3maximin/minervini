@@ -170,7 +170,5 @@ def build_positions_report(
 
 
 def write_positions_json(report: dict, path=None) -> None:
-    path = path or POSITIONS_JSON_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    from src.report.secure_io import write_docs_json
+    write_docs_json(path or POSITIONS_JSON_PATH, report)

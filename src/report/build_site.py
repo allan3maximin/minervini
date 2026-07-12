@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import REPO_ROOT, load_config
+from src.report.secure_io import read_docs_json, write_docs_json
 from src.screener.scoring import combined_score
 
 DOCS_DIR = REPO_ROOT / "docs"
@@ -155,9 +156,7 @@ def build_report(
         "data_warnings": data_warnings or {"failed_tickers": [], "stale_tickers": [], "csv_errors": []},
         "stocks": ordered,
     }
-    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(REPORT_PATH, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    write_docs_json(REPORT_PATH, report)
     return report
 
 
@@ -166,10 +165,7 @@ def build_report(
 # ---------------------------------------------------------------------------
 
 def load_breadth() -> dict:
-    if not BREADTH_PATH.exists():
-        return {"history": []}
-    with open(BREADTH_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return read_docs_json(BREADTH_PATH, default={"history": []})
 
 
 def compute_breakout_success_rate(
@@ -231,9 +227,7 @@ def update_breadth(
     breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
     breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]
-    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(BREADTH_PATH, "w", encoding="utf-8") as f:
-        json.dump(breadth, f, ensure_ascii=False, indent=2)
+    write_docs_json(BREADTH_PATH, breadth)
     return breadth
 
 
@@ -291,9 +285,7 @@ def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result
 
 
 def write_chart_data(code: str, chart_data: dict) -> None:
-    CHARTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CHARTS_DIR / f"{code}.json", "w", encoding="utf-8") as f:
-        json.dump(chart_data, f, ensure_ascii=False, indent=2)
+    write_docs_json(CHARTS_DIR / f"{code}.json", chart_data)
 
 
 # ---------------------------------------------------------------------------
@@ -308,5 +300,4 @@ def ensure_data_dir_exists() -> None:
     if not REPORT_PATH.exists():
         build_report(stocks=[], universe_size=0, template_pass=0)
     if not BREADTH_PATH.exists():
-        with open(BREADTH_PATH, "w", encoding="utf-8") as f:
-            json.dump({"history": []}, f, ensure_ascii=False, indent=2)
+        write_docs_json(BREADTH_PATH, {"history": []})

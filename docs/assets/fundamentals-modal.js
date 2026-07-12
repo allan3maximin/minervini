@@ -196,6 +196,8 @@
       </p>
       <label class="field-label">Personal Access Token</label>
       <input type="password" id="vault-pat-input" class="modal-input" autocomplete="off" placeholder="github_pat_..." />
+      <label class="field-label">データ暗号鍵 (GitHub Secret <code>DASHBOARD_DATA_KEY</code> と同じ値)</label>
+      <input type="password" id="vault-datakey-input" class="modal-input" autocomplete="off" placeholder="base64の32バイト鍵 (暗号化未使用なら空欄)" />
       <div id="vault-setup-error" class="form-error" hidden></div>
       <div class="modal-actions">
         <button type="button" id="vault-setup-cancel">キャンセル</button>
@@ -210,7 +212,9 @@
       const errEl = document.getElementById("vault-setup-error");
       errEl.hidden = true;
       const patInput = document.getElementById("vault-pat-input");
+      const dataKeyInput = document.getElementById("vault-datakey-input");
       let pat = patInput.value.trim();
+      const dataKey = dataKeyInput ? dataKeyInput.value.trim() : "";
       if (!pat) {
         errEl.textContent = "PATを入力してください。";
         errEl.hidden = false;
@@ -220,9 +224,10 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "パスキー作成中...(Face ID/Touch IDの確認が表示されます)";
       try {
-        await window.MinerviniVault.setupVault(pat);
+        await window.MinerviniVault.setupVault(pat, dataKey || null);
         pat = ""; // drop the local reference to the plaintext PAT
         patInput.value = "";
+        if (dataKeyInput) dataKeyInput.value = "";
         closeModal();
         alert(
           "セットアップが完了し、vault.jsonをコミットしました。解錠済みなのでこのまま操作できます。\n" +
@@ -295,15 +300,12 @@
     // Fetch failures here are silent -- the form still works manual-only.
     let autoByQuarter = {};
     try {
-      const resp = await fetch("data/fundamentals_public.json", { cache: "no-store" });
-      if (resp.ok) {
-        const all = await resp.json();
-        const entry = all[code];
-        if (entry && entry.quarters) {
-          entry.quarters.forEach((q) => {
-            autoByQuarter[q.fiscal_quarter] = q;
-          });
-        }
+      const all = await window.MinerviniData.fetchJson("data/fundamentals_public.json", { optional: true });
+      const entry = all && all[code];
+      if (entry && entry.quarters) {
+        entry.quarters.forEach((q) => {
+          autoByQuarter[q.fiscal_quarter] = q;
+        });
       }
     } catch (e) {
       /* non-fatal: baseline prefill only */

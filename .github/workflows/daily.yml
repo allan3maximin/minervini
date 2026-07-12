@@ -47,6 +47,8 @@ jobs:
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}
+          # docs/data/*.json の暗号化鍵 (base64 32バイト)。未設定なら平文出力。
+          DASHBOARD_DATA_KEY: ${{ secrets.DASHBOARD_DATA_KEY }}
         run: python -m src.pipeline
 
       - name: Commit results

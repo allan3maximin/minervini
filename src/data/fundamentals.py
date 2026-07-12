@@ -187,9 +187,8 @@ def write_public_json(fundamentals_by_code: dict, path=None) -> None:
             "checked_date": data.get("checked_date"),
             "guidance": data.get("guidance"),
         }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=1)
+    from src.report.secure_io import write_docs_json
+    write_docs_json(path, out, indent=1)
 
 
 def fund_coverage_tier(code: str, fundamentals_by_code: dict, config: dict | None = None) -> dict:

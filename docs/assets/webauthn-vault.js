@@ -4,10 +4,15 @@
 // Because private browsing gives no persistent storage, this module never
 // writes to localStorage/sessionStorage/IndexedDB. The only persistence is
 // docs/auth/vault.json itself, committed to the repo and served statically
-// by Pages -- readable by anyone (it's a public repo), but the PAT inside it
+// by Pages -- readable by anyone (it's a public repo), but the payload inside
 // is AES-GCM encrypted with a key that only the enrolled passkey's PRF
-// output can derive. The decrypted PAT lives in github-api.js's in-memory
-// token variable for the tab's lifetime only.
+// output can derive.
+//
+// Vault payload v2 (2026-07-12): 平文は {"pat": "...", "dataKey": "<b64>"} の
+// JSON。dataKey は docs/data/*.json を復号するデータ鍵 (GitHub Secretの
+// DASHBOARD_DATA_KEY と同じ値)。v1 (生のPAT文字列) も後方互換で解錠可能だが
+// dataKey が無いためデータ復号はできない -> 再セットアップを促す。
+// 復号された PAT / dataKey はメモリのみ(タブの寿命)。
 (function () {
   const VAULT_RELATIVE_PATH = "auth/vault.json"; // same-origin, unauthenticated fetch
   const HKDF_INFO = "pat-vault-v1";
@@ -114,9 +119,13 @@
   // commit vault.json via the Contents API using the just-entered PAT.
   // -----------------------------------------------------------------------
 
-  async function setupVault(plainPat) {
+  async function setupVault(plainPat, dataKeyB64) {
     if (!isSupported()) {
       throw new Error("この環境はWebAuthnに対応していません(iOS 18以降のSafariが必要)");
+    }
+    if (dataKeyB64) {
+      // 形式検証を先に (パスキー作成のFace ID確認を無駄にしないため)。
+      await window.MinerviniData.setDataKey(dataKeyB64);
     }
 
     const credentialId = await createPasskey();
@@ -126,10 +135,11 @@
 
     const prfOutput = await evalPrf(credentialId, prfSalt.buffer);
     const key = await deriveAesKey(prfOutput, hkdfSalt.buffer);
-    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plainPat));
+    const payload = JSON.stringify({ pat: plainPat, dataKey: dataKeyB64 || null });
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(payload));
 
     const vault = {
-      version: 1,
+      version: 2,
       credentialId: bufToB64url(credentialId),
       prfSalt: bufToB64url(prfSalt.buffer),
       hkdfSalt: bufToB64url(hkdfSalt.buffer),
@@ -171,12 +181,28 @@
     const prfOutput = await evalPrf(credentialId, prfSaltBuf);
     const key = await deriveAesKey(prfOutput, hkdfSaltBuf);
     const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(ivBuf) }, key, ciphertextBuf);
-    const pat = new TextDecoder().decode(plainBuf);
+    const plain = new TextDecoder().decode(plainBuf);
+
+    // v2: JSON {pat, dataKey} / v1(後方互換): 生のPAT文字列。
+    let pat = plain;
+    let dataKey = null;
+    try {
+      const parsed = JSON.parse(plain);
+      if (parsed && typeof parsed === "object" && "pat" in parsed) {
+        pat = parsed.pat || "";
+        dataKey = parsed.dataKey || null;
+      }
+    } catch (e) {
+      /* v1 payload -- raw PAT string */
+    }
     window.MinerviniGitHub.setToken(pat);
+    if (dataKey) await window.MinerviniData.setDataKey(dataKey);
+    return { hasDataKey: !!dataKey };
   }
 
   function lock() {
     window.MinerviniGitHub.setToken("");
+    if (window.MinerviniData) window.MinerviniData.clearDataKey();
   }
 
   window.MinerviniVault = {

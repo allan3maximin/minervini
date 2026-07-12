@@ -224,9 +224,8 @@ def build_heatmap(
         "topix_returns": topix_returns,
         "sectors": sectors,
     }
-    HEATMAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(HEATMAP_PATH, "w", encoding="utf-8") as f:
-        json.dump(heatmap, f, ensure_ascii=False, indent=2)
+    from src.report.secure_io import write_docs_json
+    write_docs_json(HEATMAP_PATH, heatmap)
 
     update_sector_history(today_str, sectors, topix_returns, cfg)
 

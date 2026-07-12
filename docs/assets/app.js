@@ -103,14 +103,15 @@ async function initDashboard() {
 
   // no-store: the daily bot commit refreshes these files; a heuristically
   // cached copy is exactly the "dashboard shows two-day-old data" failure.
+  // fetchJson: 暗号化封筒(パスキー解錠後のデータ鍵で復号)/平文の両対応。
   const [report, breadth, indices, positionsData] = await Promise.all([
-    fetch("data/report.json", { cache: "no-store" }).then((r) => r.json()),
-    fetch("data/breadth.json", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ history: [] })),
+    window.MinerviniData.fetchJson("data/report.json"),
+    window.MinerviniData.fetchJson("data/breadth.json", { optional: true }).then((b) => b || { history: [] }),
     // indices.json only exists after the first pipeline run with the market
     // overview feature; render nothing (section stays hidden) until then.
-    fetch("data/indices.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    window.MinerviniData.fetchJson("data/indices.json", { optional: true }),
     // positions.json only exists once manual/positions.csv has at least one row.
-    fetch("data/positions.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    window.MinerviniData.fetchJson("data/positions.json", { optional: true }),
   ]);
 
   pendingFund = window.MinerviniFundamentalsUI
@@ -308,10 +309,8 @@ function startLiveIndices() {
   setInterval(async () => {
     if (document.hidden) return; // バックグラウンドタブでは無駄にフェッチしない
     try {
-      const res = await fetch("data/indices.json", { cache: "no-store" });
-      if (!res.ok) return;
-      const indices = await res.json();
-      renderMarketOverview(indices);
+      const indices = await window.MinerviniData.fetchJson("data/indices.json", { optional: true });
+      if (indices) renderMarketOverview(indices);
     } catch (e) {
       // 通信エラーは無視し、既存表示を維持したまま次回ポーリングに任せる。
     }
@@ -611,8 +610,8 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = "読み込み中...";
 
   const [report, chart] = await Promise.all([
-    fetch("data/report.json", { cache: "no-store" }).then((r) => r.json()),
-    fetch(`data/charts/${encodeURIComponent(code)}.json`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+    window.MinerviniData.fetchJson("data/report.json"),
+    window.MinerviniData.fetchJson(`data/charts/${encodeURIComponent(code)}.json`, { optional: true }),
   ]);
   const stock = report.stocks.find((s) => s.code === code);
 
@@ -749,11 +748,8 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
 
   let entry = null;
   try {
-    const resp = await fetch("data/fundamentals_public.json", { cache: "no-store" });
-    if (resp.ok) {
-      const all = await resp.json();
-      entry = all[code] || null;
-    }
+    const all = await window.MinerviniData.fetchJson("data/fundamentals_public.json", { optional: true });
+    entry = (all && all[code]) || null;
   } catch (e) {
     /* fetch failure: fall through to empty state below */
   }
@@ -1149,17 +1145,13 @@ function setupStockCopyButton(stock, chart, report) {
     btn.textContent = "生成中...";
     try {
       const [fundEntry, breadthLast, indicesData] = await Promise.all([
-        fetch("data/fundamentals_public.json", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : {}))
-          .then((all) => all[stock.code] || null)
+        window.MinerviniData.fetchJson("data/fundamentals_public.json", { optional: true })
+          .then((all) => (all && all[stock.code]) || null)
           .catch(() => null),
-        fetch("data/breadth.json", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
+        window.MinerviniData.fetchJson("data/breadth.json", { optional: true })
           .then((b) => (b && b.history && b.history.length ? b.history[b.history.length - 1] : null))
           .catch(() => null),
-        fetch("data/indices.json", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
+        window.MinerviniData.fetchJson("data/indices.json", { optional: true }).catch(() => null),
       ]);
       const text = buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData);
       await copyTextToClipboard(text);
@@ -1651,8 +1643,7 @@ async function initPositionsView() {
 
   let data = null;
   try {
-    const res = await fetch("data/positions.json", { cache: "no-store" });
-    if (res.ok) data = await res.json();
+    data = await window.MinerviniData.fetchJson("data/positions.json", { optional: true });
   } catch (e) {
     data = null;
   }
@@ -1789,13 +1780,101 @@ function initRouter() {
 }
 
 // ---------------------------------------------------------------------------
+// 起動時パスキーゲート: report.json が暗号化封筒ならデータ鍵が入るまで
+// 全ビューの初期化を止め、ロック画面を出す。平文なら従来どおり素通し
+// (=データ暗号化を有効にした時点で自動的にゲートが立ち上がる)。
+// 鍵は webauthn-vault.js の解錠(パスキー) or 初回セットアップで入り、
+// secure-fetch.js の setDataKey() が "minervini-unlocked" を発火して閉じる。
+// ---------------------------------------------------------------------------
 
-if (document.getElementById("confirmed-tier-body")) {
-  initDashboard();
+async function ensureDataAccess() {
+  let probe = null;
+  try {
+    const resp = await fetch("data/report.json", { cache: "no-store" });
+    if (resp.ok) probe = await resp.json();
+  } catch (e) {
+    probe = null;
+  }
+  if (!window.MinerviniData.isEnvelope(probe)) return; // 平文 or 取得不能 → ゲート不要
+  if (window.MinerviniData.hasDataKey()) return;
+
+  const overlay = document.getElementById("lock-screen");
+  const unlockBtn = document.getElementById("lock-unlock-btn");
+  const setupBtn = document.getElementById("lock-setup-btn");
+  const errEl = document.getElementById("lock-error");
+  if (!overlay || !unlockBtn) return;
+  overlay.hidden = false;
+
+  let vault = null;
+  try {
+    vault = await window.MinerviniVault.fetchVault();
+  } catch (e) {
+    /* 取得失敗は解錠ボタン押下時に再試行する */
+  }
+  if (!vault && setupBtn) setupBtn.hidden = false;
+
+  await new Promise((resolve) => {
+    function check() {
+      if (window.MinerviniData.hasDataKey()) {
+        overlay.hidden = true;
+        window.removeEventListener("minervini-unlocked", check);
+        resolve();
+      }
+    }
+    window.addEventListener("minervini-unlocked", check);
+
+    unlockBtn.addEventListener("click", async () => {
+      if (errEl) errEl.hidden = true;
+      unlockBtn.disabled = true;
+      const original = unlockBtn.textContent;
+      unlockBtn.textContent = "認証中...";
+      try {
+        if (!vault) vault = await window.MinerviniVault.fetchVault();
+        if (!vault) {
+          throw new Error("保管庫(vault.json)がまだありません。「初回セットアップ」を実行してください。");
+        }
+        const result = await window.MinerviniVault.unlock(vault);
+        if (!result || !result.hasDataKey) {
+          throw new Error("保管庫にデータ鍵が入っていません。データ鍵込みで再セットアップしてください。");
+        }
+        // ついでに書き込み系ボタンも解錠状態にしておく(二度目のFace IDを要求しない)。
+        applyLockState(true);
+        const hdrBtn = document.getElementById("vault-unlock-btn");
+        if (hdrBtn) {
+          hdrBtn.textContent = "🔒 解錠済み";
+          hdrBtn.disabled = true;
+        }
+        check();
+      } catch (e) {
+        if (errEl) {
+          errEl.textContent = e.message || String(e);
+          errEl.hidden = false;
+        }
+      } finally {
+        unlockBtn.disabled = false;
+        unlockBtn.textContent = original;
+      }
+    });
+
+    if (setupBtn) {
+      setupBtn.addEventListener("click", () => {
+        window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: !!vault });
+      });
+    }
+  });
 }
-// 銘柄詳細(view-stock)はDockナビを持つSPAシェル(index.html)内の1ビューに
-// なったため、initStockPage()はここで直接呼ばず、initRouter()内のshowView()が
-// hashが"stock/CODE"の時にだけ呼ぶ。
-if (document.getElementById("dock-nav")) {
-  initRouter();
+
+async function bootApp() {
+  await ensureDataAccess();
+  if (document.getElementById("confirmed-tier-body")) {
+    initDashboard();
+  }
+  // 銘柄詳細(view-stock)はDockナビを持つSPAシェル(index.html)内の1ビューに
+  // なったため、initStockPage()はここで直接呼ばず、initRouter()内のshowView()が
+  // hashが"stock/CODE"の時にだけ呼ぶ。
+  if (document.getElementById("dock-nav")) {
+    initRouter();
+  }
 }
+
+bootApp();

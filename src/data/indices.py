@@ -225,9 +225,8 @@ def update_indices(config: dict | None = None) -> dict:
         "stale_keys": [k for k in failed if any(e["key"] == k for e in entries)],
         "indices": entries,
     }
-    INDICES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(INDICES_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
+    from src.report.secure_io import write_docs_json
+    write_docs_json(INDICES_JSON_PATH, payload, indent=1)
 
     return {"updated": updated, "failed": failed}
 

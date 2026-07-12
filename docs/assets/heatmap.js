@@ -24,9 +24,7 @@ const HM_COND_LABELS = {
 };
 
 async function initHeatmap() {
-  HM = await fetch("data/heatmap.json", { cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+  HM = await window.MinerviniData.fetchJson("data/heatmap.json", { optional: true }).catch(() => null);
 
   const empty = document.getElementById("hm-empty");
   if (!HM || !HM.sectors || !HM.sectors.length) {
