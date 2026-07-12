@@ -52,17 +52,18 @@ def find_base_origin(df: pd.DataFrame, config: dict | None = None) -> dict:
 
         days_from_high = len(window_df) - 1 - t0_idx
         if days_from_high < min_days_from_high:
-            return {"status": "too_recent"}
+            return {"status": "too_recent", "days_from_high": days_from_high}
 
         base_df = window_df.iloc[t0_idx:].reset_index(drop=True)
         base_days = len(base_df)
         if base_days < base_min_days:
-            return {"status": "immature", "base_days": base_days}
+            return {"status": "immature", "base_days": base_days, "days_from_high": days_from_high}
 
         return {
             "status": "ok",
             "base_df": base_df,
             "base_days": base_days,
+            "days_from_high": days_from_high,
             "t0_date": base_df["date"].iloc[0] if "date" in base_df.columns else None,
         }
 
@@ -296,7 +297,15 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
 
     origin = find_base_origin(df, config)
     if origin["status"] != "ok":
-        return {"status": origin["status"].upper(), "must_flags": None, "vcp_score": None}
+        return {
+            "status": origin["status"].upper(),
+            "must_flags": None,
+            "vcp_score": None,
+            # サマリー生成用の文脈: IMMATUREなら形成中のベース日数、TOO_RECENT/
+            # IMMATUREなら高値からの経過日数が入る(該当しない場合はNone)。
+            "base_days": origin.get("base_days"),
+            "days_from_high": origin.get("days_from_high"),
+        }
 
     base_df = origin["base_df"]
     base_days = origin["base_days"]
@@ -315,6 +324,7 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
         "status": status,
         "must_flags": flags,
         "base_days": base_days,
+        "days_from_high": origin.get("days_from_high"),
         "t0_date": origin.get("t0_date"),
         "contractions": contractions,
         "footprint": footprint_string(contractions, base_days),

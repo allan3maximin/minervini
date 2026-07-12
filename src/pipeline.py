@@ -30,6 +30,7 @@ from src.report import build_site
 from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
 from src.report import positions as positions_mod
+from src.report import summary as summary_mod
 from src.screener import entry as entry_mod
 from src.screener import priority as priority_mod
 from src.screener import trend_template
@@ -225,6 +226,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
             )
 
         build_site.attach_priority(record, pr_eval)
+        record["momentum"] = summary_mod.compute_momentum(df_ind)
         record["has_chart"] = True
         stock_records.append(record)
         chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
@@ -254,6 +256,20 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     except Exception as e:
         print(f"Market signal computation failed (ignored): {e}")
         signal_result = None
+
+    # ルールベース日本語サマリー生成。セクター強度・地合いシグナルまで確定した
+    # あとに全レコードへ付与する(summary.pyは既存判定の言語化のみで新判断はしない)。
+    for record in stock_records:
+        try:
+            record["summary"] = summary_mod.build_stock_summary(
+                record,
+                quarters=(fundamentals_by_code.get(record["code"]) or {}).get("quarters"),
+                market_signal=signal_result,
+                config=config,
+                today=today,
+            )
+        except Exception as e:
+            print(f"Summary build failed for {record['code']} (ignored): {e}")
 
     template_pass = sum(1 for r in tt_results if r["passed"])
     data_warnings = {

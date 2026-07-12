@@ -2,6 +2,44 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-12 (31): 個別銘柄画面にルールベース日本語サマリー(LLM不使用)+ステータス日本語化
+
+### 要望(ユーザー原文)
+> 次は個別銘柄画面にサマリーを書ける？ LLMがかまずにどこまで行けるだろう
+> 情報にさらに厚みを持たせることはできる？情報量・質的な意味で。必要なら追加情報取得も検討
+> あとTooReacentとかは日本語に
+
+### 変更内容
+- `src/report/summary.py` 新設: 既存判定の言語化のみを行うサマリー生成
+  (`build_stock_summary` → {headline, points, cautions})。状態別見出し(WATCH_Aは
+  ピボット距離/逆指値/リスク、TOO_RECENT/IMMATUREは「あと何日」、REJECTED/WATCH_Bは
+  落ちたV条件の日本語列挙)+ 根拠(8条件/ベース収縮列/騰落率/出来高ドライアップ/
+  セクター強度/EPS YoY 4Q推移と加速減速判定/地合い)+ 注意(ファンダ弱・鮮度・
+  決算接近推定75日・MA50乖離>15%・リスク幅>7%・地合い赤黄)。閾値はconfigから埋める。
+- `src/screener/vcp.py`: find_base_origin/evaluate_vcp が days_from_high を返すように
+  (TOO_RECENT/IMMATUREの残日数表示用。既存ロジック不変の追加のみ)。
+- `src/report/build_site.py`: レコードに `vcp_detail` (base_days/days_from_high/
+  t0_date/depths_pct) を追加。
+- `src/pipeline.py`: レコードに `momentum` (5/20/60日騰落率・出来高10/50日比) を付与し、
+  セクター強度・地合い確定後に全レコードへ `summary` を生成(失敗しても本体は止めない)。
+- フロント: index.htmlに`#stock-summary`、app.jsに`renderStockSummary`+ステータスチップの
+  日本語化。STATUS_LABELSを全日本語化(「監視A(ピボット待ち)」等。summary.pyの
+  STATUS_LABELS_JAと対で保守)。style.cssにサマリーカードのスタイル。
+- 即時反映: 現行report.jsonにワンショットでsummary/momentumを注入済み
+  (scratchpadスクリプト。vcp_detail由来のベース収縮行は次回daily実行から出る)。
+
+### 検証
+- pytest 232件全パス(214+新規18 test_summary.py)。
+- preview_start(docs静的配信)で9247(WATCH_A)/319A(REJECTED)の実表示・コンソール
+  エラー無しを確認。スクリーンショット確認済み。
+
+### 次のステップ候補(未着手・ユーザー判断待ち)
+- 厚み増強の追加データ候補: (A)会社予想(ガイダンス)EPS/売上と進捗率 —
+  J-Quants /fins/summary のレスポンスに予想フィールドがあれば取得フィールド追加のみで
+  可能(要実地確認)。(B)決算発表予定日 — J-Quants /fins/announcement(無料枠か要確認。
+  現状は前回開示+75日の推定で代替済み)。(C)時価総額・市場区分 — listed_info+株式数。
+  (D)信用残 — 有料プラン必要。
+
 ## 2026-07-12 (30): ファンダ欠落の原因特定とリペア(EDINET DB backlog再投入CLI)
 
 ### 要望(ユーザー原文)

@@ -98,6 +98,14 @@ def assemble_stock_record(
         "fund_checked_date": fund_info.get("fund_checked_date"),
         "eps_accel_slope": fund_info.get("eps_accel_slope"),
         "must_flags": {"tt": tt_flags, "vcp": vcp_result.get("must_flags")},
+        # サマリー生成(summary.py)・個別銘柄画面用のVCP文脈。footprint文字列
+        # より一段細かい素の数値(ベース日数・高値からの日数・各収縮の深さ%)。
+        "vcp_detail": {
+            "base_days": vcp_result.get("base_days"),
+            "days_from_high": vcp_result.get("days_from_high"),
+            "t0_date": str(vcp_result["t0_date"])[:10] if vcp_result.get("t0_date") is not None else None,
+            "depths_pct": [round(c["depth"] * 100, 1) for c in vcp_result.get("contractions") or []],
+        },
     }
 
 

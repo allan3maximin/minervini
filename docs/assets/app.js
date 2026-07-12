@@ -1,11 +1,12 @@
+// エントリーステータスの日本語ラベル (src/report/summary.py の STATUS_LABELS_JA と対で保守)。
 const STATUS_LABELS = {
-  BREAKOUT: "本日のBREAKOUT",
-  BREAKOUT_WEAK: "BREAKOUT (出来高不足)",
-  WATCH_A: "WATCH_A (ピボット待ち)",
-  WATCH_B: "WATCH_B (ベース形成中)",
-  EXTENDED: "EXTENDED (追いかけ禁止)",
-  REJECTED: "ベース崩れ",
-  IMMATURE: "ベース形成中(未成熟)",
+  BREAKOUT: "本日のブレイクアウト",
+  BREAKOUT_WEAK: "ブレイクアウト(出来高不足)",
+  WATCH_A: "監視A(ピボット待ち)",
+  WATCH_B: "監視B(ベース形成中)",
+  EXTENDED: "伸びすぎ(追いかけ禁止)",
+  REJECTED: "ベース不合格",
+  IMMATURE: "ベース形成中(日数不足)",
   TOO_RECENT: "高値更新中(ベース未形成)",
   NO_BASE: "ベース未検出",
 };
@@ -617,6 +618,7 @@ async function initStockPage(codeOverride) {
 
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
+  renderStockSummary(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
   setupSizingCalculator(stock);
   setupStockCopyButton(stock, chart, report);
@@ -634,10 +636,46 @@ async function initStockPage(codeOverride) {
   }
 }
 
+// ルールベース日本語サマリー (src/report/summary.py が生成した
+// {headline, points, cautions})。無ければセクションごと隠す
+// (次回daily実行前の古いreport.jsonでも壊れないように)。
+function renderStockSummary(stock) {
+  const el = document.getElementById("stock-summary");
+  if (!el) return;
+  el.innerHTML = "";
+  const s = stock && stock.summary;
+  if (!s || !s.headline) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+
+  const head = document.createElement("p");
+  head.className = "summary-headline";
+  head.textContent = s.headline;
+  el.appendChild(head);
+
+  const lists = [
+    { items: s.points, className: "summary-points", prefix: "" },
+    { items: s.cautions, className: "summary-cautions", prefix: "⚠ " },
+  ];
+  for (const { items, className, prefix } of lists) {
+    if (!Array.isArray(items) || !items.length) continue;
+    const ul = document.createElement("ul");
+    ul.className = className;
+    for (const text of items) {
+      const li = document.createElement("li");
+      li.textContent = prefix + text;
+      ul.appendChild(li);
+    }
+    el.appendChild(ul);
+  }
+}
+
 function renderStockMeta(stock) {
   const items = [
     ["終値", stock.close],
-    ["ステータス", stock.status],
+    ["ステータス", STATUS_LABELS[stock.status] || stock.status],
     ["総合スコア", stock.total_score],
     ["RS", stock.rs],
     ["ピボット", stock.pivot],

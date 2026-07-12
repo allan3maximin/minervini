@@ -50,6 +50,9 @@ src/
     heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
     market_signal.py        地合いシグナル (市場ブレッドス + TOPIXトレンド合成、breadth.json historyへ格納。2026-07-11追加)
     positions.py             ポジション管理 (manual/positions.csv → docs/data/positions.json、R倍数/売りシグナル計算。2026-07-11追加)
+    summary.py              個別銘柄のルールベース日本語サマリー生成 (LLM不使用。status/VCP詳細/ファンダ/地合いの言語化を
+                            {headline, points, cautions} で report.json の各銘柄 "summary" に格納。app.jsの
+                            renderStockSummaryが個別銘柄画面の先頭に描画。STATUS_LABELS_JAはapp.jsのSTATUS_LABELSと対で保守。2026-07-12追加)
 docs/                       GitHub Pages ルート
   index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-positions/view-batch/view-stock の
                             6セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
