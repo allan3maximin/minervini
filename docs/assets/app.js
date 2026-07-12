@@ -682,8 +682,14 @@ function renderStockMeta(stock) {
     ["推奨逆指値", stock.buy_stop],
     ["推奨損切り", stock.stop_loss],
     ["リスク%", stock.risk_pct],
+    // 以下は値がある場合のみ表示 (時価総額/市場区分/次回決算は2026-07-12追加。
+    // 市場区分は次回ユニバース再構築後、次回決算は3月期・9月期企業のみ入る)
+    ["時価総額", stock.market_cap_oku != null ? `${Number(stock.market_cap_oku).toLocaleString("ja-JP")}億円` : null],
+    ["市場", stock.market_segment ?? null],
+    ["次回決算", stock.next_earnings_date ?? null],
   ];
   document.getElementById("stock-meta").innerHTML = items
+    .filter(([, value], i) => i < 8 || value != null)
     .map(
       ([label, value]) =>
         `<span class="chip"><span class="chip-label">${label}</span><span class="chip-value">${value ?? "-"}</span></span>`
@@ -862,6 +868,10 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
   L.push(`- ティア: ${TIER_COPY_LABELS[stock.tier] || stock.tier || "-"}`);
   L.push(`- エントリーステータス: ${stock.status ?? "-"}${STATUS_LABELS[stock.status] ? ` = ${STATUS_LABELS[stock.status]}` : ""}`);
   L.push(`- セクター: ${stock.sector33 ?? "-"} (強度: ${stock.sector_strength ?? "-"} / 方向: ${stock.sector_direction ?? "-"})`);
+  if (stock.market_cap_oku != null || stock.market_segment) {
+    L.push(`- 時価総額: ${stock.market_cap_oku != null ? `約${Number(stock.market_cap_oku).toLocaleString("ja-JP")}億円` : "-"}${stock.market_segment ? ` / 市場区分: ${stock.market_segment}` : ""}`);
+  }
+  if (stock.next_earnings_date) L.push(`- 次回決算発表予定日: ${stock.next_earnings_date}`);
   L.push("");
 
   L.push("## 価格・テクニカル");
@@ -941,6 +951,15 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
     if (fundEntry.checked_date) L.push(`- 確認日: ${fundEntry.checked_date}`);
   } else {
     L.push("- ファンダデータなし");
+  }
+  const gv = stock.guidance_view;
+  if (gv) {
+    const gvParts = [];
+    if (gv.eps_plan != null) gvParts.push(`EPS ${copyNum(gv.eps_plan)}円${gv.eps_plan_yoy != null ? ` (前期比 ${copySignedPct(gv.eps_plan_yoy, 1)})` : ""}`);
+    if (gv.sales_plan_yoy != null) gvParts.push(`売上前期比 ${copySignedPct(gv.sales_plan_yoy, 1)}`);
+    if (gvParts.length) L.push(`- 会社計画(${gv.plan_fy}年度通期): ${gvParts.join(" / ")}`);
+    if (gv.eps_progress_pct != null) L.push(`- 通期計画進捗率: EPS ${copyNum(gv.eps_progress_pct, 1)}% (Q${gv.quarters_reported}時点、目安${(gv.quarters_reported * 25).toFixed(0)}%)`);
+    if (gv.forward_per != null) L.push(`- 予想PER: ${copyNum(gv.forward_per)}倍 (会社計画EPSベース)`);
   }
   L.push(`- カバレッジ: ${stock.fund_coverage ?? "-"}${stock.fund_stale ? " (古いデータ・再確認推奨)" : ""}`);
   if (stock.fund_strong != null) {

@@ -219,3 +219,121 @@ def test_yoy_series_skips_nonpositive_and_missing_base():
     ]
     out = sm.yoy_series(quarters, "eps")
     assert out == [("2025Q2", 20.0)]
+
+
+# ---------------------------------------------------------------------------
+# derive_guidance_view (会社計画・進捗率・予想PER)
+# ---------------------------------------------------------------------------
+
+def _fy_quarters(year, eps_list, rev_list):
+    return [
+        {"fiscal_quarter": f"{year}Q{n}", "eps": e, "revenue": r}
+        for n, (e, r) in enumerate(zip(eps_list, rev_list), start=1)
+    ]
+
+
+def test_guidance_view_quarterly_disclosure_uses_current_fy_plan():
+    # 2025年度Q2開示: FEPS=通期120円。前期(2024)実績EPS計100円 -> 計画YoY+20%。
+    quarters = (_fy_quarters(2024, [25, 25, 25, 25], [100, 100, 100, 100])
+                + _fy_quarters(2025, [30, 33], [110, 115]))
+    guidance = {"fy_start": "2025-04-01", "per_n": 2, "disc_date": "2025-11-07",
+                "feps": 120.0, "fsales": 460.0, "nx_feps": None, "nx_fsales": None}
+    gv = sm.derive_guidance_view(quarters, guidance, close=2400.0)
+    assert gv["plan_fy"] == 2025
+    assert gv["eps_plan_yoy"] == 20.0
+    assert gv["sales_plan_yoy"] == pytest.approx((460 - 400) / 400 * 100, abs=0.1)
+    assert gv["eps_progress_pct"] == pytest.approx((30 + 33) / 120 * 100, abs=0.1)
+    assert gv["quarters_reported"] == 2
+    assert gv["forward_per"] == 20.0  # 2400 / 120
+
+
+def test_guidance_view_fy_disclosure_uses_next_year_plan():
+    # 本決算(per_n=4)開示: NxFEPSが来期計画。実績4Q揃った2025年度EPS計100円と比較。
+    quarters = _fy_quarters(2025, [25, 25, 25, 25], [100, 100, 100, 100])
+    guidance = {"fy_start": "2025-04-01", "per_n": 4, "disc_date": "2026-05-14",
+                "feps": 100.0, "fsales": 400.0, "nx_feps": 130.0, "nx_fsales": 480.0}
+    gv = sm.derive_guidance_view(quarters, guidance, close=1300.0)
+    assert gv["plan_fy"] == 2026
+    assert gv["eps_plan_yoy"] == 30.0
+    assert gv["eps_progress_pct"] is None  # 2026年度の実績はまだ無い
+    assert gv["forward_per"] == 10.0
+
+
+def test_guidance_view_missing_prior_year_gives_none_yoy():
+    quarters = _fy_quarters(2025, [25, 25], [100, 100])  # 前期(2024)実績なし
+    guidance = {"fy_start": "2025-04-01", "per_n": 2, "disc_date": "2025-11-07",
+                "feps": 120.0, "fsales": None, "nx_feps": None, "nx_fsales": None}
+    gv = sm.derive_guidance_view(quarters, guidance, close=None)
+    assert gv["eps_plan_yoy"] is None
+    assert gv["eps_progress_pct"] == pytest.approx(50 / 120 * 100, abs=0.1)
+    assert gv["forward_per"] is None
+
+
+def test_guidance_view_none_when_no_plan_values():
+    assert sm.derive_guidance_view([], None) is None
+    g = {"fy_start": "2025-04-01", "per_n": 2, "feps": None, "fsales": None,
+         "nx_feps": None, "nx_fsales": None}
+    assert sm.derive_guidance_view([], g) is None
+
+
+# ---------------------------------------------------------------------------
+# サマリーへのガイダンス・時価総額・発表予定日の反映
+# ---------------------------------------------------------------------------
+
+def _guidance_ok():
+    return {"fy_start": "2025-04-01", "per_n": 2, "disc_date": "2025-11-07",
+            "feps": 120.0, "fsales": 460.0, "nx_feps": None, "nx_fsales": None}
+
+
+def _quarters_for_guidance():
+    return (_fy_quarters(2024, [25, 25, 25, 25], [100, 100, 100, 100])
+            + _fy_quarters(2025, [30, 33], [110, 115]))
+
+
+def test_summary_includes_guidance_and_per():
+    rec = _record(close=2400.0)
+    s = sm.build_stock_summary(rec, quarters=_quarters_for_guidance(),
+                               guidance=_guidance_ok(), config=_CFG, today=_TODAY)
+    text = "\n".join(s["points"])
+    assert "会社計画(2025年度): 前期比 EPS +20.0%" in text
+    assert "進捗率 EPS 52%(Q2時点)" in text
+    assert "予想PER 20.0倍" in text
+
+
+def test_summary_flags_plan_vs_latest_divergence():
+    # 直近四半期EPS YoYがマイナス(-37%)なのに会社計画が増益(+20%) -> 明示のpoint
+    rec = _record(close=2400.0)
+    s = sm.build_stock_summary(rec, quarters=_quarters_for_guidance(),
+                               guidance=_guidance_ok(), config=_CFG, today=_TODAY)
+    assert any("減益だが会社計画は通期増益(+20.0%)" in p for p in s["points"])
+
+
+def test_summary_low_progress_caution():
+    # Q3時点で進捗40% (目安75%) -> 低調caution
+    quarters = (_fy_quarters(2024, [25, 25, 25, 25], [100, 100, 100, 100])
+                + _fy_quarters(2025, [16, 16, 16], [100, 100, 100]))
+    g = {"fy_start": "2025-04-01", "per_n": 3, "disc_date": "2026-02-07",
+         "feps": 120.0, "fsales": None, "nx_feps": None, "nx_fsales": None}
+    s = sm.build_stock_summary(_record(), quarters=quarters, guidance=g,
+                               config=_CFG, today=_TODAY)
+    assert any("進捗が低調" in c and "40%" in c for c in s["cautions"])
+
+
+def test_summary_market_cap_point():
+    rec = _record(market_cap_oku=350, market_segment="グロース")
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("時価総額 約350億円(小型株・グロース)" in p for p in s["points"])
+
+
+def test_summary_next_earnings_within_14_days_is_caution():
+    rec = _record(next_earnings_date="2026-07-20")  # 8日後
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("決算発表予定 2026-07-20(あと8日)" in c for c in s["cautions"])
+    # 正確な予定日がある場合は75日推定は出さない
+    assert not any("次回決算発表が近い可能性" in c for c in s["cautions"])
+
+
+def test_summary_next_earnings_far_is_point():
+    rec = _record(next_earnings_date="2026-08-30")
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("次回決算発表予定: 2026-08-30" in p for p in s["points"])

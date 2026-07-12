@@ -111,6 +111,84 @@ def yoy_series(quarters: list[dict], key: str, max_points: int = 4) -> list[tupl
     return out[-max_points:]
 
 
+def derive_guidance_view(quarters: list[dict], guidance: dict | None,
+                         close: float | None = None) -> dict | None:
+    """会社予想(ガイダンス)を実績四半期と突き合わせた解釈済みビューを作る。
+
+    guidance: jquants.record_to_guidance 由来 {fy_start, per_n, disc_date,
+    feps, fsales, nx_feps, nx_fsales, shares_fy}。
+
+    「進行期の計画」を選ぶ: 本決算(per_n=4)開示なら翌期予想(NxF系)、
+    四半期開示・予想修正なら当期予想(F系)。計画YoYは前期の実績四半期4本の
+    合計と比較(4本揃わなければNone)。進捗率は計画期の実績四半期累計÷計画。
+    予想PER = 終値÷計画EPS。計算不能な項目はNoneのまま返し、全部Noneなら
+    ビュー自体をNoneにする。
+    """
+    if not guidance:
+        return None
+    fy_start = guidance.get("fy_start") or ""
+    if len(fy_start) < 4:
+        return None
+    try:
+        fy_year = int(fy_start[:4])
+    except ValueError:
+        return None
+
+    per_n = guidance.get("per_n")
+    if per_n == 4 and (guidance.get("nx_feps") is not None or guidance.get("nx_fsales") is not None):
+        plan_year = fy_year + 1
+        eps_plan = guidance.get("nx_feps")
+        sales_plan = guidance.get("nx_fsales")
+    else:
+        plan_year = fy_year
+        eps_plan = guidance.get("feps")
+        sales_plan = guidance.get("fsales")
+    if eps_plan is None and sales_plan is None:
+        return None
+
+    by_label = {q.get("fiscal_quarter"): q for q in quarters or [] if q.get("fiscal_quarter")}
+
+    def fy_sum(year: int, key: str, require_full: bool):
+        vals = [(by_label.get(f"{year}Q{n}") or {}).get(key) for n in (1, 2, 3, 4)]
+        present = [v for v in vals if v is not None]
+        if require_full and len(present) < 4:
+            return None, 0
+        return (sum(present) if present else None), len(present)
+
+    def plan_yoy(plan, prior):
+        if plan is None or prior is None or prior <= 0:
+            return None
+        return round((plan - prior) / prior * 100, 1)
+
+    prior_eps, _ = fy_sum(plan_year - 1, "eps", require_full=True)
+    prior_sales, _ = fy_sum(plan_year - 1, "revenue", require_full=True)
+    ytd_eps, n_eps_q = fy_sum(plan_year, "eps", require_full=False)
+    ytd_sales, n_sales_q = fy_sum(plan_year, "revenue", require_full=False)
+
+    def progress(ytd, plan):
+        if ytd is None or plan is None or plan <= 0:
+            return None
+        return round(ytd / plan * 100, 1)
+
+    per = None
+    if close is not None and eps_plan is not None and eps_plan > 0:
+        per = round(close / eps_plan, 1)
+
+    view = {
+        "plan_fy": plan_year,
+        "eps_plan": eps_plan,
+        "sales_plan": sales_plan,
+        "eps_plan_yoy": plan_yoy(eps_plan, prior_eps),
+        "sales_plan_yoy": plan_yoy(sales_plan, prior_sales),
+        "eps_progress_pct": progress(ytd_eps, eps_plan),
+        "sales_progress_pct": progress(ytd_sales, sales_plan),
+        "quarters_reported": max(n_eps_q, n_sales_q),
+        "forward_per": per,
+        "disc_date": guidance.get("disc_date"),
+    }
+    return view
+
+
 def _trend_word(values: list[float]) -> str | None:
     """3点以上の系列が単調に増加/減少していれば「加速中」/「減速中」を返す。"""
     if len(values) < 3:
@@ -196,6 +274,7 @@ def _build_headline(record: dict, config: dict) -> str:
 def build_stock_summary(
     record: dict,
     quarters: list[dict] | None = None,
+    guidance: dict | None = None,
     market_signal: dict | None = None,
     config: dict | None = None,
     today: date | None = None,
@@ -253,6 +332,12 @@ def build_stock_summary(
         direction = record.get("sector_direction") or ""
         points.append(f"セクター「{record['sector33']}」は強度{strength}{direction}。")
 
+    mcap = record.get("market_cap_oku")
+    if mcap is not None:
+        cls = "小型" if mcap < 500 else "中型" if mcap < 3000 else "大型"
+        seg = record.get("market_segment")
+        points.append(f"時価総額 約{mcap:,.0f}億円({cls}株" + (f"・{seg}" if seg else "") + ")。")
+
     # --- ファンダ ---
     eps_yoy = record.get("fund_eps_yoy")
     rev_yoy = record.get("fund_rev_yoy")
@@ -266,6 +351,48 @@ def build_stock_summary(
             trend = _trend_word([v for _, v in series])
             points.append(f"EPS YoY推移(直近{len(series)}Q): {seq}" + (f"({trend})" if trend else "") + "。")
 
+    # --- 会社予想(ガイダンス)と進捗率 ---
+    gv = derive_guidance_view(quarters or [], guidance, close=record.get("close"))
+    if gv:
+        yoy_parts = []
+        if gv["eps_plan_yoy"] is not None:
+            yoy_parts.append(f"EPS {_signed_pct(gv['eps_plan_yoy'])}")
+        if gv["sales_plan_yoy"] is not None:
+            yoy_parts.append(f"売上 {_signed_pct(gv['sales_plan_yoy'])}")
+        if yoy_parts:
+            line = f"会社計画({gv['plan_fy']}年度): 前期比 {'・'.join(yoy_parts)}"
+        elif gv["eps_plan"] is not None:
+            line = f"会社計画({gv['plan_fy']}年度): EPS {_num(gv['eps_plan'], 2)}円"
+        else:
+            line = f"会社計画({gv['plan_fy']}年度)開示あり"
+        prog = gv["eps_progress_pct"] if gv["eps_progress_pct"] is not None else gv["sales_progress_pct"]
+        if prog is not None and gv["quarters_reported"]:
+            label = "EPS" if gv["eps_progress_pct"] is not None else "売上"
+            line += f"。進捗率 {label} {prog:.0f}%(Q{gv['quarters_reported']}時点)"
+        points.append(line + "。")
+        if gv["forward_per"] is not None:
+            points.append(f"予想PER {gv['forward_per']}倍(会社計画EPSベース)。")
+
+        # 誤読防止: 直近四半期の実績YoYと通期計画YoYの向きが食い違う場合は明示する。
+        plan_eps_yoy = gv["eps_plan_yoy"]
+        if eps_yoy is not None and plan_eps_yoy is not None:
+            if eps_yoy < 0 <= plan_eps_yoy:
+                points.append(f"直近四半期は減益だが会社計画は通期増益({_signed_pct(plan_eps_yoy)})。")
+            elif plan_eps_yoy < 0 <= eps_yoy:
+                cautions.append(f"直近四半期は増益だが会社計画は通期減益({_signed_pct(plan_eps_yoy)})。")
+
+        # 進捗が経過四半期数から見て±15pt以上ずれていたら言及する。
+        if gv["eps_progress_pct"] is not None and gv["quarters_reported"] in (1, 2, 3):
+            expected = gv["quarters_reported"] / 4 * 100
+            if gv["eps_progress_pct"] < expected - 15:
+                cautions.append(
+                    f"通期計画に対する進捗が低調(Q{gv['quarters_reported']}時点で{gv['eps_progress_pct']:.0f}%、"
+                    f"目安{expected:.0f}%)。下方修正リスクに注意。")
+            elif gv["eps_progress_pct"] > expected + 15:
+                points.append(
+                    f"通期計画に対する進捗が良好(Q{gv['quarters_reported']}時点で{gv['eps_progress_pct']:.0f}%、"
+                    f"目安{expected:.0f}%)。上方修正余地。")
+
     coverage = record.get("fund_coverage")
     if coverage == "none":
         cautions.append("ファンダデータなし。EPS・売上の裏付け未確認。")
@@ -273,6 +400,22 @@ def build_stock_summary(
         cautions.append(
             f"ファンダ弱: 直近EPS YoY {_signed_pct(eps_yoy)}・売上YoY {_signed_pct(rev_yoy)}"
             f"(本命基準 EPS+{fcfg['confirmed_eps_yoy_min']:.0f}%/売上+{fcfg['confirmed_rev_yoy_min']:.0f}%に未達)。")
+
+    # 決算発表タイミング: カレンダーの正確な予定日があればそれを使い、
+    # 無い銘柄(3月期・9月期以外など)は前回開示からの経過日数で推定する。
+    next_earnings = record.get("next_earnings_date")
+    days_to_earnings = None
+    if next_earnings:
+        try:
+            days_to_earnings = (date.fromisoformat(str(next_earnings)[:10]) - today).days
+        except ValueError:
+            days_to_earnings = None
+    if days_to_earnings is not None:
+        if days_to_earnings <= 14:
+            cautions.append(
+                f"決算発表予定 {next_earnings}(あと{days_to_earnings}日)。発表跨ぎのエントリーに注意。")
+        else:
+            points.append(f"次回決算発表予定: {next_earnings}。")
 
     checked = record.get("fund_checked_date")
     if checked:
@@ -282,7 +425,8 @@ def build_stock_summary(
             days_since = None
         if record.get("fund_stale"):
             cautions.append(f"ファンダ確認日({checked})が古く、最新四半期が未反映の可能性。")
-        elif days_since is not None and days_since >= EARNINGS_PROXIMITY_DAYS:
+        elif (days_to_earnings is None and days_since is not None
+              and days_since >= EARNINGS_PROXIMITY_DAYS):
             cautions.append(
                 f"前回の決算確認から{days_since}日経過。次回決算発表が近い可能性があり、発表跨ぎのエントリーに注意。")
 

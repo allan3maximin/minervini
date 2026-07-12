@@ -87,8 +87,8 @@ manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,
 manual/positions.csv        保有ポジション手動入力 (code,entry_date,entry_price,shares,initial_stop,current_stop,memo。
                             2026-07-11追加。書き込みUI無し、GitHub web編集/ローカル編集で運用)
 skills/minervini-analysis/  「分析用データをコピー」の出力をSEPA手法で読み解くClaude用スキル (SKILL.md)
-tests/                      pytest 210件 (test_jquants.py, test_edinetdb.py, test_pipeline.py, test_market_signal.py,
-                            test_positions.py, test_backtest.py 含む)
+tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, test_pipeline.py, test_market_signal.py,
+                            test_positions.py, test_backtest.py, test_summary.py 含む)
 ```
 
 ## 3. 日次パイプラインの流れ (src/pipeline.py :: run_daily)
@@ -247,6 +247,19 @@ tests/                      pytest 210件 (test_jquants.py, test_edinetdb.py, te
   全日失敗時(APIキー不正など)は state を進めない。
 - **CLI**: `python -m src.data.jquants --backfill` (jquants-backfill.yml が呼ぶ。全銘柄を code 指定で1件ずつ取得、
   ~1000銘柄・60req/分で約17〜20分。50銘柄ごとに中間セーブ)
+- **会社予想(ガイダンス)取得(2026-07-12追加)**: `record_to_guidance` — 同じ /fins/summary レスポンスから
+  `FEPS`/`FSales`(当期通期予想)、`NxFEPS`/`NxFSales`(翌期予想、本決算短信に載る来期計画)、`ShOutFY`
+  (期末発行済株式数)を抽出する。決算短信に加えて業績予想修正(`ForecastRevision`、ただし
+  `Dividend`を含む配当予想修正は除外)も対象。銘柄ごとに開示日が最新の1件を
+  `fundamentals_auto.json` の entry `"guidance"` に格納(`_apply_guidance`)。日次増分と `--backfill` の両方が
+  対象なので、**既存ストアへの一括反映は jquants-backfill.yml を1回回すのが早い**。
+  merge_fundamentals→write_public_json を透過し、pipeline が `summary.derive_guidance_view`
+  (計画YoY・進捗率・予想PER算出、summary.py)で解釈してrecord `"guidance_view"` とサマリー文面に載せる。
+- **決算発表予定日(2026-07-12追加)**: `update_earnings_calendar` — `GET /v2/equities/earnings-calendar`
+  (Freeプラン可、**3月期・9月期決算企業のみ提供**という提供側制約あり)を日次1〜数reqで取得し、
+  ユニバース銘柄の「今日以降で直近の予定日」を `data/earnings_calendar.json` に保存。record
+  `"next_earnings_date"` → サマリー(14日以内なら発表跨ぎ注意caution、それより先ならpoint)と
+  個別銘柄画面チップに出る。カレンダーに無い銘柄は従来の「前回開示から75日超」推定にフォールバック。
 
 ### マージ (src/data/fundamentals.py :: merge_fundamentals)
 - `merge_fundamentals(auto_by_code, manual_by_code)` — 同一 (code, fiscal_quarter) は**手動CSVが勝ち**。

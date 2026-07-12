@@ -67,6 +67,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     universe = load_universe()
     codes = [s["code"] for s in universe["stocks"]]
     name_by_code = {s["code"]: s["name"] for s in universe["stocks"]}
+    # 時価総額(株式数×終値)と市場区分。segmentは2026-07-12以降のユニバース再構築で
+    # 入る(それ以前のuniverse.jsonではNone → 表示側でスキップ)。
+    shares_by_code = {s["code"]: s.get("shares_outstanding") for s in universe["stocks"]}
+    segment_by_code = {
+        s["code"]: (str(s["segment"]).split("（")[0] if s.get("segment") else None)
+        for s in universe["stocks"]
+    }
     if not codes:
         print("Universe is empty; run with --universe-rebuild first.")
         return 1
@@ -138,6 +145,14 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     fundamentals_by_code = merge_fundamentals(
         auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)
     write_public_json(fundamentals_by_code)
+
+    # 決算発表予定日カレンダー(J-Quants /equities/earnings-calendar、日次1〜数req)。
+    # 3月期・9月期決算企業のみ提供。失敗時は前回キャッシュ、キー無しなら空。
+    try:
+        next_earnings_by_code = jquants_mod.update_earnings_calendar(codes, config)
+    except Exception as e:
+        print(f"Earnings calendar update failed (ignored): {e}")
+        next_earnings_by_code = {}
 
     # ポジション管理: manual/positions.csv (保有銘柄) の現在値・R倍数・売りシグナルを計算。
     # 失敗しても本体は止めない。ユニバース外の保有銘柄は indicator_by_code に無いだけなので安全
@@ -227,6 +242,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
         build_site.attach_priority(record, pr_eval)
         record["momentum"] = summary_mod.compute_momentum(df_ind)
+        shares = shares_by_code.get(code)
+        close = latest_by_code[code].get("close")
+        record["market_cap_oku"] = (
+            round(shares * close / 1e8) if shares and close else None
+        )
+        record["market_segment"] = segment_by_code.get(code)
+        record["next_earnings_date"] = next_earnings_by_code.get(code)
         record["has_chart"] = True
         stock_records.append(record)
         chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
@@ -260,14 +282,20 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     # ルールベース日本語サマリー生成。セクター強度・地合いシグナルまで確定した
     # あとに全レコードへ付与する(summary.pyは既存判定の言語化のみで新判断はしない)。
     for record in stock_records:
+        fund_entry = fundamentals_by_code.get(record["code"]) or {}
         try:
             record["summary"] = summary_mod.build_stock_summary(
                 record,
-                quarters=(fundamentals_by_code.get(record["code"]) or {}).get("quarters"),
+                quarters=fund_entry.get("quarters"),
+                guidance=fund_entry.get("guidance"),
                 market_signal=signal_result,
                 config=config,
                 today=today,
             )
+            # 個別銘柄画面・分析用コピーが数値として参照できる解釈済みガイダンス。
+            record["guidance_view"] = summary_mod.derive_guidance_view(
+                fund_entry.get("quarters") or [], fund_entry.get("guidance"),
+                close=record.get("close"))
         except Exception as e:
             print(f"Summary build failed for {record['code']} (ignored): {e}")
 

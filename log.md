@@ -2,6 +2,48 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-12 (32): サマリー情報の厚み増強A/B/C(会社予想+進捗率・決算発表予定日・時価総額/市場区分)
+
+### 要望(ユーザー原文)
+> ABCいけるとこまでいって
+
+### 変更内容
+- **A: 会社予想(ガイダンス)+進捗率+予想PER**
+  - `jquants.py`: `record_to_guidance` — /fins/summary の FEPS/FSales(当期通期予想)・
+    NxFEPS/NxFSales(翌期予想)・ShOutFY を抽出(フィールド名はJ-Quants v2公式仕様
+    jpx-jquants.com/ja/spec/fin-summary で確認済み)。業績予想修正も対象(配当予想修正は除外)。
+    銘柄ごと最新開示を fundamentals_auto.json の `"guidance"` に格納。日次増分と --backfill 両対応。
+  - `fundamentals.py`: merge_fundamentals / write_public_json が guidance を透過。
+  - `summary.py`: `derive_guidance_view` — 進行期計画の選択(本決算開示なら翌期NxF、
+    四半期開示なら当期F)、計画YoY(前期実績4Q合計比)、進捗率(実績累計÷計画)、
+    予想PER(終値÷計画EPS)。サマリーに「会社計画/進捗率/予想PER」行、
+    直近実績YoYと計画YoYの食い違い明示(減益だが計画増益 等)、進捗±15pt乖離で
+    上方修正余地/下方修正リスクの言及。
+- **B: 決算発表予定日**
+  - `jquants.py`: `update_earnings_calendar` — GET /v2/equities/earnings-calendar(Free可、
+    3月期・9月期企業のみ提供)→ data/earnings_calendar.json。pipelineがrecord
+    `next_earnings_date` に載せ、サマリー(14日以内=発表跨ぎ注意caution/それより先=point)と
+    メタチップに表示。無い銘柄は従来の75日推定にフォールバック。
+- **C: 時価総額・市場区分**
+  - `universe.py`: build_universe が JPX一覧の market segment を universe.json に保存するように。
+  - `pipeline.py`: 時価総額(universe.jsonのshares_outstanding×終値)を `market_cap_oku`、
+    市場区分を `market_segment` としてrecordに付与。サマリー「時価総額 約N億円(小型/中型/大型株・
+    市場区分)」+メタチップ。**既存universe.jsonにはJPX一覧を再取得して1000/1000銘柄分の
+    segmentを注入済み**(再構築不要)。
+- フロント: メタチップ(時価総額/市場/次回決算、値がある時のみ)+分析用コピーに
+  時価総額・市場区分・次回決算・会社計画・進捗率・予想PERの行を追加。
+- 即時反映: report.json に時価総額・市場区分・サマリー再生成を注入済み。
+  **guidanceと発表予定日はAPIキーが必要なため夜間run以降に反映**。
+
+### 検証
+- pytest 247件全パス(232+新規15: guidance抽出4・カレンダー1・ガイダンスビュー4・サマリー6)。
+- preview(docs静的配信)で9247の時価総額/市場チップとサマリー新行の表示・JSエラー無しを確認。
+
+### 次のステップ
+- **ガイダンスを全銘柄に一括反映するには jquants-backfill.yml を1回手動実行**
+  (ダッシュボードのバッチ実行ページから可能、~20分)。やらなくても日次増分で徐々に入る。
+- 発表予定日はカレンダー提供対象(3月期・9月期)外の銘柄は75日推定のまま(仕様)。
+
 ## 2026-07-12 (31): 個別銘柄画面にルールベース日本語サマリー(LLM不使用)+ステータス日本語化
 
 ### 要望(ユーザー原文)

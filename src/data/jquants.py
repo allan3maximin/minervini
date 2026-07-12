@@ -32,6 +32,7 @@ from src.config import REPO_ROOT, load_config
 from src.data.fundamentals import AUTO_PATH, load_auto_store
 
 STATE_PATH = REPO_ROOT / "data" / "jquants_state.json"
+CALENDAR_PATH = REPO_ROOT / "data" / "earnings_calendar.json"
 
 API_KEY_ENV = "JQUANTS_API_KEY"
 DEFAULT_API_URL = "https://api.jquants.com/v2"
@@ -163,6 +164,48 @@ def record_to_point(rec: dict) -> dict | None:
     }
 
 
+def record_to_guidance(rec: dict) -> dict | None:
+    """/fins/summary の1レコードから会社予想(ガイダンス)を取り出す。
+
+    決算短信(FinancialStatements)に加えて業績予想修正(ForecastRevision)も
+    対象にする(四半期の間の上方/下方修正を取りこぼさないため)。
+    フィールドはJ-Quants v2仕様 (jpx-jquants.com/ja/spec/fin-summary):
+      FEPS/FSales   = 当期の通期予想EPS/売上
+      NxFEPS/NxFSales = 翌事業年度の通期予想 (本決算短信に載る来期計画)
+      ShOutFY       = 期末発行済株式数
+    予想値が1つも無ければNone。
+    """
+    doc_type = rec.get("DocType") or ""
+    is_statement = "FinancialStatements" in doc_type
+    # 配当予想修正(DividendForecastRevision)は業績予想を含まないため除外する
+    # ("ForecastRevision"の部分一致だけだと誤って通ってしまう)。
+    is_earn_revision = "ForecastRevision" in doc_type and "Dividend" not in doc_type
+    if not is_statement and not is_earn_revision:
+        return None
+    code5 = (rec.get("Code") or "").strip()
+    fy_start = (rec.get("CurFYSt") or "").strip()
+    if len(code5) < 4 or len(fy_start) < 10:
+        return None
+
+    values = {
+        "feps": _num(rec.get("FEPS")),
+        "fsales": _num(rec.get("FSales")),
+        "nx_feps": _num(rec.get("NxFEPS")),
+        "nx_fsales": _num(rec.get("NxFSales")),
+    }
+    if all(v is None for v in values.values()):
+        return None
+
+    return {
+        "code": code5[:4],
+        "fy_start": fy_start,
+        "per_n": _PERIOD_TO_N.get(rec.get("CurPerType") or ""),  # 修正開示ではNoneあり得る
+        "disc_date": (rec.get("DiscDate") or "").strip(),
+        "shares_fy": _num(rec.get("ShOutFY")),
+        **values,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Quarter derivation (YTD差分) -- EDINET版と同一ロジック
 # ---------------------------------------------------------------------------
@@ -217,6 +260,114 @@ def _apply_points(store: dict, points_by_code: dict[str, list[dict]], max_keep: 
         _merge_into_store(store, code, quarters, checked, max_keep)
 
 
+def _apply_guidance(store: dict, guidance_by_code: dict[str, list[dict]]) -> None:
+    """銘柄ごとに開示日が最新のガイダンスをストアentryの"guidance"に格納する。
+
+    既存guidanceより古い開示は上書きしない(増分取得の日順は保証されないため)。
+    """
+    for code, cands in guidance_by_code.items():
+        latest = max(cands, key=lambda g: g.get("disc_date") or "")
+        entry = store.setdefault(code, {"quarters": [], "checked_date": None, "source": "jquants"})
+        cur = entry.get("guidance")
+        if cur and (cur.get("disc_date") or "") >= (latest.get("disc_date") or ""):
+            continue
+        entry["guidance"] = {k: v for k, v in latest.items() if k != "code"}
+
+
+# ---------------------------------------------------------------------------
+# 決算発表予定日 (/equities/earnings-calendar)
+# ---------------------------------------------------------------------------
+
+def fetch_earnings_calendar(api_key: str, config: dict) -> list[dict]:
+    """GET /equities/earnings-calendar (全ページ)。Freeプランで利用可。
+
+    レスポンスは {Date(発表予定日), Code, CoName, FY, FQ, Section, ...} の配列
+    (jpx-jquants.com/ja/spec/eq-earnings-cal)。3月期・9月期決算企業のみ対象、
+    という提供側の制約があるため、載っていない銘柄は呼び出し側で
+    「前回開示からの経過日数」推定にフォールバックする。
+    """
+    api_url = _jq_cfg(config).get("api_url", DEFAULT_API_URL)
+    params: dict = {}
+    records: list[dict] = []
+    while True:
+        resp = requests.get(
+            f"{api_url}/equities/earnings-calendar",
+            params=params,
+            headers={"x-api-key": api_key},
+            timeout=60,
+        )
+        if resp.status_code == 429:
+            time.sleep(30)
+            resp = requests.get(
+                f"{api_url}/equities/earnings-calendar",
+                params=params,
+                headers={"x-api-key": api_key},
+                timeout=60,
+            )
+        resp.raise_for_status()
+        body = resp.json()
+        records.extend(body.get("data") or [])
+        pk = body.get("pagination_key")
+        if not pk:
+            return records
+        params["pagination_key"] = pk
+
+
+def next_dates_from_calendar(records: list[dict], code_set: set[str], today: date) -> dict[str, str]:
+    """カレンダーレコードから {4桁コード: 直近の今日以降の発表予定日} を作る。"""
+    by_code: dict[str, str] = {}
+    for rec in records:
+        code5 = str(rec.get("Code") or "").strip()
+        code = code5[:4] if len(code5) >= 4 else code5
+        d = str(rec.get("Date") or "").strip()[:10]
+        if code not in code_set or len(d) != 10:
+            continue
+        try:
+            if date.fromisoformat(d) < today:
+                continue
+        except ValueError:
+            continue
+        if code not in by_code or d < by_code[code]:
+            by_code[code] = d
+    return by_code
+
+
+def load_earnings_calendar(path=None) -> dict:
+    path = path or CALENDAR_PATH
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def update_earnings_calendar(codes: list[str], config: dict | None = None) -> dict[str, str]:
+    """決算発表予定日を取得して data/earnings_calendar.json に保存する(日次1〜数req)。
+
+    APIキー無し・取得失敗時は前回保存分をそのまま返す(フェイルセーフ)。
+    戻り値: {code: "YYYY-MM-DD"} (今日以降の直近予定のみ)。
+    """
+    config = config or load_config()
+    cached = load_earnings_calendar()
+    api_key = os.environ.get(API_KEY_ENV, "").strip()
+    if not api_key or not _jq_cfg(config).get("enabled", True):
+        return cached.get("by_code") or {}
+
+    today = datetime.now().date()
+    try:
+        records = fetch_earnings_calendar(api_key, config)
+    except Exception as e:
+        print(f"J-Quants earnings calendar fetch failed (kept cache): {e}")
+        return cached.get("by_code") or {}
+
+    by_code = next_dates_from_calendar(records, set(codes), today)
+    payload = {"fetched_at": today.isoformat(), "by_code": by_code}
+    CALENDAR_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CALENDAR_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1, sort_keys=True)
+    print(f"J-Quants earnings calendar: {len(by_code)} upcoming dates for universe codes.")
+    return by_code
+
+
 # ---------------------------------------------------------------------------
 # Update entrypoints
 # ---------------------------------------------------------------------------
@@ -250,6 +401,7 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
     code_set = set(codes)
 
     points_by_code: dict[str, list[dict]] = {}
+    guidance_by_code: dict[str, list[dict]] = {}
     ok = fail = n_recs = 0
     day = start
     while day <= end_day:
@@ -262,6 +414,9 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
             day += timedelta(days=1)
             continue
         for rec in recs:
+            g = record_to_guidance(rec)
+            if g is not None and g["code"] in code_set:
+                guidance_by_code.setdefault(g["code"], []).append(g)
             point = record_to_point(rec)
             if point is None or point["code"] not in code_set:
                 continue
@@ -275,6 +430,7 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None) -> di
     _refetch_incomplete(points_by_code, store, api_key, config, sleep_sec)
 
     _apply_points(store, points_by_code, max_keep)
+    _apply_guidance(store, guidance_by_code)
     save_auto_store(store)
 
     if fail > 0 and ok == 0:
@@ -337,6 +493,9 @@ def backfill_all(codes: list[str], config: dict | None = None) -> dict:
             n_fail += 1
             time.sleep(sleep_sec)
             continue
+        guidance = [g for rec in recs if (g := record_to_guidance(rec)) is not None and g["code"] == code]
+        if guidance:
+            _apply_guidance(store, {code: guidance})
         points = [p for rec in recs if (p := record_to_point(rec)) is not None]
         if points:
             _apply_points(store, {code: points}, max_keep)

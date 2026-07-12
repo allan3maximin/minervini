@@ -273,3 +273,90 @@ def test_update_success_stores_quarters_and_state(isolated_paths, monkeypatch):
     assert {"fiscal_quarter": "2025Q2", "eps": 15.0, "revenue": 120.0} in quarters
     assert state_path.exists()
     assert json.loads(auto_path.read_text())["7203"]["quarters"] == quarters
+
+
+# ---------------------------------------------------------------------------
+# 会社予想(ガイダンス) -- record_to_guidance / _apply_guidance (2026-07-12追加)
+# ---------------------------------------------------------------------------
+
+def _summary_rec(**kw):
+    base = {
+        "DocType": "2QFinancialStatements_Consolidated_JP",
+        "Code": "72030",
+        "CurFYSt": "2025-04-01",
+        "CurPerType": "2Q",
+        "DiscDate": "2025-11-07",
+        "EPS": "50.5",
+        "Sales": "1000000",
+        "FEPS": "120.5",
+        "FSales": "2500000",
+        "NxFEPS": "",
+        "NxFSales": None,
+        "ShOutFY": "1000000",
+    }
+    base.update(kw)
+    return base
+
+
+def test_record_to_guidance_quarterly_statement():
+    g = jq.record_to_guidance(_summary_rec())
+    assert g == {
+        "code": "7203",
+        "fy_start": "2025-04-01",
+        "per_n": 2,
+        "disc_date": "2025-11-07",
+        "shares_fy": 1000000.0,
+        "feps": 120.5,
+        "fsales": 2500000.0,
+        "nx_feps": None,
+        "nx_fsales": None,
+    }
+
+
+def test_record_to_guidance_accepts_forecast_revision():
+    g = jq.record_to_guidance(_summary_rec(
+        DocType="EarnForecastRevision", CurPerType="", FEPS="99.0"))
+    assert g is not None
+    assert g["per_n"] is None
+    assert g["feps"] == 99.0
+
+
+def test_record_to_guidance_rejects_other_doc_types_and_empty_forecasts():
+    assert jq.record_to_guidance(_summary_rec(DocType="DividendForecastRevision")) is None
+    assert jq.record_to_guidance(_summary_rec(FEPS="", FSales="-", NxFEPS=None, NxFSales="")) is None
+
+
+def test_apply_guidance_keeps_newest_disclosure():
+    store = {}
+    jq._apply_guidance(store, {"7203": [
+        {"code": "7203", "fy_start": "2025-04-01", "per_n": 1, "disc_date": "2025-08-01",
+         "feps": 100.0, "fsales": None, "nx_feps": None, "nx_fsales": None, "shares_fy": None},
+        {"code": "7203", "fy_start": "2025-04-01", "per_n": 2, "disc_date": "2025-11-07",
+         "feps": 110.0, "fsales": None, "nx_feps": None, "nx_fsales": None, "shares_fy": None},
+    ]})
+    assert store["7203"]["guidance"]["feps"] == 110.0
+    assert "code" not in store["7203"]["guidance"]
+
+    # 古い開示で上書きしない
+    jq._apply_guidance(store, {"7203": [
+        {"code": "7203", "fy_start": "2025-04-01", "per_n": 1, "disc_date": "2025-08-01",
+         "feps": 100.0, "fsales": None, "nx_feps": None, "nx_fsales": None, "shares_fy": None},
+    ]})
+    assert store["7203"]["guidance"]["feps"] == 110.0
+
+
+# ---------------------------------------------------------------------------
+# 決算発表予定日カレンダー (2026-07-12追加)
+# ---------------------------------------------------------------------------
+
+def test_next_dates_from_calendar_filters_and_picks_nearest():
+    from datetime import date as _date
+    records = [
+        {"Code": "72030", "Date": "2026-08-05"},
+        {"Code": "72030", "Date": "2026-07-30"},   # 近い方を採用
+        {"Code": "72030", "Date": "2026-05-08"},   # 過去 -> 無視
+        {"Code": "99999", "Date": "2026-08-01"},   # ユニバース外 -> 無視
+        {"Code": "67580", "Date": "bad-date"},     # 不正日付 -> 無視
+    ]
+    out = jq.next_dates_from_calendar(records, {"7203", "6758"}, _date(2026, 7, 12))
+    assert out == {"7203": "2026-07-30"}

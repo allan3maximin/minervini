@@ -151,6 +151,8 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
             "quarters": quarters,
             "monthly_yoy": manual.get("monthly_yoy") if manual else None,
             "checked_date": checked_date,
+            # 会社予想(ガイダンス)はJ-Quants自動取得のみが持つ(2026-07-12追加)。
+            "guidance": auto.get("guidance"),
         }
     return result
 
@@ -183,6 +185,7 @@ def write_public_json(fundamentals_by_code: dict, path=None) -> None:
             ],
             "monthly_yoy": data.get("monthly_yoy"),
             "checked_date": data.get("checked_date"),
+            "guidance": data.get("guidance"),
         }
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

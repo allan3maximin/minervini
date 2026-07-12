@@ -171,6 +171,9 @@ def build_universe(config: dict | None = None) -> dict:
     sector_by_code = (
         dict(zip(candidates["code"], candidates["sector33"])) if "sector33" in candidates.columns else {}
     )
+    segment_by_code = (
+        dict(zip(candidates["code"], candidates["segment"])) if "segment" in candidates.columns else {}
+    )
     top_codes = [row.code for row in top.itertuples(index=False)]
     shares_by_code = fetch_shares_outstanding(top_codes, config)
 
@@ -179,12 +182,16 @@ def build_universe(config: dict | None = None) -> dict:
         sector = sector_by_code.get(row.code)
         if sector is None or pd.isna(sector) or str(sector) == "-":
             sector = None
+        segment = segment_by_code.get(row.code)
+        if segment is None or pd.isna(segment):
+            segment = None
         stocks.append(
             {
                 "code": row.code,
                 "name": name_by_code.get(row.code, ""),
                 "avg_trading_value": row.avg_trading_value,
                 "sector33": sector,
+                "segment": str(segment) if segment else None,
                 "shares_outstanding": shares_by_code.get(row.code),
             }
         )
