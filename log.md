@@ -2,6 +2,44 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (37): タブ下部化+ヒートマップ横スワイプ+ドックをスライド画面切替+解錠ボタン削除(6件)
+
+### 要望(ユーザー原文)
+> ①画面(ない)切り替えドック(サマリー/グラフ/本命など)は下部に配置 ②セクターヒートマップの
+> 詳細/簡易も横スクロールで切替、詳細簡易・1日〜60日も画面下部に ③個別画面の 終値〜市場 の情報は
+> サマリーページのみ表示でOK ④個別株の各画面も縦スクロールしないよう縦幅調整 ⑤ドックのD&Dが
+> アイテム並べ替えになっていた。意図はスライドで画面切替 ⑥解錠ボタンは不要
+
+### 変更内容
+- `docs/index.html`:
+  - ヘッダーの `#vault-unlock-btn`(🔓解錠) を削除(⑥)。`initVaultUi`/lock画面のhdrBtn参照はnullガード済みで安全。
+  - `.stock-tabs`(サマリー/グラフ/…)を `.stock-header` から `#stock-panels` の**後**へ移動=画面下部(①)。
+  - `.list-tabs`(本命/候補/監視)を `#list-panels` の**後**へ移動=画面下部(①)。
+  - `#stock-meta`(終値〜市場のチップ群)を `.stock-header` からサマリーパネル内へ移動=サマリーのみ表示(③)。
+    ヘッダーはタイトルのみに。
+  - `#view-heatmap` 再構成: `#hm-panels`(scroll-snap横スワイプ)に `.hm-panel`×2(detail/simple、各 `#hm-container-detail`
+    / `#hm-container-simple`)。詳細/簡易トグル・期間(1日〜60日)トグル・凡例を `.hm-bottom-bar`(画面下部)へ(②)。
+  - cache-buster: style.css?v=23 / heatmap.js?v=13 / app.js?v=25。
+- `docs/assets/app.js`:
+  - `sizeStockPanels()`/`sizeListPanels()`: 下部タブ高さも差し引くよう reserve を `92 + tabH` に変更(①④)。
+  - ドック並べ替え(`initDockReorder`/`applyDockOrder`/`saveDockOrder`/`DOCK_ORDER_KEY`)を**全撤去**。
+    代わりに `initDockSwipe(dock)`: ドック上を横スワイプ(閾値36px)でドック順の隣ビューへ遷移(左=次/右=前)。
+    タップは従来どおり各ボタンのビューへ。スワイプ直後の合成clickはキャプチャで握りつぶし(⑤)。
+- `docs/assets/heatmap.js`:
+  - `render()`: `#hm-container` 単一 → detail/simple **両方**を描画。高さは `heatmapHeight()`(=ビューポート
+    -パネル上端-下部バー-ドック余白)で算出し縦スクロール不要に(②④)。
+  - 詳細/簡易は横スワイプ(scroll-snap)で切替。トグルは `scrollToHmView()` のショートカット。`#hm-panels` の
+    scroll↔トグル選択を双方向同期(`updateHmViewToggle`)。表示毎に現在ビューへ位置合わせ。
+- `docs/assets/style.css`:
+  - `.hm-view`/`.hm-head`/`.hm-panels`/`.hm-panel`/`.hm-bottom-bar` 追加。`.dock-btn.dragging` 削除、
+    `touch-action:none` を `.dock-nav` へ移動。`.stock-tabs`/`.list-tabs` に `flex:0 0 auto`+下部余白。
+    グラフパネルのチャート高さ圧縮(PC:280/84、スマホ:230/74)、カード余白詰め(④)。
+
+### 検証
+- `node --check` app.js/heatmap.js/batch.js OK。HTML div 65/65・section 18/18 balanced。主要id存在確認。
+  vault-unlock-btn 消滅確認。
+- 注意: データは暗号化のためヘッドレス描画不可(パスキー必須)。実機(iOS Safari)での目視確認は要ユーザー。
+
 ## 2026-07-13 (36): 画面分割+横スワイプパネル化+ドック並べ替え+セクター履歴公開(9件)
 
 ### 要望(ユーザー原文、要約)

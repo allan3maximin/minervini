@@ -61,15 +61,34 @@ async function initHeatmap() {
       });
     }
 
+    // 詳細/簡易は横スワイプ(scroll-snap)で切替。トグルはそのパネルへスクロール
+    // するショートカット。パネルのスクロール位置とトグルの選択を双方向同期。
     const viewToggle = document.getElementById("hm-view-toggle");
-    if (viewToggle) {
+    const panels = document.getElementById("hm-panels");
+    if (viewToggle && panels) {
       viewToggle.addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-view]");
         if (!btn) return;
-        viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-        currentView = btn.dataset.view;
-        render();
+        scrollToHmView(btn.dataset.view);
       });
+
+      let raf = 0;
+      panels.addEventListener(
+        "scroll",
+        () => {
+          if (raf) return;
+          raf = requestAnimationFrame(() => {
+            raf = 0;
+            const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
+            const el = panels.querySelectorAll(".hm-panel")[idx];
+            if (el && el.dataset.view !== currentView) {
+              currentView = el.dataset.view;
+              updateHmViewToggle();
+            }
+          });
+        },
+        { passive: true }
+      );
     }
 
     let resizeTimer = null;
@@ -77,7 +96,7 @@ async function initHeatmap() {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         // 幅が変わっていなければ(=スクロールに伴う高さ変化だけなら)再描画しない。
-        const c = document.getElementById("hm-container");
+        const c = document.getElementById("hm-container-detail");
         const w = c ? c.clientWidth : 0;
         if (w && w !== lastRenderWidth) render();
       }, 150);
@@ -87,6 +106,36 @@ async function initHeatmap() {
   }
 
   render();
+  // 表示のたびに現在ビューのパネルへ位置を合わせる(非表示中はscrollLeftが0に戻るため)。
+  requestAnimationFrame(() => scrollToHmView(currentView, false));
+}
+
+// トグルの選択表示を currentView に合わせる。
+function updateHmViewToggle() {
+  const viewToggle = document.getElementById("hm-view-toggle");
+  if (!viewToggle) return;
+  viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === currentView));
+}
+
+// 指定ビューのパネルへ横スクロール。smooth=false なら即時(初期表示用)。
+function scrollToHmView(view, smooth = true) {
+  const panels = document.getElementById("hm-panels");
+  if (!panels) return;
+  const list = Array.from(panels.querySelectorAll(".hm-panel"));
+  const idx = Math.max(0, list.findIndex((el) => el.dataset.view === view));
+  currentView = list[idx] ? list[idx].dataset.view : "detail";
+  updateHmViewToggle();
+  panels.scrollTo({ left: idx * panels.clientWidth, behavior: smooth ? "smooth" : "auto" });
+}
+
+// ヒートマップ描画高さ = ビューポート - パネル上端 - 下部バー - ドック余白。
+function heatmapHeight() {
+  const panels = document.getElementById("hm-panels");
+  const top = panels ? panels.getBoundingClientRect().top : 0;
+  const bar = document.querySelector(".hm-bottom-bar");
+  const barH = bar ? bar.getBoundingClientRect().height : 0;
+  const reserve = barH + 96; // 下部トグルバー + ドック余白
+  return Math.max(320, Math.round(window.innerHeight - top - reserve));
 }
 
 // ---------------------------------------------------------------------------
@@ -189,15 +238,18 @@ const SECTOR_HEADER_H = 20;
 const GAP = 1;
 
 function render() {
-  const container = document.getElementById("hm-container");
-  if (!container || !HM) return;
-  container.innerHTML = "";
+  const detailC = document.getElementById("hm-container-detail");
+  const simpleC = document.getElementById("hm-container-simple");
+  if (!detailC || !HM) return;
+  detailC.innerHTML = "";
+  if (simpleC) simpleC.innerHTML = "";
 
-  const W = container.clientWidth;
+  const W = detailC.clientWidth;
   lastRenderWidth = W; // resize時の幅変化判定用に記録
-  // 画面高さの約90%を使う(スマホでも可能な限り大きく)。
-  const H = Math.max(480, Math.round(window.innerHeight * 0.9));
-  container.style.height = H + "px";
+  // 下部トグルバー + ドックを避けた実効高さ(縦スクロール不要)。
+  const H = heatmapHeight();
+  detailC.style.height = H + "px";
+  if (simpleC) simpleC.style.height = H + "px";
 
   updateLegend();
 
@@ -212,11 +264,9 @@ function render() {
 
   const sectorRects = squarify(sectors, 0, 0, W, H);
 
-  if (currentView === "simple") {
-    renderSimple(container, sectorRects);
-  } else {
-    renderDetail(container, sectorRects);
-  }
+  // 詳細/簡易の両パネルを描画しておき、横スワイプで即切替できるようにする。
+  renderDetail(detailC, sectorRects);
+  if (simpleC) renderSimple(simpleC, sectorRects);
 }
 
 // 詳細表示: 既存のセクター×銘柄の二段squarifiedツリーマップ。

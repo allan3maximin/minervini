@@ -672,6 +672,40 @@ a.nav-btn:hover { border-color: var(--link); }
   flex-wrap: wrap;
   margin: 14px 0 10px;
 }
+
+/* ヒートマップ: 詳細/簡易を横スワイプで切替、トグルは画面下部の固定バーへ。 */
+.hm-view { display: flex; flex-direction: column; }
+.hm-view[hidden] { display: none; }
+.hm-head { flex: 0 0 auto; }
+.hm-head h2 { margin: 0 0 4px; }
+.hm-panels {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  margin-top: 8px;
+}
+.hm-panels::-webkit-scrollbar { display: none; }
+.hm-panel {
+  flex: 0 0 100%;
+  width: 100%;
+  box-sizing: border-box;
+  scroll-snap-align: start;
+}
+.hm-bottom-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.hm-bottom-bar .segmented button { padding: 6px 12px; }
 .hm-legend {
   display: flex;
   align-items: center;
@@ -855,15 +889,8 @@ a.nav-btn:hover { border-color: var(--link); }
 .dock-btn .dock-icon { font-size: 20px; line-height: 1; }
 .dock-btn:hover { color: var(--text); transform: translateY(-2px); }
 .dock-btn.active { background: var(--panel-2); color: var(--accent); }
-/* ドラッグ並べ替え: ジェスチャがスクロール/ズームに化けないよう抑止。 */
-.dock-btn { touch-action: none; }
-.dock-btn.dragging {
-  background: var(--panel-2);
-  color: var(--accent);
-  transform: scale(1.18);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-  z-index: 2;
-}
+/* 横スワイプで画面切替: ジェスチャがページスクロール/ズームに化けないよう抑止。 */
+.dock-nav { touch-action: none; }
 
 /* SPAビュー本体。下部Dockに隠れないよう余白を確保。 */
 body:has(.dock-nav) { padding-bottom: 84px; }
@@ -877,9 +904,11 @@ body:has(.dock-nav) { padding-bottom: 84px; }
 .stock-header { flex: 0 0 auto; }
 .stock-header h1 { margin: 0 0 6px; }
 
+/* パネル切替タブは画面下部(パネルの下)に配置。 */
 .stock-tabs {
   display: flex;
   gap: 4px;
+  flex: 0 0 auto;
   margin-top: 8px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -924,10 +953,13 @@ body:has(.dock-nav) { padding-bottom: 84px; }
   -webkit-overflow-scrolling: touch;
   padding: 2px 2px 12px;
 }
-/* グラフパネルは1画面に収めるため、出来高/RSは縦圧縮する。 */
-.stock-panel .chart-toolbar { margin-top: 0; }
-.stock-panel .chart-box { height: 300px; }
-.stock-panel .chart-box-small { height: 90px; }
+/* グラフパネルは1画面に収めるため、出来高/RSは縦圧縮しカード余白も詰める。 */
+.stock-panel .chart-toolbar { margin-top: 0; margin-bottom: 6px; }
+.stock-panel .chart-box { height: 280px; }
+.stock-panel .chart-box-small { height: 84px; }
+.stock-panel .chart-card { margin-bottom: 6px; }
+.stock-panel .chart-card:last-child { margin-bottom: 0; }
+.stock-panel .chart-card-head { padding: 4px 10px; }
 
 .yahoo-link {
   display: inline-flex;
@@ -947,7 +979,8 @@ body:has(.dock-nav) { padding-bottom: 84px; }
 /* 本命/候補/監視を横スワイプ+上部タブで切替。各パネルは縦スクロールOK。 */
 .list-view { display: flex; flex-direction: column; }
 .list-view[hidden] { display: none; }
-.list-tabs { display: flex; gap: 4px; flex: 0 0 auto; }
+/* パネル切替タブは画面下部(パネルの下)に配置。 */
+.list-tabs { display: flex; gap: 4px; flex: 0 0 auto; margin-top: 8px; }
 .list-tab {
   flex: 1 1 0;
   padding: 8px 12px;
@@ -1055,8 +1088,8 @@ body:has(.dock-nav) { padding-bottom: 84px; }
   .chart-box { height: 300px; }
   .chart-box-small { height: 110px; }
   /* 個別グラフパネルはスマホでも1画面に収まるよう強めに圧縮 */
-  .stock-panel .chart-box { height: 260px; }
-  .stock-panel .chart-box-small { height: 84px; }
+  .stock-panel .chart-box { height: 230px; }
+  .stock-panel .chart-box-small { height: 74px; }
   .breadth-meter { gap: 6px 14px; padding: 8px 10px; }
   .page-header-actions button { flex: 1 1 auto; }
   /* 16px inputs prevent iOS Safari's focus auto-zoom */

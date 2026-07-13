@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MinerviniScreener</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=22">
+<link rel="stylesheet" href="assets/style.css?v=23">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -26,9 +26,6 @@
 <header class="page-header">
   <div class="page-header-top">
     <h1>MinerviniScreener</h1>
-    <div class="page-header-actions">
-      <button type="button" id="vault-unlock-btn" class="secondary write-btn passkey-gated">🔓 解錠</button>
-    </div>
   </div>
 </header>
 
@@ -52,43 +49,43 @@
   </section>
 </section>
 
-<section id="view-heatmap" class="view-section" hidden>
-  <section class="hm-section">
+<section id="view-heatmap" class="view-section hm-view" hidden>
+  <div class="hm-head">
     <h2>セクターヒートマップ</h2>
     <div id="hm-meta" class="meta-line"></div>
-    <div class="hm-toolbar">
-      <div class="segmented" id="hm-view-toggle">
-        <button type="button" data-view="detail" class="active">詳細</button>
-        <button type="button" data-view="simple">簡易</button>
-      </div>
-      <div class="segmented" id="hm-period-toggle">
-        <button type="button" data-period="d1" class="active">1日</button>
-        <button type="button" data-period="d5">5日</button>
-        <button type="button" data-period="d20">20日</button>
-        <button type="button" data-period="d60">60日</button>
-      </div>
-      <div class="hm-legend">
-        <span id="hm-legend-min"></span>
-        <span class="hm-legend-bar"></span>
-        <span id="hm-legend-max"></span>
-        <span class="hm-legend-note">面積=時価総額</span>
-      </div>
-    </div>
+  </div>
 
-    <div id="hm-container" class="hm-container">
-      <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+  <div class="hm-panels" id="hm-panels">
+    <div class="hm-panel" data-view="detail">
+      <div id="hm-container-detail" class="hm-container">
+        <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+      </div>
     </div>
-    <p class="tier-note">タイル面積は時価総額(取得不可の銘柄は最小面積)、色は選択期間の騰落率。タイルタップで銘柄詳細(8条件・未達条件・MA乖離)を表示。「簡易」表示はセクターごとの騰落率のみ。</p>
-  </section>
+    <div class="hm-panel" data-view="simple">
+      <div id="hm-container-simple" class="hm-container"></div>
+    </div>
+  </div>
+
+  <div class="hm-bottom-bar">
+    <div class="segmented" id="hm-view-toggle">
+      <button type="button" data-view="detail" class="active">詳細</button>
+      <button type="button" data-view="simple">簡易</button>
+    </div>
+    <div class="segmented" id="hm-period-toggle">
+      <button type="button" data-period="d1" class="active">1日</button>
+      <button type="button" data-period="d5">5日</button>
+      <button type="button" data-period="d20">20日</button>
+      <button type="button" data-period="d60">60日</button>
+    </div>
+    <div class="hm-legend">
+      <span id="hm-legend-min"></span>
+      <span class="hm-legend-bar"></span>
+      <span id="hm-legend-max"></span>
+    </div>
+  </div>
 </section>
 
 <section id="view-stocklist" class="view-section list-view" hidden>
-  <div class="list-tabs" id="list-tabs" role="tablist">
-    <button type="button" class="list-tab active" data-panel="confirmed" role="tab">本命</button>
-    <button type="button" class="list-tab" data-panel="pool" role="tab">候補</button>
-    <button type="button" class="list-tab" data-panel="watchlist" role="tab">監視</button>
-  </div>
-
   <div class="list-panels" id="list-panels">
     <div class="list-panel" data-panel="confirmed">
       <section class="tier-section">
@@ -113,6 +110,12 @@
         <div id="watchlist-tier-body"></div>
       </section>
     </div>
+  </div>
+
+  <div class="list-tabs" id="list-tabs" role="tablist">
+    <button type="button" class="list-tab active" data-panel="confirmed" role="tab">本命</button>
+    <button type="button" class="list-tab" data-panel="pool" role="tab">候補</button>
+    <button type="button" class="list-tab" data-panel="watchlist" role="tab">監視</button>
   </div>
 </section>
 
@@ -192,18 +195,11 @@
 <section id="view-stock" class="view-section stock-view" hidden>
   <div class="stock-header">
     <h1 id="stock-title"></h1>
-    <div id="stock-meta" class="meta-chips"></div>
-    <div class="stock-tabs" id="stock-tabs" role="tablist">
-      <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
-      <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
-      <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
-      <button type="button" class="stock-tab" data-panel="must" role="tab">MUST</button>
-      <button type="button" class="stock-tab" data-panel="sizing" role="tab">サイジング</button>
-    </div>
   </div>
 
   <div class="stock-panels" id="stock-panels">
     <div class="stock-panel" data-panel="summary">
+      <div id="stock-meta" class="meta-chips"></div>
       <div class="stock-actions">
         <button type="button" id="copy-stock-data-btn" hidden>分析用データをコピー</button>
         <a id="yahoo-finance-link" class="yahoo-link" href="#" target="_blank" rel="noopener noreferrer" hidden><i class="bi bi-box-arrow-up-right"></i> Yahoo!ファイナンス</a>
@@ -285,6 +281,14 @@
       </section>
     </div>
   </div>
+
+  <div class="stock-tabs" id="stock-tabs" role="tablist">
+    <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
+    <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
+    <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
+    <button type="button" class="stock-tab" data-panel="must" role="tab">MUST</button>
+    <button type="button" class="stock-tab" data-panel="sizing" role="tab">サイジング</button>
+  </div>
 </section>
 
 </main>
@@ -307,8 +311,8 @@
 <script src="assets/github-api.js?v=6"></script>
 <script src="assets/webauthn-vault.js?v=6"></script>
 <script src="assets/fundamentals-modal.js?v=8"></script>
-<script src="assets/heatmap.js?v=12"></script>
+<script src="assets/heatmap.js?v=13"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=24"></script>
+<script src="assets/app.js?v=25"></script>
 </body>
 </html>

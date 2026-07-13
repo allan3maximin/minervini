@@ -761,14 +761,17 @@ function setupYahooFinanceLink(code) {
   link.hidden = false;
 }
 
-// 個別画面のパネル高さ = ビューポート - パネル上端 - ドック余白。
+// 個別画面のパネル高さ = ビューポート - パネル上端 - 下部タブ - ドック余白。
+// タブは画面下部(パネルの下)に置くので、その高さも差し引く。
 // これで画面全体は縦スクロールせず、各パネル内だけがスクロールする。
 function sizeStockPanels() {
   const panels = document.getElementById("stock-panels");
   if (!panels || panels.offsetParent === null) return;
+  const tabs = document.getElementById("stock-tabs");
+  const tabH = tabs ? tabs.getBoundingClientRect().height : 0;
   const top = panels.getBoundingClientRect().top;
-  const reserve = 96; // ドック + 下余白
-  const h = Math.max(320, Math.round(window.innerHeight - top - reserve));
+  const reserve = 92 + tabH; // ドック余白 + 下部タブ
+  const h = Math.max(280, Math.round(window.innerHeight - top - reserve));
   panels.style.height = h + "px";
 }
 
@@ -828,8 +831,10 @@ function setupStockPanels() {
 function sizeListPanels() {
   const panels = document.getElementById("list-panels");
   if (!panels || panels.offsetParent === null) return;
+  const tabs = document.getElementById("list-tabs");
+  const tabH = tabs ? tabs.getBoundingClientRect().height : 0;
   const top = panels.getBoundingClientRect().top;
-  const h = Math.max(320, Math.round(window.innerHeight - top - 96));
+  const h = Math.max(280, Math.round(window.innerHeight - top - 92 - tabH));
   panels.style.height = h + "px";
 }
 
@@ -2157,111 +2162,57 @@ function showView(hash) {
   }
 }
 
-const DOCK_ORDER_KEY = "minervini-dock-order";
+// ドック上を横スライド(スワイプ)すると、ドックの並び順で隣のビューへ切り替える。
+// (ドックアイテムの並べ替えではなく画面切り替え。)タップは従来どおり各ボタンの
+// ビューへ直接遷移。スワイプ直後の合成clickはキャプチャ段階で握りつぶして誤遷移を防ぐ。
+const DOCK_SWIPE_THRESHOLD = 36;
 
-// 保存済みのドック並び順(view名の配列)をDOMに反映。未知/新規ボタンは末尾へ。
-function applyDockOrder(dock) {
-  let order = [];
-  try {
-    order = JSON.parse(localStorage.getItem(DOCK_ORDER_KEY) || "[]");
-  } catch (e) {
-    order = [];
-  }
-  if (!Array.isArray(order) || !order.length) return;
-  const known = new Set(order);
-  order.forEach((v) => {
-    const b = dock.querySelector(`.dock-btn[data-view="${v}"]`);
-    if (b) dock.appendChild(b);
-  });
-  Array.from(dock.querySelectorAll(".dock-btn")).forEach((b) => {
-    if (!known.has(b.dataset.view)) dock.appendChild(b);
-  });
+function currentViewName() {
+  const raw = (window.location.hash.replace("#", "").split("/")[0]) || "dashboard";
+  return raw;
 }
 
-function saveDockOrder(dock) {
-  const order = Array.from(dock.querySelectorAll(".dock-btn")).map((b) => b.dataset.view);
-  try {
-    localStorage.setItem(DOCK_ORDER_KEY, JSON.stringify(order));
-  } catch (e) {
-    /* 無視 */
-  }
-}
-
-// ドックをドラッグ(スライド)で並べ替え。ポインタが隣ボタンの中心を越えたら
-// その場でDOMを入れ替える。8px以上動いたらドラッグ扱いにし、直後のclick
-// (=ナビ遷移)はキャプチャ段階で握りつぶす。並び順はlocalStorageに保存。
-function initDockReorder(dock) {
-  let dragBtn = null;
+function initDockSwipe(dock) {
   let startX = 0;
   let startY = 0;
-  let dragging = false;
-  let justDragged = false;
-
-  const reorder = (clientX) => {
-    const others = Array.from(dock.querySelectorAll(".dock-btn")).filter((b) => b !== dragBtn);
-    for (const b of others) {
-      const r = b.getBoundingClientRect();
-      const mid = r.left + r.width / 2;
-      const dragAfterB = b.compareDocumentPosition(dragBtn) & Node.DOCUMENT_POSITION_FOLLOWING;
-      if (clientX < mid && dragAfterB) {
-        dock.insertBefore(dragBtn, b);
-        break;
-      }
-      if (clientX > mid && !dragAfterB) {
-        dock.insertBefore(dragBtn, b.nextSibling);
-        break;
-      }
-    }
-  };
+  let tracking = false;
+  let swiped = false;
 
   dock.addEventListener("pointerdown", (e) => {
-    const btn = e.target.closest(".dock-btn");
-    if (!btn) return;
-    dragBtn = btn;
     startX = e.clientX;
     startY = e.clientY;
-    dragging = false;
+    tracking = true;
+    swiped = false;
   });
 
   dock.addEventListener("pointermove", (e) => {
-    if (!dragBtn) return;
+    if (!tracking || swiped) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    if (!dragging) {
-      if (Math.hypot(dx, dy) < 8) return;
-      dragging = true;
-      dragBtn.classList.add("dragging");
-      try {
-        dragBtn.setPointerCapture(e.pointerId);
-      } catch (err) {
-        /* 無視 */
-      }
-    }
-    e.preventDefault();
-    reorder(e.clientX);
+    if (Math.abs(dx) < DOCK_SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+    swiped = true; // 横スワイプ確定
+    const order = Array.from(dock.querySelectorAll(".dock-btn")).map((b) => b.dataset.view);
+    let idx = order.indexOf(currentViewName());
+    if (idx < 0) idx = 0;
+    // 左スワイプ(dx<0)=次のビュー / 右スワイプ(dx>0)=前のビュー
+    const nextIdx = dx < 0 ? Math.min(order.length - 1, idx + 1) : Math.max(0, idx - 1);
+    if (order[nextIdx] && nextIdx !== idx) window.location.hash = order[nextIdx];
   });
 
   const end = () => {
-    if (!dragBtn) return;
-    if (dragging) {
-      dragBtn.classList.remove("dragging");
-      saveDockOrder(dock);
-      justDragged = true;
-    }
-    dragBtn = null;
-    dragging = false;
+    tracking = false;
   };
   dock.addEventListener("pointerup", end);
   dock.addEventListener("pointercancel", end);
 
-  // ドラッグ直後の合成clickを握りつぶし、誤遷移を防ぐ。
+  // スワイプ直後の合成clickを握りつぶし、タップ扱いの誤遷移を防ぐ。
   dock.addEventListener(
     "click",
     (e) => {
-      if (justDragged) {
+      if (swiped) {
         e.stopPropagation();
         e.preventDefault();
-        justDragged = false;
+        swiped = false;
       }
     },
     true
@@ -2271,8 +2222,7 @@ function initDockReorder(dock) {
 function initRouter() {
   const dock = document.getElementById("dock-nav");
   if (!dock) return;
-  applyDockOrder(dock);
-  initDockReorder(dock);
+  initDockSwipe(dock);
   dock.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.location.hash = btn.dataset.view;
