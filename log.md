@@ -2,6 +2,39 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (41): チャートカード統合・リスト表sticky化・市況マージン修正
+
+### 要望(ユーザー原文)
+> 個別株の表を一つにまとめて欲しい / ピボット損切りのチェックボックスも場所節確保のために移動して欲しい /
+> リストの銘柄名は六文字とトリムして / スクロールしても銘柄名と列名はわかるようにして /
+> 市況画面のテンプレ通過率とか書いてあるセクションと攻めと書いてあるセクションのマージンがないので修正して
+
+### 変更内容
+- **チャートカード統合** (`index.html`+CSS): 株価/出来高/RSの3枚のカードを**1枚の `.chart-card.chart-stack`** に統合。
+  **チャートインスタンスは3つ別々のまま**(セッション39の「3グラフは別々」指示は維持。統合したのは枠だけ)。
+  出来高/RSの見出し行(chart-card-head×2)を廃止し、チャート左上の小さなオーバーレイラベル
+  `.chart-sub-label`(高さゼロ)に置換 → ヘッダ2行分の縦領域をチャートに回せる。
+  比率は chart-container:volume:rs = 5:2:2 のflexで従来どおり。`#rs-card`(今は`.chart-sub`)の hidden 切替もそのまま動く。
+- **ピボット/損切りチェックボックス移動**: `.chart-toolbar` から株価カードの `.chart-card-head`(h2の隣)へ移動。
+  ツールバーは期間segmentedのみの1行に(モバイルで2行→1行)。JSは getElementById 参照なので無変更で動く。
+- **銘柄名6文字トリム** (`app.js`): `trimName()` 10→6文字。フルネームはtitle属性(長押し/ホバー)で従来どおり。
+- **リスト表sticky化** (`app.js`+CSS): renderTableの表に `tier-table` クラス付与。
+  `.list-panel` を縦横両方のスクロールコンテナに変更(`overflow:auto`)し、`.table-scroll` は `overflow:visible` の枠に。
+  → thead(列名)は `top:0`、コード列(幅66px固定)+銘柄名列は `left:0/66px` でsticky。角セルはz-index 4。
+  `.tier-section`/`.table-scroll` は `width:max-content; min-width:100%` で表がカード背景からはみ出さない。
+  h2/tier-note/status h3 は `position:sticky; left:0` で横スクロールしても左端に残す。
+  fund-stale行のsticky列は近似色 #232219 で塗る(tr背景の半透明が透けないため)。
+- **市況マージン修正**: `.breadth-meter` に `margin-bottom:12px` 追加。`.p1-warning` は `margin:0 0 12px` に変更
+  (表示時も攻め/中立/守りカードとの間隔が空く)。
+- キャッシュバスター: style.css v26→27, app.js v28→29。
+
+### 検証
+- `node --check` app.js OK。index.html タグbalance(div61/61, section16/16, button31/31, label3/3)。
+- 実機(iOS Safari)要確認: ①統合チャートカードが1画面に収まるか ②リスト表の縦横スクロールで
+  列名/銘柄名が固定されるか ③リスト横スクロールとパネル横スワイプ(本命/候補/監視)の共存感
+  ④市況のセクション間マージン。
+- 未コミット(次回コミット時は .git/index.lock を filesystem MCP でリネームするワークアラウンド必要)。
+
 ## 2026-07-13 (40): App shell化(bodyスクロール全廃)+Dock/タブ/segmentedのUI統一
 
 ### 要望(ユーザー原文)

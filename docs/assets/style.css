@@ -79,6 +79,7 @@ a { color: var(--link); }
   padding: 10px 14px;
   font-size: 12px;
   color: var(--text-dim);
+  margin-bottom: 12px; /* 直下の地合いシグナルカードとの間隔 */
 }
 
 /* --------------------------------------------------------------- buttons */
@@ -535,7 +536,7 @@ a.nav-btn {
 a.nav-btn:hover { border-color: var(--link); }
 
 .p1-warning {
-  margin-top: 10px;
+  margin: 0 0 12px; /* 上はbreadth-meterのmargin-bottomに任せ、下にシグナルカードとの間隔 */
   padding: 10px 14px;
   border: 1px solid var(--warn);
   border-radius: var(--radius);
@@ -998,26 +999,50 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
   padding: 2px 2px 8px;
 }
-/* グラフパネル: 固定pxをやめ、株価/出来高/RSをflex比率(5:2:2)で残り高さに
-   ぴったり配分する(=縦スクロール無し)。チャート自体はJSがclientHeightで生成。 */
+/* グラフパネル: 株価/出来高/RSを1枚のカード(.chart-stack)に統合し、
+   flex比率(5:2:2)で残り高さにぴったり配分する(=縦スクロール無し)。
+   チャートインスタンスは3つ別々(JSがclientHeightで生成)。 */
 .stock-panel[data-panel="chart"] {
   display: flex;
   flex-direction: column;
 }
 .stock-panel .chart-toolbar { flex: 0 0 auto; margin-top: 0; margin-bottom: 6px; }
-.stock-panel .chart-card {
+.stock-panel .chart-card.chart-stack {
   display: flex;
   flex-direction: column;
-  flex: 5 1 0;
+  flex: 1 1 auto;
   min-height: 0;
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
-.stock-panel .chart-card[hidden] { display: none; }
-.stock-panel #volume-card, .stock-panel #rs-card { flex: 2 1 0; }
-.stock-panel .chart-card:last-child { margin-bottom: 0; }
 .stock-panel .chart-card-head { flex: 0 0 auto; padding: 4px 10px; }
-.stock-panel .chart-box { flex: 1 1 auto; height: auto; min-height: 120px; }
-.stock-panel .chart-box-small { min-height: 56px; }
+.stock-panel .chart-stack > #chart-container { flex: 5 1 0; min-height: 120px; }
+.chart-sub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 2 1 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.chart-sub[hidden] { display: none; }
+.chart-sub .chart-box-small { flex: 1 1 auto; height: auto; min-height: 56px; }
+/* 出来高/RSの見出しはチャート左上オーバーレイ(高さを消費しない) */
+.chart-sub-label {
+  position: absolute;
+  top: 3px;
+  left: 8px;
+  z-index: 5;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(19, 23, 32, 0.7);
+  padding: 1px 7px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+.stock-panel .chart-box { flex: 1 1 auto; height: auto; }
+/* カード頭に移したピボット/損切りトグルはコンパクトに */
+.chart-card-head .line-toggles { gap: 10px; }
+.chart-card-head .line-toggle { min-height: 0; font-size: 12px; }
 
 .yahoo-link {
   display: inline-flex;
@@ -1057,11 +1082,56 @@ a.nav-btn:hover { border-color: var(--link); }
   width: 100%;
   box-sizing: border-box;
   scroll-snap-align: start;
-  overflow-y: auto;
+  /* 縦横ともこのパネル自身がスクロールコンテナになる。こうすると
+     thead(top sticky)とコード/銘柄名列(left sticky)が両方効く。 */
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   padding: 0 2px 12px;
 }
-.list-panel .tier-section { margin-bottom: 0; }
+.list-panel .tier-section {
+  margin-bottom: 0;
+  /* 表(min-width 760px)がカード背景からはみ出さないよう、カード自体を
+     コンテンツ幅まで広げる(横スクロールは.list-panelが担当)。 */
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+/* 見出し・注記は横スクロールしても左端に留める */
+.list-panel .tier-section > h2,
+.list-panel .tier-note,
+.list-panel .status-section > h3 {
+  position: sticky;
+  left: 0;
+  max-width: min(680px, calc(100vw - 48px));
+}
+/* パネル自身が横スクロールするので、内側のtable-scrollはただの枠にする */
+.list-panel .table-scroll { overflow: visible; width: max-content; min-width: 100%; }
+
+/* スクロールしても列名(thead)とコード/銘柄名列が見えるように sticky 固定。
+   スクロールコンテナは .list-panel。 */
+.tier-table th { top: 0; z-index: 3; }
+.tier-table th:nth-child(1), .tier-table td:nth-child(1),
+.tier-table th:nth-child(2), .tier-table td:nth-child(2) {
+  position: sticky;
+  background: var(--panel);
+}
+.tier-table th:nth-child(1), .tier-table td:nth-child(1) {
+  left: 0;
+  width: 66px;
+  min-width: 66px;
+  max-width: 66px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tier-table th:nth-child(2), .tier-table td:nth-child(2) { left: 66px; }
+/* 左上の角セル(コード/銘柄名の列名)は縦横両方の交点なので最前面 */
+.tier-table th:nth-child(1), .tier-table th:nth-child(2) {
+  z-index: 4;
+  background: var(--panel-2);
+}
+/* fund-stale行のsticky列はtr背景(半透明アンバー)が透けないため近似色で塗る */
+.tier-table tr.fund-stale td:nth-child(1),
+.tier-table tr.fund-stale td:nth-child(2) { background: #232219; }
 
 /* ------------------------------------------------------- 投資法ページ */
 

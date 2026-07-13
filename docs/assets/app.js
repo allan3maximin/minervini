@@ -30,10 +30,10 @@ function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// 銘柄名は横幅を取りすぎるため10文字でトリムする。フルネームはtitle属性(ホバー)で確認可能。
+// 銘柄名は横幅を取りすぎるため6文字でトリムする。フルネームはtitle属性(ホバー)で確認可能。
 function trimName(name) {
   const s = String(name ?? "");
-  return s.length > 10 ? s.slice(0, 10) + "…" : s;
+  return s.length > 6 ? s.slice(0, 6) + "…" : s;
 }
 
 const SECTOR_STRENGTH_CLASS = { 強: "sector-strength-strong", 中: "sector-strength-mid", 弱: "sector-strength-weak" };
@@ -578,6 +578,7 @@ function renderTable(stocks, tier, options = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = "table-scroll";
   const table = document.createElement("table");
+  table.className = "tier-table"; // リスト表: コード/銘柄名列とヘッダをsticky固定する対象
   wrapper.appendChild(table);
 
   function sortValueFor(s, col) {
