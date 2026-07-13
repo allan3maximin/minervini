@@ -18,6 +18,10 @@ from src.config import REPO_ROOT, load_config
 
 HEATMAP_PATH = REPO_ROOT / "docs" / "data" / "heatmap.json"
 SECTOR_HISTORY_PATH = REPO_ROOT / "data" / "sector_history.json"
+# フロント(ヒートマップ簡易ビューの履歴)が読む公開版。市況カードと同じく
+# secure_io で暗号化して配信する。日付軸に揃えたセクター別の系列に整形する。
+SECTOR_HISTORY_PUBLIC_PATH = REPO_ROOT / "docs" / "data" / "sector_history.json"
+SECTOR_HISTORY_PUBLIC_DAYS = 120
 SECTOR_MAP_PATH = REPO_ROOT / "data" / "sector_map.json"
 
 UNKNOWN_SECTOR = "その他"
@@ -227,9 +231,54 @@ def build_heatmap(
     from src.report.secure_io import write_docs_json
     write_docs_json(HEATMAP_PATH, heatmap)
 
-    update_sector_history(today_str, sectors, topix_returns, cfg)
+    history = update_sector_history(today_str, sectors, topix_returns, cfg)
+    publish_sector_history(history)
 
     return {"heatmap": heatmap, "sector_strength_by_code": sector_strength_by_code}
+
+
+def publish_sector_history(history: dict) -> dict:
+    """内部履歴(data/sector_history.json)を、フロントのヒートマップ簡易履歴が
+    そのまま描ける「日付軸に揃えたセクター別系列」に整形して docs/data に公開。
+    直近 SECTOR_HISTORY_PUBLIC_DAYS 日ぶんに絞る(ペイロード削減)。"""
+    entries = sorted(history.get("history", []), key=lambda e: e.get("date") or "")
+    entries = entries[-SECTOR_HISTORY_PUBLIC_DAYS:]
+    dates = [e.get("date") for e in entries]
+    topix_d1 = [e.get("topix_d1") for e in entries]
+
+    # 全期間に現れるセクター名を収集し、各日付に揃える(欠損日はNone)。
+    sector_names: list[str] = []
+    seen = set()
+    for e in entries:
+        for name in (e.get("sectors") or {}).keys():
+            if name not in seen:
+                seen.add(name)
+                sector_names.append(name)
+
+    sectors_series: dict[str, dict] = {}
+    for name in sector_names:
+        d1s, rels, strengths = [], [], []
+        for e in entries:
+            rec = (e.get("sectors") or {}).get(name) or {}
+            d1s.append(rec.get("d1"))
+            rels.append(rec.get("rel_strength_pct"))
+            strengths.append(rec.get("strength"))
+        sectors_series[name] = {
+            "d1": d1s,
+            "rel_strength_pct": rels,
+            "strength": strengths,
+        }
+
+    public = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "dates": dates,
+        "topix_d1": topix_d1,
+        "sectors": sectors_series,
+    }
+    from src.report.secure_io import write_docs_json
+
+    write_docs_json(SECTOR_HISTORY_PUBLIC_PATH, public)
+    return public
 
 
 def update_sector_history(

@@ -2,6 +2,60 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (36): 画面分割+横スワイプパネル化+ドック並べ替え+セクター履歴公開(9件)
+
+### 要望(ユーザー原文、要約)
+> ①個別銘柄にYahooファイナンスのリンク ②モーダルを中央寄せ+下余白+外側タップで閉じる
+> ③市況とヒートマップを別ページに(ヒートマップページ追加) ④ドックをドラッグ&ドロップで並べ替え
+> ⑤ヒートマップ簡易の履歴も見れるように(市況と同じ実装) ⑥ファンダ初期表示をグラフに
+> ⑦個別画面は縦スクロール無し・横スワイプでパネル切替(サマリー/グラフ/ファンダ/MUST/サイジング)
+> ⑧市況(市況補足+市場概況)とヒートマップも一画面に ⑨リスト画面は本命/候補/監視を横スワイプ切替(縦スクロールOK)
+
+事前確認(AskUserQuestion): ③vs⑧の矛盾→**市況とヒートマップは別ページ**に確定 /
+ヒートマップ簡易履歴→**公開して実装(バックエンド変更あり)** / スワイプUI→**スワイプ+上部タブ両対応**。
+
+### 変更内容
+- `docs/index.html`:
+  - `.hm-section`(ヒートマップ)を view-dashboard から独立 `#view-heatmap` へ分離。Dockに
+    ヒートマップボタン追加(市況=graph-up-arrow / ヒートマップ=grid-3x3-gap-fill / リスト=list-ul)。
+  - `#view-stock` を横スワイプパネル化: `.stock-header`(タイトル/メタ/`.stock-tabs`)+
+    `#stock-panels`(5枚: summary/chart/fund/must/sizing)。scroll-snap で横スワイプ、タブと双方向同期。
+    サマリーパネルに Yahoo!ファイナンスリンク(`#yahoo-finance-link`)とスコア内訳を配置。
+  - `#view-stocklist` を横スワイプパネル化: `.list-tabs`(本命/候補/監視)+`#list-panels`(各パネル縦スクロールOK)。
+  - cache-buster: style.css?v=22 / heatmap.js?v=12 / app.js?v=24。
+- `docs/assets/app.js`:
+  - VIEWS に "heatmap" 追加。showView: heatmap表示で initHeatmap() / stocklist表示で initListView()。
+  - `setupYahooFinanceLink(code)`(finance.yahoo.co.jp/quote/{code}.T)、`setupStockPanels()`/
+    `sizeStockPanels()`/`updateStockActiveTab()`(高さ=ビューポート-上端-96、scroll↔タブ同期、遷移毎に先頭リセット)。
+  - `initListView()`/`sizeListPanels()`(リスト用、縦スクロール許可)。
+  - ドック並べ替え: `applyDockOrder()`/`saveDockOrder()`/`initDockReorder(dock)`。ポインタドラッグで
+    隣ボタン中心を越えたらDOM入替、8px超でドラッグ判定し直後のclickをキャプチャで握り潰す。
+    順序は localStorage "minervini-dock-order"。initRouter で apply→wire。
+  - fundViewPref 既定を "chart" に(⑥、前セッションで対応済)。
+- `docs/assets/heatmap.js`:
+  - `SECTOR_HISTORY` を data/sector_history.json から optional 取得。
+  - 簡易ビューのセクターboxをクリック可能化→`openSectorHistoryPopup(sec)`(相対強度/d1の履歴スパークライン)。
+  - 依存なしSVG `histSparkline(values, colorByLast)` + `lastNonNull()`。未公開時は「履歴データはまだありません」。
+- `docs/assets/style.css`: `.stock-view/.stock-header/.stock-tabs/.stock-panels/.stock-panel`(横snap・
+  グラフ圧縮)、`.yahoo-link`、`.list-view/.list-tabs/.list-panels/.list-panel`、`.dock-btn{touch-action:none}`+
+  `.dock-btn.dragging`、`.hm-sector-clickable/.hm-hist-spark/.hm-hist-sub`。モーダル中央寄せ(②)は前セッションで対応済。
+- `src/report/heatmap.py`: `SECTOR_HISTORY_PUBLIC_PATH`(docs/data/sector_history.json)/
+  `SECTOR_HISTORY_PUBLIC_DAYS=120`。`publish_sector_history(history)` を追加し build_heatmap から呼ぶ。
+  内部履歴を「日付軸に揃えたセクター別系列(d1/rel_strength_pct/strength)」に整形、secure_io で暗号化配信。
+
+### 検証
+- `node --check` app.js/heatmap.js OK。index.html の view-stock はタグ均衡(div28/28・section8/8、パネル5枚)。
+- publish_sector_history を実データ(data/sector_history.json=8営業日33セクター)で実行→正しい系列を生成。
+- histSparkline/lastNonNull を node で単体スモーク(SVG生成・欠損値スキップ・データ不足フォールバック)OK。
+- 制約: データ暗号化のためヘッドレスでの実描画確認は不可(パスキー必須)。
+
+### 次の課題 / 注意
+- **docs/data/sector_history.json は本番バッチ実行(DASHBOARD_DATA_KEY あり)で初めて暗号化生成される。**
+  それまで簡易履歴ポップアップは「履歴データはまだありません」を表示(フロントは optional fetch で安全)。
+  平文をコミットすると公開リポジトリで漏洩するため、ローカルからは生成・コミットしない。
+- 横スワイプは scroll-snap ベース。テーブル横スクロールと競合し得るが、上部タブが主操作系なので許容。
+
+
 ## 2026-07-13 (35): フロントエンド大規模リファクタ(画面役割見直し+UX改善11件)
 
 ### 要望(ユーザー原文、要約)

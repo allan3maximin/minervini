@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MinerviniScreener</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=21">
+<link rel="stylesheet" href="assets/style.css?v=22">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -50,7 +50,9 @@
     <div id="market-cards" class="market-cards"></div>
     <div id="market-live-meta" class="market-live-meta"></div>
   </section>
+</section>
 
+<section id="view-heatmap" class="view-section" hidden>
   <section class="hm-section">
     <h2>セクターヒートマップ</h2>
     <div id="hm-meta" class="meta-line"></div>
@@ -80,24 +82,38 @@
   </section>
 </section>
 
-<section id="view-stocklist" class="view-section" hidden>
-  <section class="tier-section">
-    <h2>〔本命〕ファンダ強度確認済み</h2>
-    <p class="tier-note">VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上(Minervini Code 33準拠)を満たした銘柄。</p>
-    <div id="confirmed-tier-body"></div>
-  </section>
+<section id="view-stocklist" class="view-section list-view" hidden>
+  <div class="list-tabs" id="list-tabs" role="tablist">
+    <button type="button" class="list-tab active" data-panel="confirmed" role="tab">本命</button>
+    <button type="button" class="list-tab" data-panel="pool" role="tab">候補</button>
+    <button type="button" class="list-tab" data-panel="watchlist" role="tab">監視</button>
+  </div>
 
-  <section class="tier-section">
-    <h2>〔候補〕セットアップ完成・エントリー可能</h2>
-    <p class="tier-note">VCPベース完成済み(ピボット・ストップあり)だが、ファンダが未確認または昇格基準(EPS YoY+25%/売上YoY+20%)未達。純テクニカル評価によるランキング。「ファンダ状態」列の「ファンダ弱」はデータはあるが基準未達の銘柄。</p>
-    <div id="pool-tier-body"></div>
-  </section>
+  <div class="list-panels" id="list-panels">
+    <div class="list-panel" data-panel="confirmed">
+      <section class="tier-section">
+        <h2>〔本命〕ファンダ強度確認済み</h2>
+        <p class="tier-note">VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上(Minervini Code 33準拠)を満たした銘柄。</p>
+        <div id="confirmed-tier-body"></div>
+      </section>
+    </div>
 
-  <section class="tier-section">
-    <h2>〔監視〕8条件合格・セットアップ形成待ち</h2>
-    <p class="tier-note">トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだエントリーできない銘柄。ベースが検出されると上の〔候補〕/〔本命〕に昇格します。全件RS降順。</p>
-    <div id="watchlist-tier-body"></div>
-  </section>
+    <div class="list-panel" data-panel="pool">
+      <section class="tier-section">
+        <h2>〔候補〕セットアップ完成・エントリー可能</h2>
+        <p class="tier-note">VCPベース完成済み(ピボット・ストップあり)だが、ファンダが未確認または昇格基準(EPS YoY+25%/売上YoY+20%)未達。純テクニカル評価によるランキング。「ファンダ状態」列の「ファンダ弱」はデータはあるが基準未達の銘柄。</p>
+        <div id="pool-tier-body"></div>
+      </section>
+    </div>
+
+    <div class="list-panel" data-panel="watchlist">
+      <section class="tier-section">
+        <h2>〔監視〕8条件合格・セットアップ形成待ち</h2>
+        <p class="tier-note">トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだエントリーできない銘柄。ベースが検出されると上の〔候補〕/〔本命〕に昇格します。全件RS降順。</p>
+        <div id="watchlist-tier-body"></div>
+      </section>
+    </div>
+  </div>
 </section>
 
 <section id="view-invest" class="view-section" hidden>
@@ -173,15 +189,34 @@
   <div id="batch-history"></div>
 </section>
 
-<section id="view-stock" class="view-section" hidden>
-  <h1 id="stock-title"></h1>
-  <div id="stock-meta" class="meta-chips"></div>
-  <div id="stock-summary" class="stock-summary" hidden></div>
-  <div class="stock-actions">
-    <button type="button" id="copy-stock-data-btn" hidden>分析用データをコピー</button>
+<section id="view-stock" class="view-section stock-view" hidden>
+  <div class="stock-header">
+    <h1 id="stock-title"></h1>
+    <div id="stock-meta" class="meta-chips"></div>
+    <div class="stock-tabs" id="stock-tabs" role="tablist">
+      <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
+      <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
+      <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
+      <button type="button" class="stock-tab" data-panel="must" role="tab">MUST</button>
+      <button type="button" class="stock-tab" data-panel="sizing" role="tab">サイジング</button>
+    </div>
   </div>
 
-  <div class="chart-toolbar">
+  <div class="stock-panels" id="stock-panels">
+    <div class="stock-panel" data-panel="summary">
+      <div class="stock-actions">
+        <button type="button" id="copy-stock-data-btn" hidden>分析用データをコピー</button>
+        <a id="yahoo-finance-link" class="yahoo-link" href="#" target="_blank" rel="noopener noreferrer" hidden><i class="bi bi-box-arrow-up-right"></i> Yahoo!ファイナンス</a>
+      </div>
+      <div id="stock-summary" class="stock-summary" hidden></div>
+      <section class="detail-card">
+        <h2>スコア内訳</h2>
+        <div id="score-breakdown"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="chart">
+      <div class="chart-toolbar">
     <div class="line-toggles">
       <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label>
       <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label>
@@ -208,45 +243,48 @@
     <div id="volume-container" class="chart-box chart-box-small"></div>
   </section>
 
-  <section class="chart-card" id="rs-card">
-    <div class="chart-card-head"><h2>RSライン（対TOPIX相対力）</h2></div>
-    <div id="rs-container" class="chart-box chart-box-small"></div>
-  </section>
-
-  <section class="detail-card">
-    <h2>MUST条件チェックリスト</h2>
-    <div id="must-checklist"></div>
-  </section>
-
-  <section class="detail-card">
-    <h2>スコア内訳</h2>
-    <div id="score-breakdown"></div>
-  </section>
-
-  <section class="detail-card" id="sizing-card">
-    <h2>ポジションサイジング</h2>
-    <div class="sizing-inputs">
-      <label class="sizing-field">
-        総資金(円)
-        <input type="number" id="sizing-capital" min="0" step="10000" inputmode="numeric" placeholder="例: 10000000">
-      </label>
-      <div class="sizing-field">
-        1トレードあたりリスク(%)
-        <div class="segmented" id="sizing-risk-toggle">
-          <button type="button" data-risk="0.5">0.5%</button>
-          <button type="button" data-risk="0.75">0.75%</button>
-          <button type="button" data-risk="1.0" class="active">1.0%</button>
-          <button type="button" data-risk="1.25">1.25%</button>
-        </div>
-      </div>
+      <section class="chart-card" id="rs-card">
+        <div class="chart-card-head"><h2>RSライン（対TOPIX相対力）</h2></div>
+        <div id="rs-container" class="chart-box chart-box-small"></div>
+      </section>
     </div>
-    <div id="sizing-result"></div>
-  </section>
 
-  <section class="detail-card">
-    <h2>ファンダメンタルズ</h2>
-    <div id="fund-detail-body"></div>
-  </section>
+    <div class="stock-panel" data-panel="fund">
+      <section class="detail-card">
+        <h2>ファンダメンタルズ</h2>
+        <div id="fund-detail-body"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="must">
+      <section class="detail-card">
+        <h2>MUST条件チェックリスト</h2>
+        <div id="must-checklist"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="sizing">
+      <section class="detail-card" id="sizing-card">
+        <h2>ポジションサイジング</h2>
+        <div class="sizing-inputs">
+          <label class="sizing-field">
+            総資金(円)
+            <input type="number" id="sizing-capital" min="0" step="10000" inputmode="numeric" placeholder="例: 10000000">
+          </label>
+          <div class="sizing-field">
+            1トレードあたりリスク(%)
+            <div class="segmented" id="sizing-risk-toggle">
+              <button type="button" data-risk="0.5">0.5%</button>
+              <button type="button" data-risk="0.75">0.75%</button>
+              <button type="button" data-risk="1.0" class="active">1.0%</button>
+              <button type="button" data-risk="1.25">1.25%</button>
+            </div>
+          </div>
+        </div>
+        <div id="sizing-result"></div>
+      </section>
+    </div>
+  </div>
 </section>
 
 </main>
@@ -256,7 +294,8 @@
 </footer>
 
 <nav class="dock-nav" id="dock-nav">
-  <button type="button" class="dock-btn" data-view="dashboard" title="ダッシュボード" aria-label="ダッシュボード"><i class="bi bi-speedometer2 dock-icon"></i></button>
+  <button type="button" class="dock-btn" data-view="dashboard" title="市況" aria-label="市況"><i class="bi bi-graph-up-arrow dock-icon"></i></button>
+  <button type="button" class="dock-btn" data-view="heatmap" title="ヒートマップ" aria-label="ヒートマップ"><i class="bi bi-grid-3x3-gap-fill dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="stocklist" title="銘柄リスト" aria-label="銘柄リスト"><i class="bi bi-list-ul dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="invest" title="投資法" aria-label="投資法"><i class="bi bi-journal-text dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="positions" title="保有" aria-label="保有"><i class="bi bi-briefcase-fill dock-icon"></i></button>
@@ -268,8 +307,8 @@
 <script src="assets/github-api.js?v=6"></script>
 <script src="assets/webauthn-vault.js?v=6"></script>
 <script src="assets/fundamentals-modal.js?v=8"></script>
-<script src="assets/heatmap.js?v=11"></script>
+<script src="assets/heatmap.js?v=12"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=23"></script>
+<script src="assets/app.js?v=24"></script>
 </body>
 </html>

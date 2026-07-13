@@ -728,6 +728,8 @@ async function initStockPage(codeOverride) {
 
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
+  setupYahooFinanceLink(code);
+  setupStockPanels();
   renderStockSummary(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
   setupSizingCalculator(stock);
@@ -744,6 +746,135 @@ async function initStockPage(codeOverride) {
     renderMustChecklist(stock.must_flags, stock.vcp_detail);
     renderScoreBreakdown(stock);
   }
+}
+
+// 個別銘柄のYahoo!ファイナンス(日本)リンク。東証銘柄はコード+".T"。
+function setupYahooFinanceLink(code) {
+  const link = document.getElementById("yahoo-finance-link");
+  if (!link) return;
+  const digits = String(code || "").trim();
+  if (!digits) {
+    link.hidden = true;
+    return;
+  }
+  link.href = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(digits)}.T`;
+  link.hidden = false;
+}
+
+// 個別画面のパネル高さ = ビューポート - パネル上端 - ドック余白。
+// これで画面全体は縦スクロールせず、各パネル内だけがスクロールする。
+function sizeStockPanels() {
+  const panels = document.getElementById("stock-panels");
+  if (!panels || panels.offsetParent === null) return;
+  const top = panels.getBoundingClientRect().top;
+  const reserve = 96; // ドック + 下余白
+  const h = Math.max(320, Math.round(window.innerHeight - top - reserve));
+  panels.style.height = h + "px";
+}
+
+// アクティブなタブ表示を切り替える。
+function updateStockActiveTab(panelName) {
+  const tabs = document.getElementById("stock-tabs");
+  if (!tabs) return;
+  tabs.querySelectorAll(".stock-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.panel === panelName);
+  });
+}
+
+// 個別画面の横スワイプ/タブUI。パネルを横スクロールスナップで並べ、
+// タブクリック↔スクロール位置を双方向同期。銘柄遷移のたびに先頭へリセット。
+function setupStockPanels() {
+  const panels = document.getElementById("stock-panels");
+  const tabs = document.getElementById("stock-tabs");
+  if (!panels || !tabs) return;
+
+  sizeStockPanels();
+  panels.scrollLeft = 0; // 常にサマリーから開始
+  updateStockActiveTab("summary");
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".stock-tab");
+    if (!btn) return;
+    const items = Array.from(tabs.querySelectorAll(".stock-tab"));
+    const idx = items.indexOf(btn);
+    if (idx < 0) return;
+    panels.scrollTo({ left: idx * panels.clientWidth, behavior: "smooth" });
+    updateStockActiveTab(btn.dataset.panel);
+  });
+
+  let raf = 0;
+  panels.addEventListener(
+    "scroll",
+    () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
+        const cur = panels.querySelectorAll(".stock-panel")[idx];
+        if (cur) updateStockActiveTab(cur.dataset.panel);
+      });
+    },
+    { passive: true }
+  );
+
+  window.addEventListener("resize", sizeStockPanels);
+}
+
+// リスト画面(本命/候補/監視)の横スワイプ+タブ。個別画面と同じ仕組みだが
+// 各パネルは縦スクロールを許可する。showViewからstocklist表示時に呼ぶ。
+function sizeListPanels() {
+  const panels = document.getElementById("list-panels");
+  if (!panels || panels.offsetParent === null) return;
+  const top = panels.getBoundingClientRect().top;
+  const h = Math.max(320, Math.round(window.innerHeight - top - 96));
+  panels.style.height = h + "px";
+}
+
+function initListView() {
+  const panels = document.getElementById("list-panels");
+  const tabs = document.getElementById("list-tabs");
+  if (!panels || !tabs) return;
+
+  sizeListPanels();
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
+
+  const setActive = (name) => {
+    tabs.querySelectorAll(".list-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.panel === name);
+    });
+  };
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".list-tab");
+    if (!btn) return;
+    const items = Array.from(tabs.querySelectorAll(".list-tab"));
+    const idx = items.indexOf(btn);
+    if (idx < 0) return;
+    panels.scrollTo({ left: idx * panels.clientWidth, behavior: "smooth" });
+    setActive(btn.dataset.panel);
+  });
+
+  let raf = 0;
+  panels.addEventListener(
+    "scroll",
+    () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
+        const cur = panels.querySelectorAll(".list-panel")[idx];
+        if (cur) setActive(cur.dataset.panel);
+      });
+    },
+    { passive: true }
+  );
+
+  window.addEventListener("resize", sizeListPanels);
 }
 
 // ルールベース日本語サマリー (src/report/summary.py が生成した
@@ -865,9 +996,10 @@ function fundViewPref(v) {
     try { localStorage.setItem(FUND_VIEW_KEY, v); } catch (e) {}
     return v;
   }
-  let stored = "table";
-  try { stored = localStorage.getItem(FUND_VIEW_KEY) || "table"; } catch (e) {}
-  return stored === "chart" ? "chart" : "table";
+  // 初期表示はグラフ。明示的に "table" を選んだ時だけ表にする。
+  let stored = "chart";
+  try { stored = localStorage.getItem(FUND_VIEW_KEY) || "chart"; } catch (e) {}
+  return stored === "table" ? "table" : "chart";
 }
 
 // EPS・売上高の推移バーチャート(YoY色分け付き)をSVGで生成する。
@@ -1993,7 +2125,7 @@ async function initPositionsView() {
 // (Dockメニューには出さない、ダッシュボードからのドリルダウン専用ビュー)。
 // ---------------------------------------------------------------------------
 
-const VIEWS = ["dashboard", "stocklist", "invest", "positions", "batch", "stock"];
+const VIEWS = ["dashboard", "heatmap", "stocklist", "invest", "positions", "batch", "stock"];
 
 function showView(hash) {
   const [rawName, param] = hash.split("/");
@@ -2006,9 +2138,9 @@ function showView(hash) {
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.view === name);
   });
-  // ヒートマップはダッシュボードに統合された。コンテナが見えて初めて
-  // clientWidthが正しく取れるため、ダッシュボード表示のたびに再init。
-  if (name === "dashboard" && typeof initHeatmap === "function") {
+  // ヒートマップは独立ページ。コンテナが見えて初めてclientWidthが
+  // 正しく取れるため、ヒートマップ表示のたびに再init。
+  if (name === "heatmap" && typeof initHeatmap === "function") {
     initHeatmap();
   }
   if (name === "batch" && window.MinerviniBatch) {
@@ -2017,14 +2149,130 @@ function showView(hash) {
   if (name === "positions") {
     initPositionsView();
   }
+  if (name === "stocklist") {
+    initListView();
+  }
   if (name === "stock") {
     initStockPage(param ? decodeURIComponent(param) : null);
   }
 }
 
+const DOCK_ORDER_KEY = "minervini-dock-order";
+
+// 保存済みのドック並び順(view名の配列)をDOMに反映。未知/新規ボタンは末尾へ。
+function applyDockOrder(dock) {
+  let order = [];
+  try {
+    order = JSON.parse(localStorage.getItem(DOCK_ORDER_KEY) || "[]");
+  } catch (e) {
+    order = [];
+  }
+  if (!Array.isArray(order) || !order.length) return;
+  const known = new Set(order);
+  order.forEach((v) => {
+    const b = dock.querySelector(`.dock-btn[data-view="${v}"]`);
+    if (b) dock.appendChild(b);
+  });
+  Array.from(dock.querySelectorAll(".dock-btn")).forEach((b) => {
+    if (!known.has(b.dataset.view)) dock.appendChild(b);
+  });
+}
+
+function saveDockOrder(dock) {
+  const order = Array.from(dock.querySelectorAll(".dock-btn")).map((b) => b.dataset.view);
+  try {
+    localStorage.setItem(DOCK_ORDER_KEY, JSON.stringify(order));
+  } catch (e) {
+    /* 無視 */
+  }
+}
+
+// ドックをドラッグ(スライド)で並べ替え。ポインタが隣ボタンの中心を越えたら
+// その場でDOMを入れ替える。8px以上動いたらドラッグ扱いにし、直後のclick
+// (=ナビ遷移)はキャプチャ段階で握りつぶす。並び順はlocalStorageに保存。
+function initDockReorder(dock) {
+  let dragBtn = null;
+  let startX = 0;
+  let startY = 0;
+  let dragging = false;
+  let justDragged = false;
+
+  const reorder = (clientX) => {
+    const others = Array.from(dock.querySelectorAll(".dock-btn")).filter((b) => b !== dragBtn);
+    for (const b of others) {
+      const r = b.getBoundingClientRect();
+      const mid = r.left + r.width / 2;
+      const dragAfterB = b.compareDocumentPosition(dragBtn) & Node.DOCUMENT_POSITION_FOLLOWING;
+      if (clientX < mid && dragAfterB) {
+        dock.insertBefore(dragBtn, b);
+        break;
+      }
+      if (clientX > mid && !dragAfterB) {
+        dock.insertBefore(dragBtn, b.nextSibling);
+        break;
+      }
+    }
+  };
+
+  dock.addEventListener("pointerdown", (e) => {
+    const btn = e.target.closest(".dock-btn");
+    if (!btn) return;
+    dragBtn = btn;
+    startX = e.clientX;
+    startY = e.clientY;
+    dragging = false;
+  });
+
+  dock.addEventListener("pointermove", (e) => {
+    if (!dragBtn) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < 8) return;
+      dragging = true;
+      dragBtn.classList.add("dragging");
+      try {
+        dragBtn.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* 無視 */
+      }
+    }
+    e.preventDefault();
+    reorder(e.clientX);
+  });
+
+  const end = () => {
+    if (!dragBtn) return;
+    if (dragging) {
+      dragBtn.classList.remove("dragging");
+      saveDockOrder(dock);
+      justDragged = true;
+    }
+    dragBtn = null;
+    dragging = false;
+  };
+  dock.addEventListener("pointerup", end);
+  dock.addEventListener("pointercancel", end);
+
+  // ドラッグ直後の合成clickを握りつぶし、誤遷移を防ぐ。
+  dock.addEventListener(
+    "click",
+    (e) => {
+      if (justDragged) {
+        e.stopPropagation();
+        e.preventDefault();
+        justDragged = false;
+      }
+    },
+    true
+  );
+}
+
 function initRouter() {
   const dock = document.getElementById("dock-nav");
   if (!dock) return;
+  applyDockOrder(dock);
+  initDockReorder(dock);
   dock.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.location.hash = btn.dataset.view;
