@@ -128,17 +128,12 @@ function scrollToHmView(view, smooth = true) {
   panels.scrollTo({ left: idx * panels.clientWidth, behavior: smooth ? "smooth" : "auto" });
 }
 
-// ヒートマップ描画高さ = ビューポート - パネル上端 - 下部バー - ドック余白。
+// ヒートマップ描画高さ: app shell化により #hm-panels がflexで残り高さ
+// (下部バー・Dockを除いた分)ちょうどに広がるので、その実高さを使うだけ。
 function heatmapHeight() {
   const panels = document.getElementById("hm-panels");
-  const top = panels ? panels.getBoundingClientRect().top : 0;
-  const bar = document.querySelector(".hm-bottom-bar");
-  const barH = bar ? bar.getBoundingClientRect().height : 0;
-  // 下部バー(詳細/簡易・期間トグル)がDockに重ならないよう、Dockの実測高さも差し引く。
-  const dock = document.querySelector(".dock-nav");
-  const dockH = dock ? dock.getBoundingClientRect().height : 60;
-  const reserve = barH + dockH + 16; // 下部トグルバー + Dock + 余白
-  return Math.max(320, Math.round(window.innerHeight - top - reserve));
+  const h = panels ? panels.clientHeight : 0;
+  return Math.max(240, Math.round(h));
 }
 
 // ---------------------------------------------------------------------------

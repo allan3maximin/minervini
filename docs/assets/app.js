@@ -762,19 +762,8 @@ function setupYahooFinanceLink(code) {
   link.hidden = false;
 }
 
-// 個別画面のパネル高さ = ビューポート - パネル上端 - 下部タブ - ドック余白。
-// タブは画面下部(パネルの下)に置くので、その高さも差し引く。
-// これで画面全体は縦スクロールせず、各パネル内だけがスクロールする。
-function sizeStockPanels() {
-  const panels = document.getElementById("stock-panels");
-  if (!panels || panels.offsetParent === null) return;
-  const tabs = document.getElementById("stock-tabs");
-  const tabH = tabs ? tabs.getBoundingClientRect().height : 0;
-  const top = panels.getBoundingClientRect().top;
-  const reserve = 92 + tabH; // ドック余白 + 下部タブ
-  const h = Math.max(280, Math.round(window.innerHeight - top - reserve));
-  panels.style.height = h + "px";
-}
+// 個別画面のパネル高さはCSSのapp shell(flex)が決める(JSでの実測上書きは廃止)。
+// bodyがスクロールしない前提で .stock-panels{flex:1;min-height:0} が残り高さを埋める。
 
 // アクティブなタブ表示を切り替える。
 function updateStockActiveTab(panelName) {
@@ -792,7 +781,6 @@ function setupStockPanels() {
   const tabs = document.getElementById("stock-tabs");
   if (!panels || !tabs) return;
 
-  sizeStockPanels();
   panels.scrollLeft = 0; // 常にサマリーから開始
   updateStockActiveTab("summary");
 
@@ -823,28 +811,14 @@ function setupStockPanels() {
     },
     { passive: true }
   );
-
-  window.addEventListener("resize", sizeStockPanels);
 }
 
 // リスト画面(本命/候補/監視)の横スワイプ+タブ。個別画面と同じ仕組みだが
-// 各パネルは縦スクロールを許可する。showViewからstocklist表示時に呼ぶ。
-function sizeListPanels() {
-  const panels = document.getElementById("list-panels");
-  if (!panels || panels.offsetParent === null) return;
-  const tabs = document.getElementById("list-tabs");
-  const tabH = tabs ? tabs.getBoundingClientRect().height : 0;
-  const top = panels.getBoundingClientRect().top;
-  const h = Math.max(280, Math.round(window.innerHeight - top - 92 - tabH));
-  panels.style.height = h + "px";
-}
-
+// 各パネルは縦スクロールを許可する。高さはCSS(flex)が決める。
 function initListView() {
   const panels = document.getElementById("list-panels");
   const tabs = document.getElementById("list-tabs");
   if (!panels || !tabs) return;
-
-  sizeListPanels();
 
   if (panels.dataset.wired) return;
   panels.dataset.wired = "1";
@@ -879,8 +853,6 @@ function initListView() {
     },
     { passive: true }
   );
-
-  window.addEventListener("resize", sizeListPanels);
 }
 
 // ルールベース日本語サマリー (src/report/summary.py が生成した
@@ -2136,11 +2108,14 @@ const VIEWS = ["dashboard", "heatmap", "stocklist", "invest", "positions", "batc
 function showView(hash) {
   const [rawName, param] = hash.split("/");
   const name = VIEWS.includes(rawName) ? rawName : "dashboard";
-  window.scrollTo(0, 0); // ページ切替時に前ビューのスクロール位置を引き継がないようにする
   for (const v of VIEWS) {
     const section = document.getElementById(`view-${v}`);
     if (section) section.hidden = v !== name;
   }
+  // bodyはスクロールしない(app shell)。ビュー自身が縦スクロールを持つので、
+  // ページ切替時に前回のスクロール位置を引き継がないようリセットする。
+  const activeSection = document.getElementById(`view-${name}`);
+  if (activeSection) activeSection.scrollTop = 0;
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.view === name);
   });

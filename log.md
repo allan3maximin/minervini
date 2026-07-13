@@ -2,6 +2,43 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (40): App shell化(bodyスクロール全廃)+Dock/タブ/segmentedのUI統一
+
+### 要望(ユーザー原文)
+> UI/UXを洗練させてくれ。今は微妙に上下スクロールができたりしていて、詰めればスクロールなくせるのに。
+> 基本 銘柄リスト画面、バッチ画面、個別株：サマリー画面、保有画面以外は上下スクロール無しでいける認識。
+> メインのDockと個別株のDock、表やグラフの切り替えのDockボタンのUI/UXを洗練してくれ。
+
+事前確認(AskUserQuestion): メインDock=**アイコン+小ラベル** / 個別株タブ・リストタブ=**Dockと同じ浮いたピル型バーに統一**。
+
+### 変更内容
+- **App shell化** (`style.css`): `body{height:100dvh; overflow:hidden; flex列}` で**bodyは一切スクロールしない**。
+  `main{flex:1; min-height:0; padding-bottom:calc(var(--dock-h)+safe-area)}` でDock分の余白を確保。
+  `.view-section{flex:1; min-height:0; overflow-y:auto}` = 各ビューが必要な時だけ**内部で**縦スクロール
+  (リスト/バッチ/保有/個別サマリー/投資法)。横スワイプ系ビュー(`.hm-view/.stock-view/.list-view`)は
+  `overflow:hidden` で外側スクロールを禁止。`body:has(.dock-nav){padding-bottom:84px}` 削除。
+- **JSの高さ実測を全廃**: `app.js` の `sizeStockPanels()`/`sizeListPanels()`(+resizeリスナー)を削除し、
+  `.stock-panels`/`.list-panels` は `flex:1 1 auto; min-height:0`(CSS)に。`heatmap.js` `heatmapHeight()` は
+  `#hm-panels` の `clientHeight` を返すだけに簡素化(reserve計算・Dock実測とも不要に)。
+  `showView()` の `window.scrollTo(0,0)` → アクティブ`section.scrollTop=0` に変更。
+- **メインDock刷新** (`index.html`+CSS): 各 `.dock-btn` に `<span class="dock-label">`(市況/セクター/リスト/
+  投資法/保有/バッチ)を追加。縦積み(アイコン18px+ラベル9px)56×52px、角丸24/19px、blur(14px)。
+  アクティブ=アクセント淡色ピル+アクセント文字。ホバーの浮き上がりtransform廃止。
+- **タブ統一**: `.stock-tabs`/`.list-tabs` をDockと同じ**半透明の浮いたピル型バー**(rgba(19,23,32,.88)+blur+
+  角丸999、`align-self:center`)に統一。アクティブタブ=アクセント塗り。リストタブはタップ面積広め(padding 6px 22px)。
+- **segmented洗練**: 全segmented(期間1ヶ月〜2年/1日〜60日、詳細簡易、表グラフ、リスク%)をピル型(角丸999、
+  padding 3px)に。アクティブ= `rgba(52,211,153,.16)`+アクセント文字+太字(旧: panel-2+境界線でサイズが跳ねる問題も解消)。
+- **グラフパネルのfit**: 固定px(280/84、モバイル230/74)をやめ、株価:出来高:RS=**5:2:2のflex比率**で
+  残り高さにぴったり配分(`min-height` 120/56px)。チャートはJSが `clientHeight` で生成するので追従。
+  RS無し銘柄では自動で再配分。`[hidden]` カードは `display:none` を明示。
+- キャッシュバスター: style.css v25→26, heatmap.js v15→16, app.js v27→28。
+
+### 検証
+- `node --check` app.js/heatmap.js/batch.js OK。index.html タグbalance(div61/61, section18/18, button31/31)。
+- `sizeStockPanels`/`sizeListPanels` の残存参照0。dock-label×6を確認。
+- 暗号化データのためヘッドレス描画不可 → 実機(iOS Safari)での見た目確認はユーザー側で。
+  特に「グラフパネルが1画面に収まるか」「ヒートマップ下部バーとDockの位置関係」を要チェック。
+
 ## 2026-07-13 (39): 3チャート統合を撤回+Dockを下寄せ+ヒートマップバーをDock上+ファンダ グラフ→表順
 
 ### 要望(ユーザー原文)
