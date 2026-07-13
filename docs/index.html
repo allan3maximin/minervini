@@ -3,50 +3,84 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ミネルヴィニ式スクリーナー</title>
+<title>MinerviniScreener</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=19">
+<link rel="stylesheet" href="assets/style.css?v=21">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-<!-- 起動時パスキーゲート: report.jsonが暗号化されている場合のみ表示される
-     (app.js ensureDataAccess)。解錠までダッシュボードは初期化されない。 -->
-<div id="lock-screen" class="lock-screen" hidden>
+<!-- 起動時パスキーゲート: 初回描画から不透明オーバーレイで全画面を覆い、
+     アクセス判定(暗号化か平文か・鍵の有無)が済むまでダッシュボードを隠す
+     (中身のチラ見え防止)。判定後、平文/解錠済みなら消し、暗号化+未解錠なら
+     パスキー解錠を促す (app.js ensureDataAccess)。 -->
+<div id="lock-screen" class="lock-screen">
   <div class="lock-card">
     <div class="lock-icon">🔐</div>
-    <h2>ミネルヴィニ式スクリーナー</h2>
-    <p class="lock-note">このダッシュボードのデータは暗号化されています。<br>パスキー(Face ID / Touch ID)で解錠してください。</p>
-    <button type="button" id="lock-unlock-btn" class="primary">パスキーで解錠</button>
-    <button type="button" id="lock-setup-btn" class="secondary" hidden>初回セットアップ</button>
+    <h2>MinerviniScreener</h2>
+    <p class="lock-note" id="lock-loading">読み込み中…</p>
+    <p class="lock-note" id="lock-prompt" hidden>このダッシュボードのデータは暗号化されています。<br>パスキー(Face ID / Touch ID)で解錠してください。</p>
+    <button type="button" id="lock-unlock-btn" class="primary" hidden>パスキーで解錠</button>
     <div id="lock-error" class="form-error" hidden></div>
   </div>
 </div>
 <header class="page-header">
   <div class="page-header-top">
-    <h1>ミネルヴィニ式スクリーナー</h1>
+    <h1>MinerviniScreener</h1>
     <div class="page-header-actions">
       <button type="button" id="vault-unlock-btn" class="secondary write-btn passkey-gated">🔓 解錠</button>
-      <button type="button" id="settings-btn" class="secondary passkey-gated">設定</button>
     </div>
   </div>
-  <div id="generated-at" class="meta-line"></div>
-  <div id="breadth-meter" class="breadth-meter"></div>
-  <div id="p1-warning" class="p1-warning" hidden></div>
 </header>
 
 <main>
 
 <section id="view-dashboard" class="view-section">
+  <!-- 統計行(最終更新/通過率など)はダッシュボードのみに表示する -->
+  <div id="generated-at" class="meta-line"></div>
+  <div id="breadth-meter" class="breadth-meter"></div>
+  <div id="p1-warning" class="p1-warning" hidden></div>
+
   <div id="market-signal-card" class="market-signal-card" hidden></div>
   <div id="positions-warning" class="warning-banner" hidden></div>
   <div id="staleness-warning" class="warning-banner" hidden></div>
 
   <section class="market-overview" id="market-overview" hidden>
     <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
+    <p class="tier-note">カードをタップすると各指数の詳細(推移・期間別騰落)を表示します。</p>
     <div id="market-cards" class="market-cards"></div>
     <div id="market-live-meta" class="market-live-meta"></div>
   </section>
 
+  <section class="hm-section">
+    <h2>セクターヒートマップ</h2>
+    <div id="hm-meta" class="meta-line"></div>
+    <div class="hm-toolbar">
+      <div class="segmented" id="hm-view-toggle">
+        <button type="button" data-view="detail" class="active">詳細</button>
+        <button type="button" data-view="simple">簡易</button>
+      </div>
+      <div class="segmented" id="hm-period-toggle">
+        <button type="button" data-period="d1" class="active">1日</button>
+        <button type="button" data-period="d5">5日</button>
+        <button type="button" data-period="d20">20日</button>
+        <button type="button" data-period="d60">60日</button>
+      </div>
+      <div class="hm-legend">
+        <span id="hm-legend-min"></span>
+        <span class="hm-legend-bar"></span>
+        <span id="hm-legend-max"></span>
+        <span class="hm-legend-note">面積=時価総額</span>
+      </div>
+    </div>
+
+    <div id="hm-container" class="hm-container">
+      <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+    </div>
+    <p class="tier-note">タイル面積は時価総額(取得不可の銘柄は最小面積)、色は選択期間の騰落率。タイルタップで銘柄詳細(8条件・未達条件・MA乖離)を表示。「簡易」表示はセクターごとの騰落率のみ。</p>
+  </section>
+</section>
+
+<section id="view-stocklist" class="view-section" hidden>
   <section class="tier-section">
     <h2>〔本命〕ファンダ強度確認済み</h2>
     <p class="tier-note">VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上(Minervini Code 33準拠)を満たした銘柄。</p>
@@ -64,33 +98,6 @@
     <p class="tier-note">トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだエントリーできない銘柄。ベースが検出されると上の〔候補〕/〔本命〕に昇格します。全件RS降順。</p>
     <div id="watchlist-tier-body"></div>
   </section>
-</section>
-
-<section id="view-sectormap" class="view-section" hidden>
-  <div id="hm-meta" class="meta-line"></div>
-  <div class="hm-toolbar">
-    <div class="segmented" id="hm-view-toggle">
-      <button type="button" data-view="detail" class="active">詳細</button>
-      <button type="button" data-view="simple">簡易</button>
-    </div>
-    <div class="segmented" id="hm-period-toggle">
-      <button type="button" data-period="d1" class="active">1日</button>
-      <button type="button" data-period="d5">5日</button>
-      <button type="button" data-period="d20">20日</button>
-      <button type="button" data-period="d60">60日</button>
-    </div>
-    <div class="hm-legend">
-      <span id="hm-legend-min"></span>
-      <span class="hm-legend-bar"></span>
-      <span id="hm-legend-max"></span>
-      <span class="hm-legend-note">面積=時価総額</span>
-    </div>
-  </div>
-
-  <div id="hm-container" class="hm-container">
-    <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
-  </div>
-  <p class="tier-note">タイル面積は時価総額(取得不可の銘柄は最小面積)、色は選択期間の騰落率。タイルタップで銘柄詳細(8条件・未達条件・MA乖離)を表示。「簡易」表示はセクターごとの騰落率のみ。</p>
 </section>
 
 <section id="view-invest" class="view-section" hidden>
@@ -167,7 +174,6 @@
 </section>
 
 <section id="view-stock" class="view-section" hidden>
-  <a class="back-link" href="#dashboard">&larr; ダッシュボードに戻る</a>
   <h1 id="stock-title"></h1>
   <div id="stock-meta" class="meta-chips"></div>
   <div id="stock-summary" class="stock-summary" hidden></div>
@@ -251,19 +257,19 @@
 
 <nav class="dock-nav" id="dock-nav">
   <button type="button" class="dock-btn" data-view="dashboard" title="ダッシュボード" aria-label="ダッシュボード"><i class="bi bi-speedometer2 dock-icon"></i></button>
-  <button type="button" class="dock-btn" data-view="sectormap" title="セクターマップ" aria-label="セクターマップ"><i class="bi bi-grid-3x3-gap-fill dock-icon"></i></button>
+  <button type="button" class="dock-btn" data-view="stocklist" title="銘柄リスト" aria-label="銘柄リスト"><i class="bi bi-list-ul dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="invest" title="投資法" aria-label="投資法"><i class="bi bi-journal-text dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="positions" title="保有" aria-label="保有"><i class="bi bi-briefcase-fill dock-icon"></i></button>
   <button type="button" class="dock-btn" data-view="batch" title="バッチ実行" aria-label="バッチ実行"><i class="bi bi-gear-fill dock-icon"></i></button>
 </nav>
 
 <script src="assets/config.js?v=7"></script>
-<script src="assets/secure-fetch.js?v=1"></script>
+<script src="assets/secure-fetch.js?v=2"></script>
 <script src="assets/github-api.js?v=6"></script>
 <script src="assets/webauthn-vault.js?v=6"></script>
 <script src="assets/fundamentals-modal.js?v=8"></script>
-<script src="assets/heatmap.js?v=9"></script>
+<script src="assets/heatmap.js?v=11"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=21"></script>
+<script src="assets/app.js?v=23"></script>
 </body>
 </html>

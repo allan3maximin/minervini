@@ -2,6 +2,51 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (35): フロントエンド大規模リファクタ(画面役割見直し+UX改善11件)
+
+### 要望(ユーザー原文、要約)
+> ①「ダッシュボードに戻る」リンク不要 ②サマリーをポジ(緑)/ネガ(赤)/中立(色なし)で色分け
+> ③ファンダを既存表とビジュアルグラフ(新規)で切替 ④サイト名を MinerviniScreener に
+> ⑤初回セットアップ/設定ボタン削除 ⑥初回描画でパスキー未通過時に画面をチラ見えさせない
+> ⑦パスキーはアクセス時に要求 ⑧リロード時はできれば再認証なし(必要ならボタン表示可)
+> ⑨ヒートマップがスマホ上下スクロールで動く(配置変化)のを固定 ⑩統計行はダッシュボードのみ表示
+> ⑪画面役割見直し: ダッシュボード=市況+ヒートマップ / 銘柄リストを新規作成 /
+>   ヒートマップタブは消してダッシュボードに寄せる / 市況カードもクリックで詳細表示
+
+事前確認(AskUserQuestion): パスキー永続化は sessionStorage に読み取り用データ鍵を保持(推奨) /
+ファンダグラフは EPS+売上の推移バー+YoY(推奨)。
+
+### 変更内容
+- `docs/index.html`: title/h1を MinerviniScreener に。設定ボタン削除(vault-unlock🔓は維持)。
+  lock-screen を既定表示のスプラッシュ(不透明・全面・z1000)化しチラ見え防止。統計行
+  (generated-at/breadth-meter/p1-warning)を view-dashboard 内へ移動。市況の下に
+  `.hm-section`(セクターヒートマップ)を統合、view-sectormap を削除。`view-stocklist` を新規追加
+  (本命/候補/監視の3ティア)。Dockの sectormap→stocklist(list-ul)。view-stockの戻るリンク削除。
+  cache-buster: style.css?v=21 / heatmap.js?v=11 / app.js?v=23。
+- `docs/assets/secure-fetch.js`(前回セッションで対応済): sessionStorage("minervini-dk")に
+  読み取り用データ鍵を保持、restoreDataKey()でリロード時パスキーレス解錠。
+- `docs/assets/app.js`:
+  - VIEWS を dashboard/stocklist/invest/positions/batch/stock に。showView の dashboard 表示で initHeatmap()。
+  - ensureDataAccess: 起動時 restoreDataKey()→report.json封筒判定→未解錠なら lock-prompt+解錠ボタン表示。
+  - renderStockSummary: `summary-item-{positive|negative|neutral}` を付与。cautionsは常にネガ、
+    pointsは NEUTRAL_POINT_PREFIXES(時価総額/市場/次回決算等)なら中立、他はポジ。
+  - renderMarketOverview: 市況カードを role=button 化+イベント委譲、`MARKET_ENTRIES` に key→entry 保持。
+    `openMarketModal(key)` を新規実装(現在値/前日比/大スパークライン/期間別騰落(series から算出)/レンジ)。
+  - renderStockFundamentals: 表/グラフの `.segmented` トグル追加(設定は localStorage "minervini-fund-view")。
+    `fundChartHtml`/`fundBarPanel`(EPS・売上の推移バー、色=YoY正負、直近8Q)を新規実装。
+- `docs/assets/heatmap.js`: `lastRenderWidth` を導入。resize は幅が変わった時のみ再描画
+  (スマホのアドレスバー開閉による innerHeight 変化=スクロールでは再描画せず、ブロックが動かない)。
+- `docs/assets/style.css`: summary-item トーン色 / market-card[role=button] hover・focus /
+  market-modal 系 / fund-view トグル・fund-chart(bar/legend) / .hm-section の余白 を追加。
+
+### 検証
+- `node --check` を app.js / heatmap.js / secure-fetch.js に実行 → 全てOK。
+- 純粋関数の単体スモーク(node): fundChartHtml が有効なSVGを出力 / periodChange(d1,d5,データ不足)/
+  marketBigSparkline を確認 → 期待通り。
+- 未実施: ブラウザ実描画確認。data/*.json が AES-GCM 封筒で WebAuthn パスキー解錠が必須のため、
+  ヘッドレス環境では実データでの画面確認ができない。次回、実機(iOS Safari/パスキー)で
+  市況モーダル・ファンダグラフ切替・サマリー色分け・ヒートマップのスクロール固定を目視確認すること。
+
 ## 2026-07-13 (34): VCP MUST条件(V1〜V7)の許容度緩和 — 「壊れたベースの排除」のみに限定
 
 ### 要望(ユーザー原文、要約)

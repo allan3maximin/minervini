@@ -9,6 +9,10 @@ let currentView = "detail"; // "detail" (既存treemap) | "simple" (セクター
 // (非表示中はcontainerの幅が0でtreemapが描けないため、表示時に再計算・再描画
 // する必要がある)。イベントリスナーの重複登録だけは防ぐためのフラグ。
 let hmWired = false;
+// 直近レンダリング時のコンテナ幅。スマホでスクロールするとアドレスバーの
+// 表示/非表示で innerHeight が変わり resize が発火するが、幅が変わらない限り
+// treemapを再描画しない(=ブロックが動かない)ためのガード。
+let lastRenderWidth = 0;
 
 // 期間ごとの色クランプ(±%): これを超える騰落率は最濃色で飽和
 const COLOR_CLAMP = { d1: 3, d5: 6, d20: 12, d60: 25 };
@@ -66,7 +70,12 @@ async function initHeatmap() {
     let resizeTimer = null;
     window.addEventListener("resize", () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(render, 150);
+      resizeTimer = setTimeout(() => {
+        // 幅が変わっていなければ(=スクロールに伴う高さ変化だけなら)再描画しない。
+        const c = document.getElementById("hm-container");
+        const w = c ? c.clientWidth : 0;
+        if (w && w !== lastRenderWidth) render();
+      }, 150);
     });
 
     hmWired = true;
@@ -180,6 +189,7 @@ function render() {
   container.innerHTML = "";
 
   const W = container.clientWidth;
+  lastRenderWidth = W; // resize時の幅変化判定用に記録
   // 画面高さの約90%を使う(スマホでも可能な限り大きく)。
   const H = Math.max(480, Math.round(window.innerHeight * 0.9));
   container.style.height = H + "px";

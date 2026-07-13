@@ -102,7 +102,6 @@ async function initDashboard() {
   if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
     hidePasskeyAuthUi();
   } else {
-    wireHeaderButtons();
     if (window.MinerviniFundamentalsUI) {
       window.MinerviniFundamentalsUI.onSaved = initDashboard;
     }
@@ -147,14 +146,6 @@ function hidePasskeyAuthUi() {
   document.querySelectorAll(".passkey-gated").forEach((el) => {
     el.style.display = "none";
   });
-}
-
-function wireHeaderButtons() {
-  const settingsBtn = document.getElementById("settings-btn");
-  if (settingsBtn && !settingsBtn.dataset.wired) {
-    settingsBtn.dataset.wired = "1";
-    settingsBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: true }));
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +259,9 @@ function shortDate(dateStr) {
   return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
 }
 
+// 指数カードのクリック時に詳細モーダルへ渡すためのkey→entryマップ(描画毎に再構築)。
+let MARKET_ENTRIES = {};
+
 function renderMarketOverview(indices) {
   const section = document.getElementById("market-overview");
   const cards = document.getElementById("market-cards");
@@ -275,12 +269,15 @@ function renderMarketOverview(indices) {
   if (!indices || !indices.indices || !indices.indices.length) return; // stays hidden
 
   const staleKeys = new Set(indices.stale_keys || []);
+  // クリック時にモーダルへ渡すため、key→entry を保持しておく。
+  MARKET_ENTRIES = {};
   cards.innerHTML = indices.indices
     .map((entry) => {
+      MARKET_ENTRIES[entry.key] = entry;
       const isUp = (entry.change ?? 0) >= 0;
       const stale = staleKeys.has(entry.key);
       return `
-        <div class="market-card${stale ? " is-stale" : ""}">
+        <div class="market-card${stale ? " is-stale" : ""}" role="button" tabindex="0" data-market-key="${escapeHtml(entry.key)}">
           <div class="market-card-name">${entry.name}${stale ? '<span class="stale-badge" title="最新データの取得に失敗（キャッシュ表示）">stale</span>' : ""}</div>
           <div class="market-card-value">${formatIndexValue(entry)}</div>
           <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
@@ -291,11 +288,117 @@ function renderMarketOverview(indices) {
     .join("");
   section.hidden = false;
 
+  // カードクリック/Enterで指数の詳細モーダルを開く(イベント委譲で一度だけ登録)。
+  if (!cards.dataset.wired) {
+    cards.dataset.wired = "1";
+    cards.addEventListener("click", (e) => {
+      const card = e.target.closest(".market-card[data-market-key]");
+      if (card) openMarketModal(card.dataset.marketKey);
+    });
+    cards.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const card = e.target.closest(".market-card[data-market-key]");
+      if (card) { e.preventDefault(); openMarketModal(card.dataset.marketKey); }
+    });
+  }
+
   const meta = document.getElementById("market-live-meta");
   if (meta && indices.generated_at) {
     const when = new Date(indices.generated_at).toLocaleTimeString("ja-JP");
     meta.textContent = `指数データ取得: ${when} 時点`;
   }
+}
+
+// series(={t,v}[])から n営業日前比の騰落を算出。unit=="%"(金利)はpt差、それ以外は%。
+function periodChange(entry, days) {
+  const s = entry.series || [];
+  if (s.length < days + 1) return null;
+  const last = s[s.length - 1].v;
+  const past = s[s.length - 1 - days].v;
+  if (last == null || past == null) return null;
+  if (entry.unit === "%") return { txt: (last - past >= 0 ? "+" : "") + (last - past).toFixed(3) + "pt", up: last - past >= 0 };
+  const pct = past !== 0 ? (last / past - 1) * 100 : 0;
+  return { txt: (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%", up: pct >= 0 };
+}
+
+function closeMarketModal() {
+  const el = document.getElementById("market-modal");
+  if (el) el.remove();
+}
+
+// 指数カードのクリックで詳細(現在値/前日比/大きめスパークライン/期間別騰落/レンジ)を表示。
+function openMarketModal(key) {
+  const entry = MARKET_ENTRIES[key];
+  if (!entry) return;
+  closeMarketModal();
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "market-modal";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeMarketModal();
+  });
+
+  const isUp = (entry.change ?? 0) >= 0;
+  const periods = [
+    { d: 1, label: "1日" },
+    { d: 5, label: "1週" },
+    { d: 20, label: "1ヶ月" },
+    { d: 60, label: "3ヶ月" },
+  ];
+  const chips = periods
+    .map((p) => {
+      const c = periodChange(entry, p.d);
+      const val = c ? c.txt : "-";
+      const cls = c ? (c.up ? "chg-up" : "chg-down") : "";
+      return `<span class="chip"><span class="chip-label">${p.label}</span><span class="chip-value ${cls}">${val}</span></span>`;
+    })
+    .join("");
+
+  const vals = (entry.series || []).map((p) => p.v).filter((v) => v != null);
+  let rangeHtml = "";
+  if (vals.length) {
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const fmt = (v) => (entry.unit === "%" ? v.toFixed(3) + "%" : v.toLocaleString("ja-JP", { maximumFractionDigits: 2 }));
+    rangeHtml = `<h4>期間レンジ(直近${vals.length}営業日)</h4><p class="market-modal-range">安値 ${fmt(lo)} 〜 高値 ${fmt(hi)}</p>`;
+  }
+
+  // 大きめスパークライン(カードの120x32より大)。
+  const bigSpark = marketBigSparkline(entry.series, isUp);
+
+  overlay.innerHTML = `
+    <div class="modal-box market-modal-box">
+      <div class="hm-popup-head">
+        <h3>${escapeHtml(entry.name)}</h3>
+        <button type="button" class="secondary" id="market-modal-close">閉じる</button>
+      </div>
+      <div class="market-modal-value">${formatIndexValue(entry)}</div>
+      <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
+      ${bigSpark}
+      <h4>期間別騰落</h4>
+      <div class="meta-chips">${chips}</div>
+      ${rangeHtml}
+      <p class="market-modal-date">最終データ: ${entry.last_date || "-"}</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("market-modal-close").addEventListener("click", closeMarketModal);
+}
+
+function marketBigSparkline(series, isUp) {
+  const points = (series || []).map((p) => p.v).filter((v) => v != null);
+  if (points.length < 2) return "";
+  const w = 320;
+  const h = 96;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const step = w / (points.length - 1);
+  const coords = points
+    .map((v, i) => `${(i * step).toFixed(1)},${(h - 4 - ((v - min) / span) * (h - 8)).toFixed(1)}`)
+    .join(" ");
+  const color = isUp ? "var(--accent)" : "var(--danger)";
+  return `<svg class="market-modal-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -662,21 +765,34 @@ function renderStockSummary(stock) {
   head.textContent = s.headline;
   el.appendChild(head);
 
+  // ポジ/ネガで色分け: cautions(注意点)は常にネガティブ(赤)。points は原則
+  // ポジティブ(緑)だが、時価総額・市場・次回決算などの中立な事実は色なし。
   const lists = [
-    { items: s.points, className: "summary-points", prefix: "" },
-    { items: s.cautions, className: "summary-cautions", prefix: "⚠ " },
+    { items: s.points, className: "summary-points", prefix: "", tone: pointTone },
+    { items: s.cautions, className: "summary-cautions", prefix: "⚠ ", tone: () => "negative" },
   ];
-  for (const { items, className, prefix } of lists) {
+  for (const { items, className, prefix, tone } of lists) {
     if (!Array.isArray(items) || !items.length) continue;
     const ul = document.createElement("ul");
     ul.className = className;
     for (const text of items) {
       const li = document.createElement("li");
+      li.className = "summary-item summary-item-" + tone(text);
       li.textContent = prefix + text;
       ul.appendChild(li);
     }
     el.appendChild(ul);
   }
+}
+
+// point 文の中で「中立な事実」を判定する接頭辞(時価総額/市場区分/次回決算など)。
+// これらは色を付けず、それ以外の point はポジティブ(緑)として扱う。
+const NEUTRAL_POINT_PREFIXES = ["時価総額", "市場", "次回決算", "EPS YoY推移", "予想PER", "会社計画", "セクター"];
+
+function pointTone(text) {
+  const t = String(text || "");
+  if (NEUTRAL_POINT_PREFIXES.some((p) => t.startsWith(p))) return "neutral";
+  return "positive";
 }
 
 function renderStockMeta(stock) {
@@ -742,6 +858,75 @@ function formatRevenue(v) {
   return `${(Number(v) / 100000000).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}億円`;
 }
 
+// ファンダの表/グラフ表示切替の設定を localStorage に保持(引数ありでset)。
+const FUND_VIEW_KEY = "minervini-fund-view";
+function fundViewPref(v) {
+  if (v != null) {
+    try { localStorage.setItem(FUND_VIEW_KEY, v); } catch (e) {}
+    return v;
+  }
+  let stored = "table";
+  try { stored = localStorage.getItem(FUND_VIEW_KEY) || "table"; } catch (e) {}
+  return stored === "chart" ? "chart" : "table";
+}
+
+// EPS・売上高の推移バーチャート(YoY色分け付き)をSVGで生成する。
+// 直近最大8四半期を古い→新しい順(左→右)で描画。棒の色は前年同期比の
+// 正負(緑/赤)、YoYが無い期は中立色。EPSと売上は単位が違うので別パネル。
+function fundBarPanel(title, quarters, byQuarter, valueOf, fmt, yoyMetric) {
+  const qs = quarters.slice(-8);
+  if (!qs.length) return "";
+  const vals = qs.map(valueOf).filter((v) => v != null);
+  if (!vals.length) return "";
+  const maxV = Math.max(...vals, 0);
+  const minV = Math.min(...vals, 0);
+  const range = maxV - minV || 1;
+
+  const w = 320;
+  const h = 150;
+  const padTop = 22;
+  const padBottom = 30;
+  const plotH = h - padTop - padBottom;
+  const zeroY = padTop + (maxV / range) * plotH; // 0 の位置
+  const slot = w / qs.length;
+  const barW = Math.min(28, slot * 0.6);
+
+  const bars = qs
+    .map((q, i) => {
+      const v = valueOf(q);
+      if (v == null) return "";
+      const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+      const yoy = growthPct(yoyMetric(q), prev ? yoyMetric(prev) : null);
+      const fill = yoy == null ? "var(--text-dim)" : yoy > 0 ? "var(--accent)" : yoy < 0 ? "var(--danger)" : "var(--text-dim)";
+      const cx = slot * i + slot / 2;
+      const vH = (Math.abs(v) / range) * plotH;
+      const y = v >= 0 ? zeroY - vH : zeroY;
+      const label = escapeHtml(q.fiscal_quarter.replace(/^\d{2}/, ""));
+      const yoyTxt = yoy == null ? "" : `<text x="${cx.toFixed(1)}" y="${(y - 4).toFixed(1)}" class="fund-bar-yoy" text-anchor="middle" fill="${fill}">${formatYoy(yoy)}</text>`;
+      return `
+        <rect x="${(cx - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, vH).toFixed(1)}" rx="2" fill="${fill}" opacity="0.85"/>
+        ${yoyTxt}
+        <text x="${cx.toFixed(1)}" y="${(h - 14).toFixed(1)}" class="fund-bar-x" text-anchor="middle">${label}</text>`;
+    })
+    .join("");
+
+  return `
+    <div class="fund-chart-panel">
+      <div class="fund-chart-title">${title}</div>
+      <svg viewBox="0 0 ${w} ${h}" class="fund-bar-svg" preserveAspectRatio="xMidYMid meet" role="img">
+        <line x1="0" y1="${zeroY.toFixed(1)}" x2="${w}" y2="${zeroY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        ${bars}
+      </svg>
+    </div>`;
+}
+
+function fundChartHtml(quarters, byQuarter) {
+  const eps = fundBarPanel("EPS 推移(棒=EPS / 色=前年同期比)", quarters, byQuarter, (q) => q.eps, formatEps, (q) => q.eps);
+  const rev = fundBarPanel("売上高 推移(棒=売上高 / 色=前年同期比)", quarters, byQuarter, (q) => (q.revenue == null ? null : q.revenue / 1e8), formatRevenue, (q) => q.revenue);
+  if (!eps && !rev) return '<p class="tier-note">グラフ化できるデータがありません。</p>';
+  return `<div class="fund-chart-wrap">${eps}${rev}<p class="fund-chart-legend"><span class="lg-up">■</span> 前年同期比プラス　<span class="lg-down">■</span> マイナス　<span class="lg-neutral">■</span> 前年同期比なし</p></div>`;
+}
+
 async function renderStockFundamentals(code, name, reportGeneratedAt) {
   const container = document.getElementById("fund-detail-body");
   if (!container) return;
@@ -794,18 +979,44 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
       ? `<p class="tier-note">確認日: ${escapeHtml(entry.checked_date)}</p>`
       : "";
 
+    // 表 / グラフ の切替(設定はlocalStorageに保持)。
+    const view = fundViewPref();
     container.innerHTML = `
       ${btnHtml}
-      <div class="table-scroll">
-        <table class="fund-table fund-detail-table">
-          <thead>
-            <tr><th>会計四半期</th><th>EPS</th><th>EPS前年同期比</th><th>売上高</th><th>売上高前年同期比</th></tr>
-          </thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
+      <div class="fund-view-toggle segmented" role="tablist">
+        <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
+        <button type="button" class="${view === "chart" ? "active" : ""}" data-fund-view="chart">グラフ</button>
+      </div>
+      <div id="fund-view-table" class="fund-view-panel"${view === "chart" ? " hidden" : ""}>
+        <div class="table-scroll">
+          <table class="fund-table fund-detail-table">
+            <thead>
+              <tr><th>会計四半期</th><th>EPS</th><th>EPS前年同期比</th><th>売上高</th><th>売上高前年同期比</th></tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+      <div id="fund-view-chart" class="fund-view-panel"${view === "table" ? " hidden" : ""}>
+        ${fundChartHtml(quarters, byQuarter)}
       </div>
       ${metaLine}
     `;
+
+    const toggle = container.querySelector(".fund-view-toggle");
+    if (toggle) {
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-fund-view]");
+        if (!btn) return;
+        const v = btn.dataset.fundView;
+        fundViewPref(v);
+        toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+        const tbl = container.querySelector("#fund-view-table");
+        const cht = container.querySelector("#fund-view-chart");
+        if (tbl) tbl.hidden = v !== "table";
+        if (cht) cht.hidden = v !== "chart";
+      });
+    }
   }
 
   const editBtn = document.getElementById("fund-detail-edit-btn");
@@ -1782,7 +1993,7 @@ async function initPositionsView() {
 // (Dockメニューには出さない、ダッシュボードからのドリルダウン専用ビュー)。
 // ---------------------------------------------------------------------------
 
-const VIEWS = ["dashboard", "sectormap", "invest", "positions", "batch", "stock"];
+const VIEWS = ["dashboard", "stocklist", "invest", "positions", "batch", "stock"];
 
 function showView(hash) {
   const [rawName, param] = hash.split("/");
@@ -1795,7 +2006,9 @@ function showView(hash) {
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.view === name);
   });
-  if (name === "sectormap" && typeof initHeatmap === "function") {
+  // ヒートマップはダッシュボードに統合された。コンテナが見えて初めて
+  // clientWidthが正しく取れるため、ダッシュボード表示のたびに再init。
+  if (name === "dashboard" && typeof initHeatmap === "function") {
     initHeatmap();
   }
   if (name === "batch" && window.MinerviniBatch) {
@@ -1832,6 +2045,15 @@ function initRouter() {
 // ---------------------------------------------------------------------------
 
 async function ensureDataAccess() {
+  const overlay = document.getElementById("lock-screen");
+  const hideOverlay = () => { if (overlay) overlay.hidden = true; };
+
+  // リロード時: sessionStorageに保持した読み取り用データ鍵で先に解錠を試みる
+  // (パスキー不要)。成功すればこのままゲートを素通しできる。
+  if (!window.MinerviniData.hasDataKey()) {
+    try { await window.MinerviniData.restoreDataKey(); } catch (e) { /* 無視 */ }
+  }
+
   let probe = null;
   try {
     const resp = await fetch("data/report.json", { cache: "no-store" });
@@ -1839,15 +2061,23 @@ async function ensureDataAccess() {
   } catch (e) {
     probe = null;
   }
-  if (!window.MinerviniData.isEnvelope(probe)) return; // 平文 or 取得不能 → ゲート不要
-  if (window.MinerviniData.hasDataKey()) return;
 
-  const overlay = document.getElementById("lock-screen");
+  // 平文 or 取得不能、または既に鍵あり(復元成功含む) → ゲート不要。
+  // オーバーレイ(初期描画から出しっぱなしのスプラッシュ)を消して素通し。
+  if (!window.MinerviniData.isEnvelope(probe) || window.MinerviniData.hasDataKey()) {
+    hideOverlay();
+    return;
+  }
+
+  // 暗号化+未解錠 → アクセスしたこのタイミングでパスキー解錠を促す。
+  const loadingEl = document.getElementById("lock-loading");
+  const promptEl = document.getElementById("lock-prompt");
   const unlockBtn = document.getElementById("lock-unlock-btn");
-  const setupBtn = document.getElementById("lock-setup-btn");
   const errEl = document.getElementById("lock-error");
+  if (loadingEl) loadingEl.hidden = true;
+  if (promptEl) promptEl.hidden = false;
+  if (unlockBtn) unlockBtn.hidden = false;
   if (!overlay || !unlockBtn) return;
-  overlay.hidden = false;
 
   let vault = null;
   try {
@@ -1855,7 +2085,6 @@ async function ensureDataAccess() {
   } catch (e) {
     /* 取得失敗は解錠ボタン押下時に再試行する */
   }
-  if (!vault && setupBtn) setupBtn.hidden = false;
 
   await new Promise((resolve) => {
     function check() {
@@ -1875,7 +2104,7 @@ async function ensureDataAccess() {
       try {
         if (!vault) vault = await window.MinerviniVault.fetchVault();
         if (!vault) {
-          throw new Error("保管庫(vault.json)がまだありません。「初回セットアップ」を実行してください。");
+          throw new Error("保管庫(vault.json)がまだありません。GitHub上でセットアップしてください。");
         }
         const result = await window.MinerviniVault.unlock(vault);
         if (!result || !result.hasDataKey) {
@@ -1899,12 +2128,6 @@ async function ensureDataAccess() {
         unlockBtn.textContent = original;
       }
     });
-
-    if (setupBtn) {
-      setupBtn.addEventListener("click", () => {
-        window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: !!vault });
-      });
-    }
   });
 }
 
