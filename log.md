@@ -2,6 +2,42 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (38): 不要要素削除+3チャート統合+期間トグル1行+ヒートマップ拡大+タブ改名
+
+### 要望(ユーザー原文)
+> [不要] セクターヒートマップ見出し/最終更新メタ, ダッシュボードの最終更新行, -3%/+3%凡例,
+> フッター「既知の制約…」  [修正] 1日〜60日の20/60が2行→1行に, ヒートマップをもっと大きく,
+> 株価移動平均線・出来高・RSラインを1つのグラフに(3つは縦を取りすぎ), サイジング→ロット, MUST→テンプレ
+
+### 変更内容
+- `docs/index.html`:
+  - ダッシュボードの `#generated-at`(最終更新/ユニバース/通過数) を削除。
+  - ヒートマップの `.hm-head`(h2「セクターヒートマップ」+ `#hm-meta`) を削除。
+  - 下部バーの `.hm-legend`(-3%/+3%凡例) を削除。
+  - `<footer class="page-footer">`(既知の制約…) を削除。
+  - グラフパネル: 3枚の `.chart-card`(株価/出来高/RS)を1枚に統合。`#chart-container` のみ残し
+    `.chart-box-tall` を付与。`#volume-container`/`#rs-container`/`#volume-card`/`#rs-card` 削除。
+    chart-card-head の h2「株価・移動平均線」も削除(凡例 `#ohlc-legend` のみ)。
+  - タブ改名: `MUST`→`テンプレ`, `サイジング`→`ロット`(data-panel は must/sizing のまま=ロジック非依存)。
+- `docs/assets/app.js` `renderCharts()`:
+  - LightweightCharts v4 のオーバーレイ価格スケールで1チャートに統合。
+    ローソク+MAはメイン右軸(scaleMargins top .06/bottom .26)、出来高は独立スケール `vol`
+    (top .8/bottom 0)で下段固定、RSは独立スケール `rs`(株価領域に重畳)。
+  - `volChart`/`rsChart`/`syncTimeScales` 廃止(単一チャート)。日付ラベル/resizeも priceChart のみ。
+  - `renderHeader()` の `#generated-at` を null ガード。
+- `docs/assets/heatmap.js`:
+  - `heatmapHeight()` の reserve を `barH+96`→`barH+58`、最小 320→360 に(見出し/凡例削除分でマップ拡大)。
+  - `#hm-meta`/`updateLegend` は既存の null ガードで安全(要素削除に追従)。
+- `docs/assets/style.css`:
+  - `.hm-bottom-bar .segmented { flex-wrap:nowrap }` + ボタン `white-space:nowrap` で期間トグルを1行固定。
+  - `.stock-panel .chart-box-tall { height:460px }`(モバイル `66vh`/min 380px)を追加。
+- キャッシュバスター: style.css v23→24, heatmap.js v13→14, app.js v25→26。
+
+### 検証
+- `node --check` app.js/heatmap.js OK。HTMLタグ balance div57/57・section16/16・footer0/0。
+- 削除要素(generated-at/hm-head/hm-legend/page-footer/volume-container/rs-container)の残存0を確認。
+- 暗号化データのためヘッドレス描画不可 → 実機(iOS Safari)での見た目確認はユーザー側で。
+
 ## 2026-07-13 (37): タブ下部化+ヒートマップ横スワイプ+ドックをスライド画面切替+解錠ボタン削除(6件)
 
 ### 要望(ユーザー原文)

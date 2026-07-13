@@ -134,8 +134,8 @@ function heatmapHeight() {
   const top = panels ? panels.getBoundingClientRect().top : 0;
   const bar = document.querySelector(".hm-bottom-bar");
   const barH = bar ? bar.getBoundingClientRect().height : 0;
-  const reserve = barH + 96; // 下部トグルバー + ドック余白
-  return Math.max(320, Math.round(window.innerHeight - top - reserve));
+  const reserve = barH + 58; // 下部トグルバー + ドック余白(見出し/凡例削除でマップを拡大)
+  return Math.max(360, Math.round(window.innerHeight - top - reserve));
 }
 
 // ---------------------------------------------------------------------------
