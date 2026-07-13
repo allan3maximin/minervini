@@ -57,6 +57,7 @@ a { color: var(--link); }
 /* ---------------------------------------------------------------- header */
 
 .page-header { flex: 0 0 auto; margin-bottom: 10px; }
+.page-header[hidden] { display: none; }
 .meta-line { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; }
 
 .page-header-top {
@@ -783,6 +784,14 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .hm-sector-name { font-weight: 700; color: var(--text); }
 .hm-sector-info { color: var(--text-dim); }
+/* セクター見出しはタップで拡大/縮小するため、この行だけクリックを受け取る */
+.hm-sector-head-zoom {
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hm-sector-head-zoom:hover { background: rgba(0, 0, 0, 0.62); }
+.hm-zoom-head .hm-sector-name { color: var(--accent); }
 .hm-rs-pos { color: var(--accent); font-weight: 700; }
 .hm-rs-neg { color: #f87171; font-weight: 700; }
 
@@ -1065,73 +1074,54 @@ a.nav-btn:hover { border-color: var(--link); }
 /* タブの見た目は .stock-tabs と共通(上のピル型バー定義)。本命/候補/監視は3つ
    だけなのでタップ面積を広めに。 */
 .list-tab { padding: 6px 22px; font-size: 13px; }
+/* パネルは横スワイプで切り替えない。activeなパネルだけ表示し、切替はタブのみ。 */
 .list-panels {
-  display: flex;
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   margin-top: 10px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
 }
-.list-panels::-webkit-scrollbar { display: none; }
-.list-panel {
-  flex: 0 0 100%;
-  width: 100%;
-  box-sizing: border-box;
-  scroll-snap-align: start;
-  /* 縦横ともこのパネル自身がスクロールコンテナになる。こうすると
-     thead(top sticky)とコード/銘柄名列(left sticky)が両方効く。 */
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0 2px 12px;
-}
+.list-panel { display: none; height: 100%; box-sizing: border-box; }
+.list-panel.active { display: flex; flex-direction: column; }
+/* tier-sectionを縦flex化: 見出し・注記は固定、本文だけがスクロールする
+   (=横スクロールしても見出しが揺れない)。 */
 .list-panel .tier-section {
   margin-bottom: 0;
-  /* 表(min-width 760px)がカード背景からはみ出さないよう、カード自体を
-     コンテンツ幅まで広げる(横スクロールは.list-panelが担当)。 */
-  width: max-content;
-  min-width: 100%;
-  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
-/* 見出し・注記は横スクロールしても左端に留める */
 .list-panel .tier-section > h2,
-.list-panel .tier-note,
-.list-panel .status-section > h3 {
-  position: sticky;
-  left: 0;
-  max-width: min(680px, calc(100vw - 48px));
+.list-panel .tier-note { flex: 0 0 auto; }
+/* 本文(表の入る領域)がこのパネルの唯一のスクロールコンテナ。
+   縦(行)と横(列)の両方をここでスクロールさせ、thead/銘柄名列をstickyにする。 */
+.list-panel [id$="-tier-body"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
-/* パネル自身が横スクロールするので、内側のtable-scrollはただの枠にする */
-.list-panel .table-scroll { overflow: visible; width: max-content; min-width: 100%; }
+/* 本文がスクロールコンテナなので内側のtable-scrollはただの枠に(枠線は二重になるため消す) */
+.list-panel .table-scroll { overflow: visible; border: none; border-radius: 0; }
 
-/* スクロールしても列名(thead)とコード/銘柄名列が見えるように sticky 固定。
-   スクロールコンテナは .list-panel。 */
+/* スクロールしても列名(thead)と銘柄名列が見えるように sticky 固定。
+   スクロールコンテナは *-tier-body。固定するのは1列目(銘柄名)のみ。 */
 .tier-table th { top: 0; z-index: 3; }
-.tier-table th:nth-child(1), .tier-table td:nth-child(1),
-.tier-table th:nth-child(2), .tier-table td:nth-child(2) {
-  position: sticky;
-  background: var(--panel);
-}
 .tier-table th:nth-child(1), .tier-table td:nth-child(1) {
+  position: sticky;
   left: 0;
-  width: 66px;
-  min-width: 66px;
-  max-width: 66px;
+  background: var(--panel);
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tier-table th:nth-child(2), .tier-table td:nth-child(2) { left: 66px; }
-/* 左上の角セル(コード/銘柄名の列名)は縦横両方の交点なので最前面 */
-.tier-table th:nth-child(1), .tier-table th:nth-child(2) {
-  z-index: 4;
-  background: var(--panel-2);
-}
+/* 左上の角セル(銘柄名の列名)は縦横両方の交点なので最前面 */
+.tier-table th:nth-child(1) { z-index: 4; background: var(--panel-2); }
 /* fund-stale行のsticky列はtr背景(半透明アンバー)が透けないため近似色で塗る */
-.tier-table tr.fund-stale td:nth-child(1),
-.tier-table tr.fund-stale td:nth-child(2) { background: #232219; }
+.tier-table tr.fund-stale td:nth-child(1) { background: #232219; }
 
 /* ------------------------------------------------------- 投資法ページ */
 
@@ -1261,6 +1251,16 @@ a.nav-btn:hover { border-color: var(--link); }
 .summary-item-neutral { color: var(--text-dim); }
 
 /* ファンダ 表/グラフ 切替 (app.js renderStockFundamentals) */
+/* 入力/編集ボタンとグラフ｜表トグルを同一行に並べる */
+.fund-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.fund-detail-head .fund-view-toggle { margin: 0; flex: 0 0 auto; }
 .fund-view-toggle { margin: 10px 0; max-width: 200px; }
 .fund-view-panel[hidden] { display: none; }
 .fund-chart-wrap { display: flex; flex-direction: column; gap: 16px; }

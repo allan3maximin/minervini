@@ -24,6 +24,50 @@ sandboxのマウント経由では `.git/` 配下にファイルを**作成は�
 注意: GitHub MCP が「Bad credentials」を返す場合はトークン切れ。
 ユーザーにGitHubコネクタの再連携を依頼すること。
 
+## 2026-07-14 (42): リスト横スワイプ廃止・列順/固定変更・見出し揺れ解消・タイトル局所化・ファンダ行統合・クロスヘア3枚同期・セクターズーム
+
+### 要望(ユーザー原文)
+> リスト画面は横スクロールで画面切り替え動かないようにして。カラムを銘柄名コードの順にして 固定を銘柄名だけにして /
+> [監視]とかって書いてあるところ含めてセクションが揺れるのを治して / MinerviniScreenerの表示はダッシュボードだけでOK
+> それ以外はスペース確保のため不要 / ファンダ入力編集の横にグラフ｜表 ボタンが来るようにして /
+> 株価表はホバーした時にその日を選択できるが これを3表跨ぎで選択できるように / セクターヒートマップの
+> 電気機器 とか 金融 とかってラベルを押下したらそのセクターを拡大するように
+
+### 変更内容
+- **リスト横スワイプ廃止** (`app.js` initListView + CSS): `.list-panels` の scroll-snap 横スクロールを撤廃。
+  `.list-panel` は既定 `display:none`、`.active` のみ `display:flex`。切替はタブクリックのみ(`setActive` が
+  タブ+パネルの active を同期、切替時 scrollTop=0)。scroll リスナー削除。→ 表の横スクロールがパネル切替を
+  誘発しなくなった。
+- **列順を銘柄名→コード / 固定は銘柄名のみ** (`app.js` COLUMNS + CSS): COLUMNS 先頭2つを name,code に入替。
+  sticky 固定は `.tier-table th/td:nth-child(1)`(銘柄名, 幅92px, left:0)だけに縮小。旧 nth-child(2)=コードの
+  sticky/left:66px は削除。角セル z-index・fund-stale 塗りも1列目のみに。
+- **見出し揺れ解消** (CSS): `.list-panel .tier-section` を縦flex化(見出しh2・注記tier-noteは `flex:0`固定)、
+  本文 `[id$="-tier-body"]` だけを `overflow:auto` のスクロールコンテナに。旧「見出しを sticky left:0 で左端固定」
+  (これが横スクロール時に揺れる原因)を全廃。thead(top)と銘柄名列(left)は本文コンテナ基準で sticky 継続。
+  `.list-panel .table-scroll` は overflow:visible+枠線なしのただの枠に。
+- **タイトル局所化** (`app.js` showView + CSS): `.page-header`(h1 MinerviniScreener)を `name!=="dashboard"` で
+  `hidden`。`.page-header[hidden]{display:none}` 追加。→ 他ビューで縦領域を確保。
+- **ファンダ 入力/編集とグラフ｜表を同一行に** (`app.js` renderStockFundamentals + CSS): btnHtml と
+  `.fund-view-toggle` を `.fund-detail-head`(flex, space-between, wrap)で囲む。
+- **クロスヘア3枚同期** (`app.js` renderCharts): 各チャートの `subscribeCrosshairMove` で、他2ペインに
+  `setCrosshairPosition(値, param.time, 系列)` を複製(離脱時は `clearCrosshairPosition`)。`syncingCross` フラグで
+  再入防止。ペインごとの横線値は 株価=終値/出来高=出来高/RS=RS値(`rsLookup` 追加)。→ どのチャートを
+  ホバーしても同じ日が3枚で選択される。
+- **セクターズーム** (`heatmap.js` + CSS): 詳細treemapのセクター見出し `.hm-sector-head` をクリックで
+  `zoomedSector` にセット→ `renderZoomedSector` がそのセクターを全面拡大(タイル大きく、見出しは「← 戻る」で
+  縮小)。`.hm-sector-head` は `pointer-events:none` だったため、見出し行に `.hm-sector-head-zoom`
+  (`pointer-events:auto`+cursor)を付与。タイル描画は `renderStockTile` に共通化。ヒートマップ再表示(initHeatmap)
+  ごとに zoom をリセットして俯瞰から開始。
+- キャッシュバスター: style.css v27→28, heatmap.js v16→17, app.js v29→30。
+
+### 検証
+- `node --check` app.js/heatmap.js OK。index.html タグbalance(div61/61, section16/16, button31/31, label3/3)。
+- 実機(iOS Safari)要確認: ①リストで表を横スクロールしてもパネルが切り替わらないか/タブ切替は効くか
+  ②1列目が銘柄名で左固定・コードが2列目か ③〔監視〕等の見出しが横スクロールで揺れないか
+  ④ダッシュボード以外でタイトルが消え縦が広がるか ⑤ファンダのボタン2つが同一行か
+  ⑥株価/出来高/RSのどれをホバーしても3枚に十字線が出るか ⑦セクター名タップで拡大→戻るできるか。
+- 未コミット(コミット時は .git/index.lock を filesystem MCP でリネームするワークアラウンド必要)。
+
 ## 2026-07-13 (41): チャートカード統合・リスト表sticky化・市況マージン修正
 
 ### 要望(ユーザー原文)

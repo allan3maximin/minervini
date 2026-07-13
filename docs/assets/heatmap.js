@@ -6,6 +6,7 @@ let HM = null;
 let SECTOR_HISTORY = null; // 簡易ビュー履歴 (docs/data/sector_history.json)。未公開ならnull
 let currentPeriod = "d1";
 let currentView = "detail"; // "detail" (既存treemap) | "simple" (セクター騰落率のみ)
+let zoomedSector = null; // 詳細ビューでセクター名を押すとそのセクター名を格納しズーム表示
 // SPA化に伴い、initHeatmap()はセクターマップタブに切り替えるたび毎回呼ばれる
 // (非表示中はcontainerの幅が0でtreemapが描けないため、表示時に再計算・再描画
 // する必要がある)。イベントリスナーの重複登録だけは防ぐためのフラグ。
@@ -105,6 +106,7 @@ async function initHeatmap() {
     hmWired = true;
   }
 
+  zoomedSector = null; // タブ再表示時は俯瞰(全セクター)から始める
   render();
   // 表示のたびに現在ビューのパネルへ位置を合わせる(非表示中はscrollLeftが0に戻るため)。
   requestAnimationFrame(() => scrollToHmView(currentView, false));
@@ -263,12 +265,44 @@ function render() {
   const sectorRects = squarify(sectors, 0, 0, W, H);
 
   // 詳細/簡易の両パネルを描画しておき、横スワイプで即切替できるようにする。
-  renderDetail(detailC, sectorRects);
+  renderDetail(detailC, sectorRects, sectors, W, H);
   if (simpleC) renderSimple(simpleC, sectorRects);
 }
 
+// セクター内の銘柄タイルを1枚描画するヘルパー(詳細ビュー/ズームビュー共通)。
+function renderStockTile(box, s, sec, tx, ty, tw, th) {
+  const tile = document.createElement("div");
+  const ret = s.returns ? s.returns[currentPeriod] : null;
+  tile.className = "hm-tile";
+  Object.assign(tile.style, {
+    left: tx + "px",
+    top: ty + "px",
+    width: Math.max(0, tw - GAP) + "px",
+    height: Math.max(0, th - GAP) + "px",
+    background: tileColor(ret),
+  });
+  const iw = tw - GAP, ih = th - GAP;
+  if (iw >= 56 && ih >= 30) {
+    tile.innerHTML = `<span class="hm-tile-code">${s.code}</span><span class="hm-tile-ret">${fmtPct(ret)}</span>`;
+  } else if (iw >= 34 && ih >= 14) {
+    tile.innerHTML = `<span class="hm-tile-code hm-tile-code-sm">${s.code}</span>`;
+  }
+  tile.title = `${s.code} ${s.name} ${fmtPct(ret)}`;
+  tile.addEventListener("click", () => openTilePopup(s, sec));
+  box.appendChild(tile);
+}
+
 // 詳細表示: 既存のセクター×銘柄の二段squarifiedツリーマップ。
-function renderDetail(container, sectorRects) {
+// zoomedSector が指定されていれば、そのセクターだけを全面に拡大表示する。
+function renderDetail(container, sectorRects, sectors, W, H) {
+  if (zoomedSector) {
+    const sec = sectors.find((s) => s.sector === zoomedSector);
+    if (sec) {
+      renderZoomedSector(container, sec, W, H);
+      return;
+    }
+    zoomedSector = null; // 対象が消えていれば通常表示へフォールバック
+  }
   for (const { item: sec, x, y, w, h } of sectorRects) {
     const box = document.createElement("div");
     box.className = "hm-sector";
@@ -291,7 +325,14 @@ function renderDetail(container, sectorRects) {
           ? `<span class="${rsVal >= 0 ? "hm-rs-pos" : "hm-rs-neg"}">RS${rsVal > 0 ? "+" : ""}${rsVal.toFixed(1)}</span>`
           : "";
       head.innerHTML = `<span class="hm-sector-name">${sec.sector}</span><span class="hm-sector-info">${rsTxt} ${fmtPct(sec.returns[currentPeriod])}</span>`;
-      head.title = `${sec.sector} ${fmtPct(sec.returns[currentPeriod])} / 対TOPIX相対強度: ${rsVal != null ? rsVal + "%" : "-"}`;
+      head.title = `${sec.sector} をタップで拡大 / ${fmtPct(sec.returns[currentPeriod])} / 対TOPIX相対強度: ${rsVal != null ? rsVal + "%" : "-"}`;
+      // セクター名(見出し)をタップするとそのセクターだけを全面拡大する。
+      head.classList.add("hm-sector-head-zoom");
+      head.addEventListener("click", (e) => {
+        e.stopPropagation();
+        zoomedSector = sec.sector;
+        render();
+      });
       box.appendChild(head);
     }
 
@@ -301,30 +342,41 @@ function renderDetail(container, sectorRects) {
     const tileRects = squarify([...sec.stocksW].sort((a, b) => b.weight - a.weight), 0, 0, innerW, innerH);
 
     for (const { item: s, x: tx, y: ty, w: tw, h: th } of tileRects) {
-      const tile = document.createElement("div");
-      const ret = s.returns ? s.returns[currentPeriod] : null;
-      tile.className = "hm-tile";
-      Object.assign(tile.style, {
-        left: tx + "px",
-        top: innerY + ty + "px",
-        width: Math.max(0, tw - GAP) + "px",
-        height: Math.max(0, th - GAP) + "px",
-        background: tileColor(ret),
-      });
-
-      // ラベル段階表示: 広→コード+騰落率 / 中→コードのみ / 極小→なし
-      const iw = tw - GAP, ih = th - GAP;
-      if (iw >= 56 && ih >= 30) {
-        tile.innerHTML = `<span class="hm-tile-code">${s.code}</span><span class="hm-tile-ret">${fmtPct(ret)}</span>`;
-      } else if (iw >= 34 && ih >= 14) {
-        tile.innerHTML = `<span class="hm-tile-code hm-tile-code-sm">${s.code}</span>`;
-      }
-      tile.title = `${s.code} ${s.name} ${fmtPct(ret)}`;
-      tile.addEventListener("click", () => openTilePopup(s, sec));
-      box.appendChild(tile);
+      renderStockTile(box, s, sec, tx, innerY + ty, tw, th);
     }
     container.appendChild(box);
   }
+}
+
+// ズーム表示: 選択した1セクターを全面に拡大し、銘柄タイルを大きく見せる。
+// 見出し(← 戻る)をタップすると通常の一覧へ戻る。
+function renderZoomedSector(container, sec, W, H) {
+  const box = document.createElement("div");
+  box.className = "hm-sector hm-sector-zoomed";
+  Object.assign(box.style, { left: "0px", top: "0px", width: W + "px", height: H + "px" });
+
+  const head = document.createElement("div");
+  head.className = "hm-sector-head hm-sector-head-zoom hm-zoom-head";
+  head.style.height = SECTOR_HEADER_H + "px";
+  const rsVal = sec.rs ? sec.rs.rel_strength_pct : null;
+  const rsTxt = rsVal != null ? `<span class="${rsVal >= 0 ? "hm-rs-pos" : "hm-rs-neg"}">RS${rsVal > 0 ? "+" : ""}${rsVal.toFixed(1)}</span>` : "";
+  head.innerHTML = `<span class="hm-sector-name">← ${sec.sector}</span><span class="hm-sector-info">${rsTxt} ${fmtPct(sec.returns[currentPeriod])}</span>`;
+  head.title = "タップで一覧に戻る";
+  head.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomedSector = null;
+    render();
+  });
+  box.appendChild(head);
+
+  const innerY = SECTOR_HEADER_H;
+  const innerH = Math.max(0, H - GAP - innerY);
+  const innerW = Math.max(0, W - GAP);
+  const tileRects = squarify([...sec.stocksW].sort((a, b) => b.weight - a.weight), 0, 0, innerW, innerH);
+  for (const { item: s, x: tx, y: ty, w: tw, h: th } of tileRects) {
+    renderStockTile(box, s, sec, tx, innerY + ty, tw, th);
+  }
+  container.appendChild(box);
 }
 
 // 簡易表示: 個別銘柄タイルを省き、セクター全体を1枚の色付きボックスとして

@@ -48,8 +48,8 @@ function sectorStrengthHtml(s) {
 }
 
 const COLUMNS = [
-  { key: "code", label: "コード", value: (s) => s.code },
   { key: "name", label: "銘柄名", value: (s) => trimName(s.name), title: (s) => s.name },
+  { key: "code", label: "コード", value: (s) => s.code },
   { key: "close", label: "終値", value: (s) => formatClose(s.close) },
   { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
   { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
@@ -814,46 +814,36 @@ function setupStockPanels() {
   );
 }
 
-// リスト画面(本命/候補/監視)の横スワイプ+タブ。個別画面と同じ仕組みだが
-// 各パネルは縦スクロールを許可する。高さはCSS(flex)が決める。
+// リスト画面(本命/候補/監視)はタブでのみ切替。横スワイプでの画面切替は廃止し、
+// 各パネル内の横スクロールは表の列閲覧専用にした(スワイプでパネルが動かない)。
 function initListView() {
   const panels = document.getElementById("list-panels");
   const tabs = document.getElementById("list-tabs");
   if (!panels || !tabs) return;
 
-  if (panels.dataset.wired) return;
-  panels.dataset.wired = "1";
-
   const setActive = (name) => {
     tabs.querySelectorAll(".list-tab").forEach((b) => {
       b.classList.toggle("active", b.dataset.panel === name);
     });
+    panels.querySelectorAll(".list-panel").forEach((p) => {
+      const on = p.dataset.panel === name;
+      p.classList.toggle("active", on);
+      if (on) p.scrollTop = 0; // 切替のたびに先頭へ
+    });
   };
+
+  // 初期表示は本命(既にactiveなタブがあればそれを尊重)。
+  const initial = (tabs.querySelector(".list-tab.active") || tabs.querySelector(".list-tab"));
+  setActive(initial ? initial.dataset.panel : "confirmed");
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
 
   tabs.addEventListener("click", (e) => {
     const btn = e.target.closest(".list-tab");
     if (!btn) return;
-    const items = Array.from(tabs.querySelectorAll(".list-tab"));
-    const idx = items.indexOf(btn);
-    if (idx < 0) return;
-    panels.scrollTo({ left: idx * panels.clientWidth, behavior: "smooth" });
     setActive(btn.dataset.panel);
   });
-
-  let raf = 0;
-  panels.addEventListener(
-    "scroll",
-    () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
-        const cur = panels.querySelectorAll(".list-panel")[idx];
-        if (cur) setActive(cur.dataset.panel);
-      });
-    },
-    { passive: true }
-  );
 }
 
 // ルールベース日本語サマリー (src/report/summary.py が生成した
@@ -1090,13 +1080,15 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
       ? `<p class="tier-note">確認日: ${escapeHtml(entry.checked_date)}</p>`
       : "";
 
-    // 表 / グラフ の切替(設定はlocalStorageに保持)。
+    // 表 / グラフ の切替(設定はlocalStorageに保持)。トグルは入力/編集ボタンと同じ行に置く。
     const view = fundViewPref();
     container.innerHTML = `
-      ${btnHtml}
-      <div class="fund-view-toggle segmented" role="tablist">
-        <button type="button" class="${view === "chart" ? "active" : ""}" data-fund-view="chart">グラフ</button>
-        <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
+      <div class="fund-detail-head">
+        ${btnHtml}
+        <div class="fund-view-toggle segmented" role="tablist">
+          <button type="button" class="${view === "chart" ? "active" : ""}" data-fund-view="chart">グラフ</button>
+          <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
+        </div>
       </div>
       <div id="fund-view-chart" class="fund-view-panel"${view === "table" ? " hidden" : ""}>
         ${fundChartHtml(quarters, byQuarter)}
@@ -1762,6 +1754,12 @@ function renderCharts(chart) {
     D: buildBarLookup(chart.candles, chart.volume),
     M: buildBarLookup(monthly.candles, monthly.volume),
   };
+  // RSラインの時刻→値 (クロスヘアを3チャートに同期する際、RSペインの横線を
+  // その日のRS値に合わせるため)。
+  const rsLookup = {
+    D: new Map((chart.rs_line || []).map((p) => [p.time, p.value])),
+    M: new Map((monthly.rs_line || []).map((p) => [p.time, p.value])),
+  };
   let currentTf = "D";
 
   const legendEl = document.getElementById("ohlc-legend");
@@ -1809,11 +1807,38 @@ function renderCharts(chart) {
     return barLookup[currentTf].get(candles[candles.length - 1].time) || null;
   }
 
+  // チャート→そのペインの主系列。クロスヘアを他ペインへ複製する際に使う。
+  const chartSeries = new Map([[priceChart, candleSeries], [volChart, volSeries]]);
+  if (rsChart && rsSeries) chartSeries.set(rsChart, rsSeries);
+
+  // 他ペインの横線を「その日の各ペインの値」に合わせる(株価=終値/出来高=出来高/RS=RS値)。
+  function paneValue(targetChart, key, bar) {
+    if (targetChart === priceChart) return bar ? bar.close : null;
+    if (targetChart === volChart) return bar ? bar.volume : null;
+    return rsLookup[currentTf].get(key);
+  }
+
+  // ホバー中の日をどのペインでもクロスヘアで指せるように、他の2ペインへ複製する。
+  let syncingCross = false;
   for (const c of charts) {
     c.subscribeCrosshairMove((param) => {
       const key = param.time != null ? timeKey(param.time) : null;
       const bar = key ? barLookup[currentTf].get(key) : null;
       updateLegend(bar || latestBar()); // fall back to the latest bar when not hovering
+      if (syncingCross) return; // setCrosshairPositionの再入を防ぐ
+      syncingCross = true;
+      for (const other of charts) {
+        if (other === c) continue;
+        if (param.time == null) {
+          other.clearCrosshairPosition();
+        } else {
+          const series = chartSeries.get(other);
+          const val = paneValue(other, key, bar);
+          if (series && val != null) other.setCrosshairPosition(val, param.time, series);
+          else other.clearCrosshairPosition();
+        }
+      }
+      syncingCross = false;
     });
   }
 
@@ -2117,6 +2142,9 @@ function showView(hash) {
   // ページ切替時に前回のスクロール位置を引き継がないようリセットする。
   const activeSection = document.getElementById(`view-${name}`);
   if (activeSection) activeSection.scrollTop = 0;
+  // タイトル(MinerviniScreener)はダッシュボードのみ表示。他ビューは縦領域を確保するため隠す。
+  const pageHeader = document.querySelector(".page-header");
+  if (pageHeader) pageHeader.hidden = name !== "dashboard";
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.view === name);
   });
