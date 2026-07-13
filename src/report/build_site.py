@@ -101,12 +101,29 @@ def assemble_stock_record(
         "must_flags": {"tt": tt_flags, "vcp": vcp_result.get("must_flags")},
         # サマリー生成(summary.py)・個別銘柄画面用のVCP文脈。footprint文字列
         # より一段細かい素の数値(ベース日数・高値からの日数・各収縮の深さ%)。
-        "vcp_detail": {
-            "base_days": vcp_result.get("base_days"),
-            "days_from_high": vcp_result.get("days_from_high"),
-            "t0_date": str(vcp_result["t0_date"])[:10] if vcp_result.get("t0_date") is not None else None,
-            "depths_pct": [round(c["depth"] * 100, 1) for c in vcp_result.get("contractions") or []],
+        "vcp_detail": _build_vcp_detail(vcp_result, config),
+    }
+
+
+def _build_vcp_detail(vcp_result: dict, config: dict) -> dict:
+    depths_pct = [round(c["depth"] * 100, 1) for c in vcp_result.get("contractions") or []]
+    diagnostics = vcp_result.get("vcp_diagnostics") or {}
+    v5_diag = diagnostics.get("v5") or {}
+    return {
+        "base_days": vcp_result.get("base_days"),
+        "days_from_high": vcp_result.get("days_from_high"),
+        "t0_date": str(vcp_result["t0_date"])[:10] if vcp_result.get("t0_date") is not None else None,
+        "depths_pct": depths_pct,
+        "depth_last_pct": depths_pct[-1] if depths_pct else None,
+        "last_depth_max_pct": round(config["vcp"]["last_depth_max"] * 100, 1),
+        "volume_dryup": {
+            "recent10_median": v5_diag.get("recent10_median"),
+            "vol_ma50": v5_diag.get("vol_ma50"),
+            "median_ratio_threshold": v5_diag.get("median_ratio_threshold"),
+            "sub_a_pass": v5_diag.get("sub_a_pass"),
+            "sub_b_pass": v5_diag.get("sub_b_pass"),
         },
+        "shakeout_detected": vcp_result.get("shakeout_detected", False),
     }
 
 

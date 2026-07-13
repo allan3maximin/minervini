@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
+import pytest
 
+from src.config import load_config
 from src.indicators import add_atr, add_moving_averages
-from src.screener.vcp import evaluate_vcp
+from src.screener.vcp import _check_v5, evaluate_vcp
 
 # T0 (base origin) sits after a 100-day gradual run-up from 70 -> ~100.
 RUNUP_DAYS = 100
@@ -36,6 +38,65 @@ REVERSED_CONTROL_POINTS = [
     (30, 79.9),     # depth 18% (79.9 = 97.439 * (1-0.18))
     (36, 83.5),
     (42, 80.7245),  # depth 3.3%
+]
+
+# Same skeleton as REVERSED_CONTROL_POINTS (the depth reversal at trough3 vs.
+# trough2 is unchanged: 18% > 12%*1.2), but with a flat price extension added
+# after trough4 (same price repeated) that adds no new pivot -- compute_zigzag
+# never confirms a new swing on a flat run, so the final provisional pivot
+# stays anchored at trough4 (idx 42) regardless. This only inflates base_days
+# (43 -> 64), which pushes trough3's *relative* position from 30/43 (~0.70,
+# back half -- where REVERSED_CONTROL_POINTS' test expects V2 to fail) to
+# 30/64 (~0.47, front half), so the exact same reversal is now forgivable
+# under V2's early_violation_allowance.
+#
+# Note peak2/peak3/peak4 must all stay below T0 (100.0) for find_base_origin
+# to keep anchoring the base at T0 -- a peak that exceeds T0 gets picked as
+# the new origin instead, silently discarding everything before it. Combined
+# with V7's requirement that lows never meaningfully fall, this means a
+# depth reversal can never occur at the *very first* contraction step (its
+# preceding low has no room below it to exceed T0 from), which is why the
+# reversal here, like in REVERSED_CONTROL_POINTS, sits at step 3.
+FRONT_HALF_VIOLATION_CONTROL_POINTS = [
+    (0, 100.0),
+    (6, 76.0),      # trough1: depth 24%
+    (12, 90.0),
+    (18, 79.2),     # trough2: depth 12%
+    (24, 97.439),   # peak3 raised so the next drop is 18%, not 6%
+    (30, 79.9),     # trough3: depth 18% (reversal vs. trough2's 12%, front half)
+    (36, 83.5),
+    (42, 80.7245),  # trough4 (final): depth ~3.3%
+    (63, 80.7245),  # flat extension: no new pivot, only inflates base_days
+]
+
+# Same skeleton again, but the final contraction's depth is 11% -- inside the
+# relaxed V4 ceiling (12%) but above the old, tighter one (10%) -- while the
+# preceding contraction is loosened to 10% so no V2 step exceeds the 1.2x
+# tolerance. Also used to check that the tightness SCORE (not just the MUST
+# gate) still tells 11% apart from a "perfect" sub-5% base.
+LOOSE_FINAL_DEPTH_CONTROL_POINTS = [
+    (0, 100.0),     # T0
+    (6, 76.0),      # trough1: depth 24%
+    (12, 90.0),     # peak2
+    (18, 79.2),     # trough2: depth 12%
+    (24, 90.0),     # peak3
+    (30, 81.0),     # trough3: depth 10%
+    (36, 95.0),     # peak4
+    (42, 84.55),    # trough4 (final): depth 11%
+]
+
+# A slight (<1%) undercut of trough1 at trough2 -- within the unchanged
+# swing_low_tolerance (0.99) -- followed by peak3 exceeding peak2: a textbook
+# shakeout (V7 stays satisfied; the undercut/recovery is a score-only bonus).
+SHAKEOUT_CONTROL_POINTS = [
+    (0, 100.0),     # T0
+    (6, 80.0),      # trough1: depth 20%
+    (12, 92.0),     # peak2
+    (18, 79.6),     # trough2: 0.5% undercut of trough1 (79.6 / 80.0 = 0.995)
+    (24, 98.0),     # peak3, higher than peak2 (92.0) -- shakeout confirmation
+    (30, 92.12),    # trough3: depth 6%
+    (36, 96.0),     # peak4
+    (42, 93.12),    # trough4 (final): depth ~3%
 ]
 
 
@@ -98,3 +159,59 @@ def test_vcp_v2_fails_on_depth_reversal():
     assert result["status"] != "WATCH_A"
     # the reversal shouldn't trip V7 (lows aren't meaningfully undercut)
     assert result["must_flags"]["V7"] is True
+
+
+def test_vcp_v2_allows_single_front_half_reversal():
+    df = _build_synthetic_df(FRONT_HALF_VIOLATION_CONTROL_POINTS)
+    result = evaluate_vcp(df)
+
+    depths = [round(c["depth"] * 100) for c in result["contractions"]]
+    assert depths == [24, 12, 18, 3], result["contractions"]
+    low_idx = result["contractions"][2]["low_idx"]
+    base_days = result["base_days"]
+    assert low_idx / base_days < 0.5  # the reversal sits in the base's front half
+    assert result["must_flags"]["V2"] is True, result["must_flags"]
+    assert result["status"] == "WATCH_A", result
+
+
+def test_v5_median_based_dryup_survives_single_day_spike():
+    """A single 3x spike day at the tail of the base pulls the mean above the
+    old dryup threshold (0.8) but leaves the median-based gate (0.85)
+    unaffected -- this is exactly the robustness V5(a)'s rewrite is for.
+    """
+    config = load_config()
+    normal_vol = 150.0
+    spike_vol = normal_vol * 3
+    volume = [normal_vol] * 49 + [spike_vol]
+    base_df = pd.DataFrame({"volume": volume, "vol_ma50": [200.0] * 50})
+
+    v5, diag = _check_v5(base_df, config)
+
+    mean_ratio = (sum(volume[-10:]) / 10) / 200.0
+    assert mean_ratio > 0.8  # a mean-based gate would have rejected this base
+    assert diag["recent10_median"] == pytest.approx(normal_vol)
+    assert diag["sub_a_pass"] is True
+    assert v5 is True
+
+
+def test_vcp_v7_shakeout_detected_and_scored():
+    df = _build_synthetic_df(SHAKEOUT_CONTROL_POINTS)
+    result = evaluate_vcp(df)
+
+    assert result["must_flags"]["V7"] is True, result["must_flags"]
+    assert result["status"] == "WATCH_A", result
+    assert result["shakeout_detected"] is True
+    assert result["vcp_diagnostics"]["v7"]["shakeout_detected"] is True
+    assert result["components"]["shakeout_bonus"] == pytest.approx(5.0, abs=0.1)
+
+
+def test_vcp_v4_relaxed_ceiling_but_tightness_score_not_perfect():
+    df = _build_synthetic_df(LOOSE_FINAL_DEPTH_CONTROL_POINTS)
+    result = evaluate_vcp(df)
+
+    depths = [round(c["depth"] * 100) for c in result["contractions"]]
+    assert depths == [24, 12, 10, 11], result["contractions"]
+    assert result["must_flags"]["V4"] is True  # 11% <= new 12% ceiling
+    assert result["status"] == "WATCH_A", result
+    # 11% is well short of last_depth_perfect (5%): tightness shouldn't be maxed.
+    assert 0 < result["components"]["tightness"] < 10

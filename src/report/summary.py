@@ -58,7 +58,7 @@ def _vcp_fail_labels(config: dict) -> dict[str, str]:
         "V2": "収縮の深さが段階的に減っていない",
         "V3": f"最初の収縮が{v['first_depth_max'] * 100:.0f}%超と深すぎ",
         "V4": f"最後の収縮が{v['last_depth_max'] * 100:.0f}%超でまだ緩い",
-        "V5": f"出来高ドライアップ未達(直近10日が50日平均の{v['volume_dryup_ratio'] * 100:.0f}%以下になっていない)",
+        "V5": f"出来高ドライアップ未達(直近10日の中央値が50日平均の{v['volume_dryup_median_ratio'] * 100:.0f}%以下になっていない)",
         "V6": f"ベース期間が{v['base_min_days']}〜{v['base_max_days']}日の範囲外",
         "V7": "収縮の安値が切り下がっている",
     }
@@ -79,13 +79,24 @@ def compute_momentum(df: pd.DataFrame) -> dict:
         return round((cur / prev - 1.0) * 100, 1)
 
     vol_ratio = None
+    vol_median_ratio = None
     if "volume" in df.columns and len(df) >= 50:
         v10 = float(df["volume"].tail(10).mean())
         v50 = float(df["volume"].tail(50).mean())
         if v50 > 0:
             vol_ratio = round(v10 / v50, 2)
+        v10_median = float(df["volume"].tail(10).median())
+        v50_mean = v50
+        if v50_mean > 0:
+            vol_median_ratio = round(v10_median / v50_mean, 2)
 
-    return {"chg_5d": chg(5), "chg_20d": chg(20), "chg_60d": chg(60), "vol_ratio_10_50": vol_ratio}
+    return {
+        "chg_5d": chg(5),
+        "chg_20d": chg(20),
+        "chg_60d": chg(60),
+        "vol_ratio_10_50": vol_ratio,
+        "vol_median_ratio_10_50": vol_median_ratio,
+    }
 
 
 def yoy_series(quarters: list[dict], key: str, max_points: int = 4) -> list[tuple[str, float]]:
@@ -320,11 +331,11 @@ def build_stock_summary(
     if mom.get("chg_20d") is not None or mom.get("chg_60d") is not None:
         points.append(
             f"騰落率: 20日{_signed_pct(mom.get('chg_20d'))} / 60日{_signed_pct(mom.get('chg_60d'))}。")
-    ratio = mom.get("vol_ratio_10_50")
-    if ratio is not None:
-        dry = config["vcp"]["volume_dryup_ratio"]
-        line = f"出来高: 直近10日平均は50日平均の{ratio * 100:.0f}%"
-        line += "(ドライアップ水準)。" if ratio <= dry else "。"
+    median_ratio = mom.get("vol_median_ratio_10_50")
+    if median_ratio is not None:
+        dry = config["vcp"]["volume_dryup_median_ratio"]
+        line = f"出来高: 直近10日中央値は50日平均の{median_ratio * 100:.0f}%"
+        line += "(ドライアップ水準)。" if median_ratio <= dry else "。"
         points.append(line)
 
     if record.get("sector33"):

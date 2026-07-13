@@ -55,10 +55,30 @@ vcp:
   # 良好なことを確認済み(data/backtest/vcp_tolerance_comparison_20260712.md)。
   # なお swing_low_tolerance(V7)の緩和は同バックテストで質の劣化(期待R 0.33)が確認されたため見送り。
   monotonic_tolerance: 1.2
+  # 2026-07-13新規: 上記tolerance超過の深さ逆転でも、ベース前半(low_idx/base_days<0.5)で
+  # 1回だけなら無視してよい(後半の逆転・2回目以降の逆転は従来通りV2違反)。
+  early_violation_allowance: 1
+  # 2026-07-13新規: 段階チェックを迂回しても、最終収縮が初回収縮のこの比率以上に緩ければ
+  # 絶対的にV2違反とするバックストップ(全体としての段階的タイト化を担保)。
+  overall_contraction_ratio: 0.6
   first_depth_max: 0.35
-  last_depth_max: 0.10
-  volume_dryup_ratio: 0.80
-  swing_low_tolerance: 0.99
+  # 2026-07-13: 0.10→0.12。V4(MUST)の最終収縮深さ上限。
+  last_depth_max: 0.12
+  # 2026-07-13新規: タイトネススコアが満点になる深さ(旧ハードコード0.03を設定化・0.05に変更)。
+  last_depth_perfect: 0.05
+  # 2026-07-13: volume_dryup_ratio(0.80、直近10日"平均")から改称・変更。単発の出来高スパイクに
+  # 頑健な"中央値"ベースに変更(V5(a))。
+  volume_dryup_median_ratio: 0.85
+  # 2026-07-13新規: V5(b)。ベース全体の出来高回帰傾きが負、かつ直近10日中央値がベース前半
+  # (先頭50%)の出来高中央値のこの比率以下なら、水準(a)を満たさなくてもV5合格とする。
+  volume_trend_ratio: 0.75
+  swing_low_tolerance: 0.99  # 変更なし(0.97緩和は見送り。shakeout_bonus検証後に再検討)
+  # 2026-07-13新規: V7シェイクアウト(直前安値をswing_low_tolerance許容内でわずかに下抜け後、
+  # 直前高値を更新)検出時のvcp_scoreへの加点(フラット、合計は100点でキャップ)。
+  shakeout_bonus: 5
+  # 2026-07-13新規: V5の(a)(b)両方成立時にvol_trendスコアへ加算するボーナス
+  # (コンポーネント自身の0-1比率換算・上限1.0でクリップ)。
+  vol_trend_bonus_fraction: 0.15
   score_weights: {tightness: 30, halving: 20, vol_trend: 20, first_depth: 15, duration: 15}
 
 entry:

@@ -15,8 +15,11 @@ _CFG = {
         "scan_days": 130, "scan_days_extended": 200,
         "base_min_days": 15, "base_max_days": 200, "min_days_from_high": 5,
         "contraction_count": [2, 6], "monotonic_tolerance": 1.2,
-        "first_depth_max": 0.35, "last_depth_max": 0.1,
-        "volume_dryup_ratio": 0.8, "swing_low_tolerance": 0.99,
+        "early_violation_allowance": 1, "overall_contraction_ratio": 0.6,
+        "first_depth_max": 0.35, "last_depth_max": 0.12, "last_depth_perfect": 0.05,
+        "volume_dryup_median_ratio": 0.85, "volume_trend_ratio": 0.75,
+        "swing_low_tolerance": 0.99, "shakeout_bonus": 5,
+        "vol_trend_bonus_fraction": 0.15,
     },
     "entry": {"breakout_vol_mult": 1.4, "extended_pct": 0.05},
     "fundamentals": {"confirmed_eps_yoy_min": 25, "confirmed_rev_yoy_min": 20,
@@ -49,7 +52,8 @@ def _record(**kw):
         "ma_deviation_pct": {"ma50": 19.04, "ma150": 26.8, "ma200": 30.08},
         "vcp_detail": {"base_days": 17, "days_from_high": 17, "t0_date": "2026-06-16",
                        "depths_pct": [6.0, 7.0, 7.0]},
-        "momentum": {"chg_5d": 1.2, "chg_20d": 8.5, "chg_60d": 25.0, "vol_ratio_10_50": 0.75},
+        "momentum": {"chg_5d": 1.2, "chg_20d": 8.5, "chg_60d": 25.0, "vol_ratio_10_50": 0.75,
+                     "vol_median_ratio_10_50": 0.8},
         "sector33": "サービス業",
         "sector_strength": "強",
         "sector_direction": "↑",
@@ -94,7 +98,7 @@ def test_rejected_headline_lists_failed_conditions_in_japanese():
     rec = _record(status="REJECTED", must_flags={"tt": {}, "vcp": flags})
     s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
     assert "段階的に減っていない" in s["headline"]  # V2
-    assert "10%超" in s["headline"]  # V4 (閾値はconfigから)
+    assert "12%超" in s["headline"]  # V4 (閾値はconfigから)
     assert "V2" not in s["headline"]  # 生のコード名は出さない
 
 
@@ -115,7 +119,7 @@ def test_points_include_base_and_momentum_and_sector():
     assert "8条件すべて合格" in text and "RS 72" in text
     assert "ベース17営業日" in text and "6% → 7% → 7%" in text
     assert "20日+8.5%" in text
-    assert "75%(ドライアップ水準)" in text
+    assert "80%(ドライアップ水準)" in text
     assert "サービス業" in text
 
 
@@ -201,12 +205,14 @@ def test_compute_momentum():
     assert m["chg_5d"] == pytest.approx((179 / 174 - 1) * 100, abs=0.05)
     assert m["chg_20d"] == pytest.approx((179 / 159 - 1) * 100, abs=0.05)
     assert m["vol_ratio_10_50"] == pytest.approx(500 / 900, abs=0.01)
+    assert m["vol_median_ratio_10_50"] == pytest.approx(500 / 900, abs=0.01)
 
 
 def test_compute_momentum_short_history():
     df = pd.DataFrame({"close": [100.0, 101.0], "volume": [1.0, 1.0]})
     m = sm.compute_momentum(df)
     assert m["chg_20d"] is None and m["vol_ratio_10_50"] is None
+    assert m["vol_median_ratio_10_50"] is None
 
 
 def test_yoy_series_skips_nonpositive_and_missing_base():

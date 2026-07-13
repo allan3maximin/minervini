@@ -66,7 +66,15 @@ const COLUMNS = [
     value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
     sortValue: (s) => (s.high52w_distance_pct != null ? -s.high52w_distance_pct : -Infinity),
   },
-  { key: "footprint", label: "フットプリント", value: (s) => s.footprint ?? "-" },
+  {
+    key: "footprint",
+    label: "フットプリント",
+    value: (s) => {
+      if (!s.footprint) return "-";
+      const depthLast = s.vcp_detail && s.vcp_detail.depth_last_pct;
+      return depthLast != null ? `${s.footprint} (最終${depthLast}%)` : s.footprint;
+    },
+  },
   { key: "pivot", label: "ピボット", value: (s) => s.pivot ?? "-" },
   { key: "buy_stop", label: "推奨逆指値", value: (s) => s.buy_stop ?? "-" },
   { key: "stop_loss", label: "推奨損切り", value: (s) => s.stop_loss ?? "-" },
@@ -630,7 +638,7 @@ async function initStockPage(codeOverride) {
   renderCharts(chart);
 
   if (stock) {
-    renderMustChecklist(stock.must_flags);
+    renderMustChecklist(stock.must_flags, stock.vcp_detail);
     renderScoreBreakdown(stock);
   }
 }
@@ -835,9 +843,9 @@ function copySignedPct(v, digits = 2) {
   return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
 }
 
-function copyFlagLines(flags, labels) {
+function copyFlagLines(flags, labels, detailFn) {
   return Object.entries(flags)
-    .map(([name, value]) => `- ${value ? "✓" : "✗"} ${labels[name] || name}`)
+    .map(([name, value]) => `- ${value ? "✓" : "✗"} ${labels[name] || name}${detailFn ? detailFn(name) : ""}`)
     .join("\n");
 }
 
@@ -904,8 +912,17 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
   L.push("");
   L.push("## VCP条件 (V1〜V7)");
   L.push("");
-  L.push(mustFlags.vcp ? copyFlagLines(mustFlags.vcp, MUST_FLAG_LABELS.vcp) : "- VCP評価なし (セットアップ未形成 or 評価対象外)");
-  if (stock.footprint) L.push(`- フットプリント: ${stock.footprint}`);
+  const vcpDetail = stock.vcp_detail;
+  L.push(
+    mustFlags.vcp
+      ? copyFlagLines(mustFlags.vcp, MUST_FLAG_LABELS.vcp, (name) => _mustFlagDetailSuffix("vcp", name, vcpDetail))
+      : "- VCP評価なし (セットアップ未形成 or 評価対象外)"
+  );
+  if (vcpDetail && vcpDetail.shakeout_detected) L.push("- シェイクアウト検出: 直近安値のわずかな下抜け後、直前高値を更新済み");
+  if (stock.footprint) {
+    const depthLast = vcpDetail && vcpDetail.depth_last_pct;
+    L.push(`- フットプリント: ${stock.footprint}${depthLast != null ? ` (最終${depthLast}%)` : ""}`);
+  }
   L.push("");
 
   if (chart && Array.isArray(chart.candles) && chart.candles.length) {
@@ -1556,14 +1573,35 @@ const MUST_FLAG_LABELS = {
     V1: "収縮回数が2〜6回",
     V2: "収縮の深さが段階的に減少",
     V3: "最初の収縮が35%以内",
-    V4: "最後の収縮が10%以内",
-    V5: "出来高ドライアップ(直近10日 ≤ 50日平均×0.8)",
+    V4: "最後の収縮が一定以内",
+    V5: "出来高ドライアップ",
     V6: "ベース期間が15〜200日",
     V7: "収縮の安値が切り上がり",
   },
 };
 
-function renderMustChecklist(mustFlags) {
+// V4/V5は設定駆動・V5はOR判定のため、vcpDetailの実測値/閾値があれば行に追記する。
+function _mustFlagDetailSuffix(key, name, vcpDetail) {
+  if (key !== "vcp" || !vcpDetail) return "";
+  if (name === "V4") {
+    const last = vcpDetail.depth_last_pct;
+    const threshold = vcpDetail.last_depth_max_pct;
+    if (last == null || threshold == null) return "";
+    return ` (実測${last}% ≤ ${threshold}%)`;
+  }
+  if (name === "V5") {
+    const dryup = vcpDetail.volume_dryup;
+    if (!dryup || dryup.recent10_median == null || dryup.vol_ma50 == null) return "";
+    const ratio = dryup.vol_ma50 ? Math.round((dryup.recent10_median / dryup.vol_ma50) * 100) : null;
+    const thresholdPct = dryup.median_ratio_threshold != null ? Math.round(dryup.median_ratio_threshold * 100) : null;
+    const via = dryup.sub_a_pass ? "水準" : dryup.sub_b_pass ? "トレンド" : "";
+    const ratioText = ratio != null && thresholdPct != null ? ` (直近10日中央値 ${ratio}% ≤ ${thresholdPct}%)` : "";
+    return via ? `${ratioText}[${via}判定]` : ratioText;
+  }
+  return "";
+}
+
+function renderMustChecklist(mustFlags, vcpDetail) {
   const el = document.getElementById("must-checklist");
   el.innerHTML = "";
   if (!mustFlags) {
@@ -1577,11 +1615,17 @@ function renderMustChecklist(mustFlags) {
     const h4 = document.createElement("h4");
     h4.textContent = groupLabels[key];
     el.appendChild(h4);
+    if (key === "vcp" && vcpDetail && vcpDetail.shakeout_detected) {
+      const badge = document.createElement("span");
+      badge.className = "sell-signal-badge signal-badge-accent";
+      badge.textContent = "シェイクアウト検出";
+      el.appendChild(badge);
+    }
     const ul = document.createElement("ul");
     const labels = MUST_FLAG_LABELS[key] || {};
     for (const [name, value] of Object.entries(flags)) {
       const li = document.createElement("li");
-      li.textContent = `${value ? "✓" : "✗"} ${labels[name] || name}`;
+      li.textContent = `${value ? "✓" : "✗"} ${labels[name] || name}${_mustFlagDetailSuffix(key, name, vcpDetail)}`;
       li.className = value ? "flag-pass" : "flag-fail";
       ul.appendChild(li);
     }

@@ -2,6 +2,62 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (34): VCP MUST条件(V1〜V7)の許容度緩和 — 「壊れたベースの排除」のみに限定
+
+### 要望(ユーザー原文、要約)
+> 教科書的なVCP形状のみを厳格に判定していると実運用でのヒット数が過少になる。
+> MUSTは「壊れたベースの排除」のみを担い、「美しさ」はSCORE側の加点/減点で表現して
+> 人間の目視に委ねる方針で緩和したい。
+
+事前確認で2点、当初案から方針転換(ユーザーとすり合わせ済み):
+- `monotonic_tolerance`(V2)は前日(2026-07-12)に1.0→1.2へ緩和済み・バックテスト確認済みのため、
+  1.15への再変更は撤回し1.2を維持。新規に「前半1回までの逆転許容」「最終/初回比バックストップ」を追加。
+- `swing_low_tolerance`(V7)の0.99→0.97緩和は、同バックテストで質の劣化(期待R 0.33)が確認済みのため見送り。
+  0.99を維持し、MUSTを緩めない2点(シェイクアウトのスコア加点、最終安値がベース内最安値を
+  下回ったら即不合格というフロアガード)のみ追加。
+
+### 変更内容
+- `config.yaml` vcp: 新規 `early_violation_allowance`(1)・`overall_contraction_ratio`(0.6)・
+  `last_depth_perfect`(0.05)・`volume_trend_ratio`(0.75)・`shakeout_bonus`(5)・
+  `vol_trend_bonus_fraction`(0.15)を追加。`last_depth_max` 0.10→0.12。
+  `volume_dryup_ratio`(平均ベース0.80)→`volume_dryup_median_ratio`(中央値ベース0.85)にリネーム。
+- `src/screener/vcp.py`: `_check_v2`(前半1回まで逆転許容+全体比バックストップ)、
+  `_check_v5`(中央値ベースの枯れ判定(a)+出来高トレンド判定(b)のOR)、
+  `_check_v7`(既存0.99許容はそのまま+最安値フロアガード+シェイクアウト検出をスコアのみに反映)を実装。
+  `check_vcp_must_conditions`/`vcp_quality_score`はdiagnostics dictを返すよう変更(呼び出し元は
+  `evaluate_vcp`のみ、後方互換は不要と判断)。`evaluate_vcp`結果に`shakeout_detected`と
+  `vcp_diagnostics`をトップレベルで追加。
+- `src/report/build_site.py`: `vcp_detail`に`depth_last_pct`・`last_depth_max_pct`・
+  `volume_dryup`(recent10_median等)・`shakeout_detected`を追加(vcp_diagnosticsからの転記のみ、再計算しない)。
+- `src/report/summary.py`: `volume_dryup_ratio`参照を`volume_dryup_median_ratio`にリネーム(V5判定文言・
+  根拠テキスト両方)。`compute_momentum`に`vol_median_ratio_10_50`(既存の平均ベース`vol_ratio_10_50`は
+  残置、乖離自体がスパイクシグナルとして有用なため)。根拠テキストがV5と同じ統計量(中央値)を
+  参照するよう統一。
+- `docs/assets/app.js` / `index.html`: MUST_FLAG_LABELS.vcp のV4/V5固定%表記を削除(設定駆動・OR判定
+  のため)。`renderMustChecklist`にvcpDetail引数を追加し実測値/閾値・シェイクアウトバッジを表示。
+  フットプリント欄とbuildAnalysisMarkdownにdepth_last_pct併記。キャッシュバスターapp.js?v=20→21、
+  style.css?v=17→18。
+- テスト: `tests/test_vcp.py`に新規4件(前半逆転許容、V5中央値の単発スパイク耐性、V7シェイクアウト検出、
+  V4緩和後のタイトネススコア非最大)。`tests/test_summary.py`の`_CFG`を新config形状に更新。
+
+### 詰まった点と教訓
+- `FRONT_HALF_VIOLATION_CONTROL_POINTS`の初期設計が誤り: peak2の価格をT0超に設定したため
+  `find_base_origin`がpeak2を新T0として選び直し、意図した形状が崩れて1件失敗した。
+  さらに一般に、「ピークがT0を超えない」制約下では**収縮1→収縮2間**の深さ逆転は
+  安値が単調非減少のままでは原理的に作れない(安値の床がT0で決まる上限を超えられないため)ことが
+  判明。既存の`REVERSED_CONTROL_POINTS`(収縮3で逆転・後半判定)の形状はそのまま流用し、
+  末尾に同価格の「平坦延長」を1点追加してbase_daysだけ伸ばし、逆転位置の相対位置(30/43→30/64)を
+  後半→前半に押し込む形に修正して解決。
+- 検証中、Bashツールの安全性分類器(python実行系コマンドのみ)が長時間(1時間以上)断続的に
+  利用不能になる障害が発生。ScheduleWakeupで待機しつつ手計算による検算を進め、復旧後にpytest実行
+  →1件の失敗発見・修正→全261件パス、`node --check`もOKまで確認した。
+
+### 検証結果
+- `python3 -m pytest tests/ -q` → 261件全パス。
+- `node --check docs/assets/app.js` → OK。
+- ローカルhttp.serverでの目視確認(report.jsonが旧ロジック生成のため新フィールド欠損時のフォールバック
+  確認含む)は未実施(任意項目、優先度低のため保留)。
+
 ## 2026-07-12 (33): パスキー必須化 — docs/dataの暗号化 + 起動時ゲート(アクセス制御の実体化)
 
 ### 要望(ユーザー原文)
