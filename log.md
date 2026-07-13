@@ -2,6 +2,28 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 恒久ルール: Cowork(sandbox)からの git commit/push 手順
+
+sandboxのマウント経由では `.git/` 配下にファイルを**作成はできるが削除(unlink)できない**。
+そのため git 操作のたびに `index.lock` 等が残留し、次の操作が
+「Unable to create index.lock: File exists」で失敗する。以下の手順で回避すること。
+
+1. **git操作の前**: `.git/index.lock` が残っていたら Mac側の filesystem MCP
+   (`mcp__filesystem__move_file`)で `index.lock.staleN` にリネームして退避する
+   (sandboxのbashからは消せない。`rm`は Operation not permitted)。
+2. `git fetch` → 差分確認 → `git commit -am "..."`。コミット自体は
+   「unable to unlink」警告を出しつつも**成功する**。
+3. コミット後に残った `HEAD.lock`/`index.lock` も同様にリネームして退避。
+4. **push**: sandboxには git 認証情報がないため `git push` は不可
+   (`could not read Username for 'https://github.com'`)。**GitHub MCP の
+   `push_files` でAPI経由push**する(コミットSHAはローカルと別物になる)。
+   push後は `git fetch` + `git reset origin/master` でローカルを同期する
+   (このときも手順1のロック退避が必要)。
+5. `.git/*.stale*` / `*.bak*` はただのゴミ。ユーザーがMacから手動削除してよい。
+
+注意: GitHub MCP が「Bad credentials」を返す場合はトークン切れ。
+ユーザーにGitHubコネクタの再連携を依頼すること。
+
 ## 2026-07-13 (41): チャートカード統合・リスト表sticky化・市況マージン修正
 
 ### 要望(ユーザー原文)
