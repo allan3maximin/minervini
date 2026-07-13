@@ -134,8 +134,11 @@ function heatmapHeight() {
   const top = panels ? panels.getBoundingClientRect().top : 0;
   const bar = document.querySelector(".hm-bottom-bar");
   const barH = bar ? bar.getBoundingClientRect().height : 0;
-  const reserve = barH + 58; // 下部トグルバー + ドック余白(見出し/凡例削除でマップを拡大)
-  return Math.max(360, Math.round(window.innerHeight - top - reserve));
+  // 下部バー(詳細/簡易・期間トグル)がDockに重ならないよう、Dockの実測高さも差し引く。
+  const dock = document.querySelector(".dock-nav");
+  const dockH = dock ? dock.getBoundingClientRect().height : 60;
+  const reserve = barH + dockH + 16; // 下部トグルバー + Dock + 余白
+  return Math.max(320, Math.round(window.innerHeight - top - reserve));
 }
 
 // ---------------------------------------------------------------------------

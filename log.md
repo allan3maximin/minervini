@@ -2,6 +2,31 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-13 (39): 3チャート統合を撤回+Dockを下寄せ+ヒートマップバーをDock上+ファンダ グラフ→表順
+
+### 要望(ユーザー原文)
+> やっぱ株価などの3グラフは別々にして / メインDockはもっと下に寄せて / ヒートマップの詳細〜60日ボタンは
+> Dockと重ならないように(Dockの上に来るように) / ファンダはグラフ→表の順に
+
+### 変更内容
+- 3グラフ統合(38)を撤回し**元の3チャート構成に戻した**:
+  - `docs/index.html`: `.chart-card`×3(株価/出来高/RS)を復元。`#chart-container`(chart-box)+
+    `#volume-container`/`#rs-container`(chart-box-small)、h2見出しも復元。
+  - `docs/assets/app.js` `renderCharts()`: `priceChart`/`volChart`/`rsChart` の3インスタンス+
+    `syncTimeScales` に復帰。日付ラベル/resizeも3ペイン対象に戻す。
+  - `docs/assets/style.css`: 未使用の `.chart-box-tall`(desktop/mobile)を削除。
+- Dockを下寄せ: `.dock-nav` の `bottom: 14px`→`max(2px, env(safe-area-inset-bottom))`。
+  二重適用になる `padding-bottom: max(6px, safe-area)` は削除。
+- ヒートマップ下部バーがDockに被る問題: `heatmapHeight()` の reserve を
+  `barH + 58`→`barH + Dock実測高 + 16` に。Dockの高さを毎回計測して差し引き、
+  バーが必ずDockの上に来るようにした。最小360→320。
+- ファンダ切替のボタン/パネル順を **グラフ→表** に入替(初期表示グラフは従来通り)。
+- キャッシュバスター: style.css v24→25, heatmap.js v14→15, app.js v26→27。
+
+### 検証
+- `node --check` app.js/heatmap.js OK。HTMLタグ balance div61/61・section18/18・footer0/0。
+- volume-container/rs-container/rs-card/volume-card=各1で3チャート復元を確認。
+
 ## 2026-07-13 (38): 不要要素削除+3チャート統合+期間トグル1行+ヒートマップ拡大+タブ改名
 
 ### 要望(ユーザー原文)

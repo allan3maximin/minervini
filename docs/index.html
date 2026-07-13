@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MinerviniScreener</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=24">
+<link rel="stylesheet" href="assets/style.css?v=25">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -216,10 +216,21 @@
 
   <section class="chart-card">
     <div class="chart-card-head">
+      <h2>株価・移動平均線</h2>
       <div id="ohlc-legend" class="ohlc-legend"></div>
     </div>
-    <div id="chart-container" class="chart-box chart-box-tall"></div>
+    <div id="chart-container" class="chart-box"></div>
   </section>
+
+  <section class="chart-card" id="volume-card">
+    <div class="chart-card-head"><h2>出来高</h2></div>
+    <div id="volume-container" class="chart-box chart-box-small"></div>
+  </section>
+
+      <section class="chart-card" id="rs-card">
+        <div class="chart-card-head"><h2>RSライン（対TOPIX相対力）</h2></div>
+        <div id="rs-container" class="chart-box chart-box-small"></div>
+      </section>
     </div>
 
     <div class="stock-panel" data-panel="fund">
@@ -284,8 +295,8 @@
 <script src="assets/github-api.js?v=6"></script>
 <script src="assets/webauthn-vault.js?v=6"></script>
 <script src="assets/fundamentals-modal.js?v=8"></script>
-<script src="assets/heatmap.js?v=14"></script>
+<script src="assets/heatmap.js?v=15"></script>
 <script src="assets/batch.js?v=2"></script>
-<script src="assets/app.js?v=26"></script>
+<script src="assets/app.js?v=27"></script>
 </body>
 </html>

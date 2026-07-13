@@ -1122,8 +1122,11 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
     container.innerHTML = `
       ${btnHtml}
       <div class="fund-view-toggle segmented" role="tablist">
-        <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
         <button type="button" class="${view === "chart" ? "active" : ""}" data-fund-view="chart">グラフ</button>
+        <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
+      </div>
+      <div id="fund-view-chart" class="fund-view-panel"${view === "table" ? " hidden" : ""}>
+        ${fundChartHtml(quarters, byQuarter)}
       </div>
       <div id="fund-view-table" class="fund-view-panel"${view === "chart" ? " hidden" : ""}>
         <div class="table-scroll">
@@ -1134,9 +1137,6 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
             <tbody>${rowsHtml}</tbody>
           </table>
         </div>
-      </div>
-      <div id="fund-view-chart" class="fund-view-panel"${view === "table" ? " hidden" : ""}>
-        ${fundChartHtml(quarters, byQuarter)}
       </div>
       ${metaLine}
     `;
@@ -1699,12 +1699,19 @@ function renderCharts(chart) {
   const dailyVolume = colorizeVolume(chart);
 
   const priceEl = document.getElementById("chart-container");
+  const volEl = document.getElementById("volume-container");
+  const rsEl = document.getElementById("rs-container");
   const hasRs = !!(chart.rs_line && chart.rs_line.length);
+  // 銘柄を切り替えた時にRS無し→ありへ戻せるよう、DOMからremove()するのではなく
+  // hidden切り替えにする(remove()すると次にRSありの銘柄を見てもrs-cardが復活しない)。
+  const rsCard = document.getElementById("rs-card");
+  if (rsCard) rsCard.hidden = !hasRs;
 
-  // 株価・移動平均線・出来高・RSラインを1つのチャートに統合(縦スペース節約)。
-  // v4にはネイティブなペイン分割が無いので、オーバーレイ価格スケール
-  // (priceScaleId + scaleMargins)で領域を縦に分けて重ねる。
+  // Each pane lives in its own card now, so each shows its own time axis
+  // (they still pan/zoom in lockstep via syncTimeScales).
   const priceChart = makeChart(priceEl, { showTimeAxis: true });
+  const volChart = makeChart(volEl, { showTimeAxis: true });
+  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true }) : null;
 
   const candleSeries = priceChart.addCandlestickSeries({
     upColor: CHART_COLORS.up,
@@ -1714,32 +1721,16 @@ function renderCharts(chart) {
     wickUpColor: CHART_COLORS.up,
     wickDownColor: CHART_COLORS.down,
   });
-  // メイン右軸(ローソク+MA): 上5% / 下28% を空けて下段を出来高に譲る。
-  candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
   const ma50 = priceChart.addLineSeries({ color: "#60a5fa", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   const ma150 = priceChart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   const ma200 = priceChart.addLineSeries({ color: "#c084fc", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
 
-  // 出来高: 独立オーバーレイスケールでペイン下段(下から約22%)に固定。
-  const volSeries = priceChart.addHistogramSeries({
-    priceFormat: { type: "volume" },
-    priceScaleId: "vol",
-    lastValueVisible: false,
-    priceLineVisible: false,
-  });
-  volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  const volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" } });
+  // Pin the histogram base to the pane's bottom edge so the auto-scaled
+  // axis never extends into negative territory.
+  volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0 } });
 
-  // RSライン: 独立オーバーレイスケール。株価領域に重ねて相対力の形状を表示。
-  const rsSeries = hasRs
-    ? priceChart.addLineSeries({
-        color: "#2dd4bf",
-        lineWidth: 1,
-        priceScaleId: "rs",
-        lastValueVisible: false,
-        priceLineVisible: false,
-      })
-    : null;
-  if (rsSeries) rsSeries.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
+  const rsSeries = rsChart ? rsChart.addLineSeries({ color: "#2dd4bf", lineWidth: 1 }) : null;
 
   // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
   // checkboxes in the toolbar. Handles are kept so the lines can be removed.
@@ -1781,7 +1772,8 @@ function renderCharts(chart) {
     }
   });
 
-  const charts = [priceChart];
+  const charts = [priceChart, volChart, ...(rsChart ? [rsChart] : [])];
+  syncTimeScales(charts);
   window.__minerviniCharts = charts; // debug/testing handle
 
   // ---- crosshair OHLCV legend -------------------------------------------
@@ -1884,7 +1876,7 @@ function renderCharts(chart) {
   if (lastDate) {
     const [, m, d] = lastDate.split("-");
     const shortDate = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
-    dateLabels = [priceEl].map((el) => ({ el, label: addLatestDateLabel(el, shortDate) }));
+    dateLabels = [priceEl, volEl, ...(rsChart ? [rsEl] : [])].map((el) => ({ el, label: addLatestDateLabel(el, shortDate) }));
   }
 
   const toggleOld = document.getElementById("timeframe-toggle");
@@ -1903,7 +1895,9 @@ function renderCharts(chart) {
   }
 
   const resizeHandler = () => {
-    priceChart.applyOptions({ width: priceEl.clientWidth, height: priceEl.clientHeight });
+    for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
+      c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    }
     for (const { el, label } of dateLabels) alignLatestDateLabel(el, label);
   };
   window.addEventListener("resize", resizeHandler);

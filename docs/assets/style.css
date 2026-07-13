@@ -861,7 +861,7 @@ a.nav-btn:hover { border-color: var(--link); }
 .dock-nav {
   position: fixed;
   left: 50%;
-  bottom: 14px;
+  bottom: max(2px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
@@ -872,7 +872,6 @@ a.nav-btn:hover { border-color: var(--link); }
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
   z-index: 50;
-  padding-bottom: max(6px, env(safe-area-inset-bottom));
 }
 .dock-btn {
   display: flex;
@@ -957,8 +956,6 @@ body:has(.dock-nav) { padding-bottom: 84px; }
 /* グラフパネルは1画面に収めるため、出来高/RSは縦圧縮しカード余白も詰める。 */
 .stock-panel .chart-toolbar { margin-top: 0; margin-bottom: 6px; }
 .stock-panel .chart-box { height: 280px; }
-/* 株価+移動平均線+出来高+RSを1枚に統合したメインチャート。縦を大きく取る。 */
-.stock-panel .chart-box-tall { height: 460px; }
 .stock-panel .chart-box-small { height: 84px; }
 .stock-panel .chart-card { margin-bottom: 6px; }
 .stock-panel .chart-card:last-child { margin-bottom: 0; }
@@ -1092,7 +1089,6 @@ body:has(.dock-nav) { padding-bottom: 84px; }
   .chart-box-small { height: 110px; }
   /* 個別グラフパネルはスマホでも1画面に収まるよう強めに圧縮 */
   .stock-panel .chart-box { height: 230px; }
-  .stock-panel .chart-box-tall { height: 66vh; min-height: 380px; }
   .stock-panel .chart-box-small { height: 74px; }
   .breadth-meter { gap: 6px 14px; padding: 8px 10px; }
   .page-header-actions button { flex: 1 1 auto; }
