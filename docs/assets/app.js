@@ -1713,10 +1713,11 @@ function renderCharts(chart) {
   const rsCard = document.getElementById("rs-card");
   if (rsCard) rsCard.hidden = !hasRs;
 
-  // Each pane lives in its own card now, so each shows its own time axis
-  // (they still pan/zoom in lockstep via syncTimeScales).
-  const priceChart = makeChart(priceEl, { showTimeAxis: true });
-  const volChart = makeChart(volEl, { showTimeAxis: true });
+  // 日付軸は最下段のペイン(RSがあればRS、無ければ出来高)だけに表示する。
+  // 3ペイン全部に出すと同じ日付が重複するため。パン/ズームはtimeScale.visible
+  // と独立してsyncTimeScales()で同期されるので、表示を1つに絞っても連動は保たれる。
+  const priceChart = makeChart(priceEl, { showTimeAxis: false });
+  const volChart = makeChart(volEl, { showTimeAxis: !hasRs });
   const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true }) : null;
 
   const candleSeries = priceChart.addCandlestickSeries({
@@ -1908,14 +1909,15 @@ function renderCharts(chart) {
 
   setTimeframe(String(DEFAULT_DAILY_BARS));
 
-  // 最新日付を各ペインの日付軸上に常時表示(オートticksは最新日を保証しないため)。
-  // 表示は年なしの「月/日」形式。
+  // 最新日付は日付軸を表示している最下段ペインにのみ表示する
+  // (オートticksは最新日を保証しないため自前で描画。表示は年なしの「月/日」形式)。
   const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
   let dateLabels = [];
   if (lastDate) {
     const [, m, d] = lastDate.split("-");
     const shortDate = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
-    dateLabels = [priceEl, volEl, ...(rsChart ? [rsEl] : [])].map((el) => ({ el, label: addLatestDateLabel(el, shortDate) }));
+    const bottomEl = rsChart ? rsEl : volEl;
+    dateLabels = [{ el: bottomEl, label: addLatestDateLabel(bottomEl, shortDate) }];
   }
 
   const toggleOld = document.getElementById("timeframe-toggle");
