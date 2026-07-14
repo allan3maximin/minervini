@@ -8,6 +8,7 @@ const STATUS_LABELS = {
   REJECTED: "ベース不合格",
   IMMATURE: "ベース形成中(日数不足)",
   TOO_RECENT: "高値更新中(ベース未形成)",
+  TOO_VOLATILE: "ボラ過大(VCP評価対象外)",
   NO_BASE: "ベース未検出",
 };
 const STATUS_ORDER = [
@@ -19,6 +20,7 @@ const STATUS_ORDER = [
   "REJECTED",
   "IMMATURE",
   "TOO_RECENT",
+  "TOO_VOLATILE",
   "NO_BASE",
 ];
 
@@ -127,6 +129,7 @@ async function initDashboard() {
 
   renderHeader(report);
   renderMarketSignal(breadth);
+  renderVcpFunnel(breadth);
   renderPositionsWarningBanner(positionsData);
   renderStalenessWarning(report);
   renderMarketOverview(indices);
@@ -488,6 +491,44 @@ function renderMarketSignal(breadth) {
     <ul class="market-signal-reasons">${reasons}</ul>
     <div class="market-signal-stats">MA200上回り率 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
     ${caution}
+  `;
+}
+
+// VCPファネル(P1銘柄の origin/status 内訳)。breadth.json history の各エントリの
+// vcp_funnel(pipeline -> update_breadth)に依存。origin=ok は V判定に到達した銘柄
+// (WATCH_A+WATCH_B+REJECTED)。TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
+// 高値追い局面→調整入りでセットアップが増える先行指標として直近60日を折れ線表示する。
+function renderVcpFunnel(breadth) {
+  const el = document.getElementById("vcp-funnel-card");
+  if (!el) return;
+  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
+  const withFunnel = history.filter((h) => h && h.vcp_funnel);
+  if (!withFunnel.length) {
+    el.hidden = true;
+    return;
+  }
+  const originOk = (f) =>
+    (f.WATCH_A || 0) + (f.WATCH_B || 0) + (f.REJECTED || 0);
+  const latest = withFunnel[withFunnel.length - 1].vcp_funnel;
+
+  // TOO_RECENT の直近60日推移。減少(高値追い→調整入り)を accent、増加を danger 表示。
+  const series = withFunnel.slice(-60).map((h) => ({ v: h.vcp_funnel.TOO_RECENT || 0 }));
+  const declining = series.length >= 2 && series[series.length - 1].v <= series[0].v;
+  const spark = sparklineSvg(series, declining);
+
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="vcp-funnel-title">VCPファネル(P1銘柄の内訳)</div>
+    <div class="vcp-funnel-stats">
+      <span>ベース到達(origin_ok): ${originOk(latest)}件</span>
+      <span>高値更新中(TOO_RECENT): ${latest.TOO_RECENT || 0}件</span>
+      <span>形成中(IMMATURE): ${latest.IMMATURE || 0}件</span>
+      <span>ボラ過大(TOO_VOLATILE): ${latest.TOO_VOLATILE || 0}件</span>
+    </div>
+    <div class="vcp-funnel-spark">
+      <span class="vcp-funnel-spark-label">TOO_RECENT 直近60日(減少=セットアップ増の先行シグナル)</span>
+      ${spark}
+    </div>
   `;
 }
 

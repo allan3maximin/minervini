@@ -78,7 +78,9 @@ def zigzag_swing_threshold(latest_row: dict, config: dict | None = None) -> floa
     config = config or load_config()
     vcp_cfg = config["vcp"]
     atr_pct = vcp_cfg["zigzag_atr_mult"] * latest_row["atr20"] / latest_row["close"]
-    return max(vcp_cfg["zigzag_min_pct"], atr_pct)
+    raw = max(vcp_cfg["zigzag_min_pct"], atr_pct)
+    cap = vcp_cfg.get("swing_th_cap")
+    return min(raw, cap) if cap else raw
 
 
 def compute_zigzag(base_df: pd.DataFrame, threshold: float) -> list[dict]:
@@ -144,6 +146,47 @@ def compute_zigzag(base_df: pd.DataFrame, threshold: float) -> list[dict]:
         pivots.insert(0, {"idx": 0, "price": highs[0], "type": "H"})
 
     return pivots
+
+
+def merge_shallow_pivots(pivots: list[dict], min_depth: float) -> list[dict]:
+    """Envelope-preserving merge of sub-`min_depth` swings.
+
+    Over-segmentation (a ZigZag that registers minor intra-base wiggles as
+    separate contractions) inflates the contraction count and mechanically
+    fails V1(count)/V2(monotonic)/V7(no-undercut). This folds away the
+    shallowest leg below `min_depth` and repeats: the removed pair's extreme
+    high/low are absorbed into the retained neighbours so the H/L envelope is
+    preserved (a merge, not a delete). T0 (index 0) and the final -- possibly
+    provisional -- pivot are never dropped, so the base's anchor and the
+    still-forming last contraction stay intact.
+    """
+    if not min_depth or len(pivots) < 4:
+        return pivots
+    p = [dict(pv) for pv in pivots]
+    # Only interior legs are eligible (need both i-1 and i+2 to exist), which
+    # also protects index 0 (T0) and the last two pivots (final contraction).
+    while len(p) >= 4:
+        shallow = None
+        for i in range(1, len(p) - 2):
+            hi = max(p[i]["price"], p[i + 1]["price"])
+            if hi <= 0:
+                continue
+            depth = abs(p[i]["price"] - p[i + 1]["price"]) / hi
+            if depth < min_depth and (shallow is None or depth < shallow[1]):
+                shallow = (i, depth)
+        if shallow is None:
+            break
+        i = shallow[0]
+        removed = (p[i], p[i + 1])
+        rem_high = max(removed, key=lambda pv: pv["price"])
+        rem_low = min(removed, key=lambda pv: pv["price"])
+        for nb in (p[i - 1], p[i + 2]):
+            if nb["type"] == "H" and rem_high["price"] > nb["price"]:
+                nb["price"], nb["idx"] = rem_high["price"], rem_high["idx"]
+            elif nb["type"] == "L" and rem_low["price"] < nb["price"]:
+                nb["price"], nb["idx"] = rem_low["price"], rem_low["idx"]
+        del p[i:i + 2]
+    return p
 
 
 def extract_contractions(pivots: list[dict]) -> list[dict]:
@@ -472,6 +515,23 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
     """
     config = config or load_config()
 
+    latest = df.iloc[-1].to_dict()
+
+    # ボラ過大チェック(V判定より前): ATR/close が閾値超の銘柄はZigZagがノイズを
+    # 収縮として拾いすぎ V1/V2/V7 を機械的に落とすため、土俵から外す。
+    excl = config["vcp"].get("atr_exclude_threshold")
+    close = latest.get("close")
+    atr_ratio = (latest["atr20"] / close) if (close and latest.get("atr20") is not None) else None
+    if excl and atr_ratio is not None and atr_ratio > excl:
+        return {
+            "status": "TOO_VOLATILE",
+            "must_flags": None,
+            "vcp_score": None,
+            "base_days": None,
+            "days_from_high": None,
+            "atr_ratio": round(atr_ratio, 4),
+        }
+
     origin = find_base_origin(df, config)
     if origin["status"] != "ok":
         return {
@@ -487,10 +547,9 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
     base_df = origin["base_df"]
     base_days = origin["base_days"]
 
-    latest = df.iloc[-1].to_dict()
-
     threshold = zigzag_swing_threshold(latest, config)
     pivots = compute_zigzag(base_df, threshold)
+    pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
     contractions = extract_contractions(pivots)
 
     flags, diagnostics = check_vcp_must_conditions(contractions, base_days, base_df, config)

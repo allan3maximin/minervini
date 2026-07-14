@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import datetime
 
 import jpholiday
@@ -172,6 +173,8 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     stock_records = []
     watch_count = 0
     actionable_count = 0
+    # VCP評価対象(P1)の origin/status 分布を地合い観測用に集計。
+    vcp_status_counts = Counter()
 
     for code, pr_eval in priority_by_code.items():
         tt_result = tt_by_code[code]
@@ -185,6 +188,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
         df_ind = indicator_by_code[code]
         vcp_result = vcp_mod.evaluate_vcp(df_ind, config)
+        vcp_status_counts[vcp_result["status"]] += 1
         entry_result = entry_mod.evaluate_entry(code, latest_by_code[code], vcp_result, history, config)
         fund_info = score_stock(code, latest_by_code[code], fundamentals_by_code, today, config)
 
@@ -316,6 +320,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     build_site.update_breadth(
         today_str, len(codes), template_pass, watch_count, history,
         priority_counts=pr_counts, market_signal=signal_result,
+        vcp_funnel=dict(vcp_status_counts),
     )
 
     watchlist_count = len(stock_records) - actionable_count

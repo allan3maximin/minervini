@@ -49,6 +49,18 @@ vcp:
   min_days_from_high: 5
   zigzag_min_pct: 0.03
   zigzag_atr_mult: 1.2
+  # 2026-07-14: ATR連動閾値の上限。激ボラ銘柄で swing_th が過大になり収縮列が
+  # 歪むのを防ぐ(swing_th = min(max(zigzag_min_pct, atr_mult×ATR/close), swing_th_cap))。
+  swing_th_cap: 0.08
+  # 2026-07-14: ATR/close がこの値を超える銘柄はボラ過大でVCP評価対象外(status=TOO_VOLATILE)。
+  # ZigZagがノイズを収縮として拾いすぎ V1/V2/V7 を機械的に落とすため、土俵から外す。
+  atr_exclude_threshold: 0.09
+  # 2026-07-14: 深さがこの値未満のスイングは独立した収縮とせず隣接波へマージする
+  # (削除ではなくマージ。高値・安値の包絡構造を保持しマージ後の深さで再計算)。
+  # 過分割による収縮数の水増し(→V1超過・V2非単調・V7切り下げの機械的不合格)を抑える。
+  # 2026-07-14時点で不活性(ZigZag確定脚は swing閾値3%以上のため 0.02 では発火しない)。
+  # swing_th_cap変更時や閾値見直し時は scripts/diag_vcp_funnel.py で感度を再確認すること。
+  min_contraction_depth: 0.02
   contraction_count: [2, 6]
   # 2026-07-12: 1.0(許容ゼロ)→1.2。ZigZag測定ノイズ程度の深さ逆転で落選していたため緩和。
   # バックテスト(400営業日)で緩和により追加されるセットアップの期待R 1.25 と現行合格組(0.82)より

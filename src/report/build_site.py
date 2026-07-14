@@ -30,7 +30,8 @@ STATUS_ORDER = {
     "REJECTED": 5,
     "IMMATURE": 6,
     "TOO_RECENT": 7,
-    "NO_BASE": 8,
+    "TOO_VOLATILE": 8,
+    "NO_BASE": 9,
 }
 TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2}
 
@@ -219,6 +220,7 @@ def update_breadth(
     keep_days: int = 60,
     priority_counts: dict | None = None,
     market_signal: dict | None = None,
+    vcp_funnel: dict | None = None,
 ) -> dict:
     breadth = load_breadth()
     entry = {
@@ -241,6 +243,10 @@ def update_breadth(
         )
     if market_signal is not None:
         entry.update(market_signal)
+    if vcp_funnel is not None:
+        # VCP評価対象(P1)の origin/status 分布を地合い観測用に記録。
+        # 二段目リーダーが高値更新中(TOO_RECENT)で土俵に乗らない比率などを追う。
+        entry["vcp_funnel"] = vcp_funnel
     breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
     breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]

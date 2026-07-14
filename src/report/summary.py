@@ -29,6 +29,7 @@ STATUS_LABELS_JA = {
     "REJECTED": "ベース不合格",
     "IMMATURE": "ベース形成中(日数不足)",
     "TOO_RECENT": "高値更新中(ベース未形成)",
+    "TOO_VOLATILE": "ボラ過大(VCP評価対象外)",
     "NO_BASE": "ベース未検出",
 }
 

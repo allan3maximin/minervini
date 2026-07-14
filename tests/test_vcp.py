@@ -4,7 +4,7 @@ import pytest
 
 from src.config import load_config
 from src.indicators import add_atr, add_moving_averages
-from src.screener.vcp import _check_v5, evaluate_vcp
+from src.screener.vcp import _check_v5, evaluate_vcp, merge_shallow_pivots
 
 # T0 (base origin) sits after a 100-day gradual run-up from 70 -> ~100.
 RUNUP_DAYS = 100
@@ -215,3 +215,92 @@ def test_vcp_v4_relaxed_ceiling_but_tightness_score_not_perfect():
     assert result["status"] == "WATCH_A", result
     # 11% is well short of last_depth_perfect (5%): tightness shouldn't be maxed.
     assert 0 < result["components"]["tightness"] < 10
+
+
+# --- (b) 包絡保存マージ: merge_shallow_pivots -------------------------------
+
+def test_merge_shallow_pivots_folds_subthreshold_interior_leg():
+    """min_depth 未満の内側スイングは独立収縮とせず隣接波へ畳み込む。
+
+    ここでは 90H->89.1L(深さ~1%)が min_depth(2%)未満なので除去され、
+    ピボット数が2つ減る(=収縮1本ぶん)。T0(idx0)と最終ピボットは保護される。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 5, "price": 80.0, "type": "L"},   # depth 20%
+        {"idx": 10, "price": 90.0, "type": "H"},
+        {"idx": 12, "price": 89.1, "type": "L"},  # 90->89.1 = 1% shallow
+        {"idx": 18, "price": 95.0, "type": "H"},
+        {"idx": 24, "price": 85.0, "type": "L", "provisional": True},
+    ]
+    merged = merge_shallow_pivots([dict(p) for p in pivots], 0.02)
+
+    assert len(merged) == len(pivots) - 2
+    assert merged[0]["idx"] == 0 and merged[0]["price"] == 100.0  # T0 kept
+    assert merged[-1]["idx"] == 24  # final (provisional) pivot kept
+    # 包絡(全体の高値・安値の輪郭)は不変。
+    assert max(p["price"] for p in merged) == 100.0
+    assert min(p["price"] for p in merged) == 80.0
+
+
+def test_merge_shallow_pivots_absorbs_extreme_into_neighbor():
+    """浅い脚が局所ピークを含む場合、そのピークは隣接H波へ吸収され消えない。
+
+    95H を含む 95H->94L の脚が min_depth 未満で除去されるが、95 は隣の 90H より
+    高いので隣接Hに吸収される(削除ではなくマージ=包絡の保存)。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 5, "price": 80.0, "type": "L"},
+        {"idx": 10, "price": 95.0, "type": "H"},  # local peak, to be absorbed
+        {"idx": 12, "price": 94.0, "type": "L"},  # 95->94 = ~1% shallow
+        {"idx": 18, "price": 90.0, "type": "H"},  # neighbor H (lower than 95)
+        {"idx": 24, "price": 82.0, "type": "L", "provisional": True},
+    ]
+    merged = merge_shallow_pivots([dict(p) for p in pivots], 0.02)
+
+    assert len(merged) == len(pivots) - 2
+    # 95 のピークは消えず、隣接Hに idx ごと吸収されている。
+    assert any(p["price"] == 95.0 and p["idx"] == 10 for p in merged)
+
+
+def test_merge_shallow_pivots_noop_when_disabled():
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 5, "price": 80.0, "type": "L"},
+        {"idx": 10, "price": 90.0, "type": "H"},
+        {"idx": 12, "price": 89.1, "type": "L"},
+        {"idx": 18, "price": 95.0, "type": "H"},
+        {"idx": 24, "price": 85.0, "type": "L"},
+    ]
+    assert merge_shallow_pivots([dict(p) for p in pivots], 0.0) == pivots
+
+
+# --- (d) ボラ過大除外: TOO_VOLATILE ----------------------------------------
+
+def test_vcp_too_volatile_excluded_before_v_checks():
+    """ATR/close が atr_exclude_threshold(9%)を超える銘柄は V判定前に除外。"""
+    n = 160
+    dates = pd.bdate_range("2023-01-01", periods=n)
+    close = np.linspace(70.0, 100.0, n)
+    # 日々の高安レンジを終値の約14%に設定 → ATR20/close ≈ 0.13 > 0.09。
+    high = close * 1.07
+    low = close * 0.93
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": close,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": [150_000.0] * n,
+        }
+    )
+    df = add_moving_averages(df)
+    df = add_atr(df, 20)
+
+    result = evaluate_vcp(df)
+
+    assert result["status"] == "TOO_VOLATILE", result
+    assert result["must_flags"] is None
+    assert result["atr_ratio"] > 0.09
