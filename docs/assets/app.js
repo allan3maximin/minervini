@@ -138,6 +138,9 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
+  // 縦横の同時スクロール(斜め移動)を禁止する対象は、実際のスクロールコンテナ
+  // である *-tier-body 要素(style.css: .list-panel [id$="-tier-body"])。
+  ["confirmed-tier-body", "pool-tier-body", "watchlist-tier-body"].forEach((id) => lockDiagonalScroll(document.getElementById(id)));
   startLiveIndices();
 }
 
@@ -685,6 +688,27 @@ function renderTable(stocks, tier, options = {}) {
 
   draw();
   return wrapper;
+}
+
+// トラックパッドの斜めスワイプで表が縦横同時に動く(斜め移動)のを禁止する。
+// wheelイベント1回ごとに縦横で絶対値が大きい方の軸だけ適用し、もう片方は無視する。
+// initDashboard()はモーダル保存後に再実行されることがあるため、二重登録防止に
+// dataset フラグでガードする。
+function lockDiagonalScroll(el) {
+  if (!el || el.dataset.axisLockWired) return;
+  el.dataset.axisLockWired = "1";
+  el.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        el.scrollLeft += e.deltaX;
+      } else {
+        el.scrollTop += e.deltaY;
+      }
+    },
+    { passive: false }
+  );
 }
 
 function formatClose(v) {
