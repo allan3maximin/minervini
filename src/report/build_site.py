@@ -103,7 +103,38 @@ def assemble_stock_record(
         # サマリー生成(summary.py)・個別銘柄画面用のVCP文脈。footprint文字列
         # より一段細かい素の数値(ベース日数・高値からの日数・各収縮の深さ%)。
         "vcp_detail": _build_vcp_detail(vcp_result, config),
+        # 枯れ度(DRY-UP)バッジ/ソート用。VCP MUST・vcp_scoreとは独立(表示専用、
+        # スコア融合なし)。バッジ値=dryup_med_10_50。
+        "dryup": _build_dryup_badge(vcp_result, config),
     }
+
+
+def _build_dryup_badge(vcp_result: dict, config: dict) -> dict:
+    """DRY-UPバッジ用レコード。
+
+    バッジ値 dryup_med_10_50 は V5(a)診断の recent10_median/vol_ma50 と同一系列
+    (indicators.dryup_metrics の定義と一致。base_df 末尾=full df 末尾のため tail(10)
+    も一致する)。config.dryup の2段閾値で badge 種別(激枯れ/枯れ気味)を決める。
+    VCP MUST・vcp_score には一切融合しない(「スコアは順位付け、フラグは事実」)。
+    """
+    diagnostics = vcp_result.get("vcp_diagnostics") or {}
+    v5 = diagnostics.get("v5") or {}
+    med = v5.get("recent10_median")
+    vol_ma50 = v5.get("vol_ma50")
+    value = round(med / vol_ma50, 4) if (med is not None and vol_ma50) else None
+
+    d = config.get("dryup", {})
+    strong_th = d.get("dryup_badge_strong", 0.66)  # ≒p25
+    mild_th = d.get("dryup_badge_mild", 0.77)      # ≒p50
+    if value is None:
+        badge = None
+    elif value <= strong_th:
+        badge = "extreme"   # 激枯れ
+    elif value <= mild_th:
+        badge = "dryup"     # 枯れ気味
+    else:
+        badge = None
+    return {"value": value, "badge": badge}
 
 
 def _build_vcp_detail(vcp_result: dict, config: dict) -> dict:

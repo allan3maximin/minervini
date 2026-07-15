@@ -35,6 +35,65 @@ def test_assemble_stock_record_confirmed_uses_full_score_for_total():
     assert record["total_score"] == 75.0  # (80*0.5 + 70*0.5)
 
 
+DRYUP_CONFIG = {
+    "dryup": {"dryup_badge_strong": 0.66, "dryup_badge_mild": 0.77},
+    "scoring": {"phase1_weight": 0.5, "vcp_weight": 0.5},
+    "vcp": {"last_depth_max": 0.12},
+}
+
+
+def _vcp_with_v5(recent10_median, vol_ma50):
+    return {
+        "vcp_score": 70.0,
+        "footprint": "7W 18/9/4 3T",
+        "must_flags": {"V1": True},
+        "contractions": [],
+        "vcp_diagnostics": {"v5": {"recent10_median": recent10_median, "vol_ma50": vol_ma50}},
+    }
+
+
+def test_dryup_badge_extreme():
+    # med/vol_ma50 = 0.30 <= 0.66 -> 激枯れ(extreme)
+    vcp_result = _vcp_with_v5(300.0, 1000.0)
+    entry_result = {"status": "WATCH_A", "pivot": 1280}
+    record = assemble_stock_record(
+        "7134", "T", CONFIG_LATEST, {}, vcp_result, entry_result, _fund_info(), DRYUP_CONFIG
+    )
+    assert record["dryup"]["value"] == 0.3
+    assert record["dryup"]["badge"] == "extreme"
+
+
+def test_dryup_badge_dry():
+    # 0.70: > 0.66 (strong) but <= 0.77 (mild) -> 枯れ気味(dryup)
+    vcp_result = _vcp_with_v5(700.0, 1000.0)
+    entry_result = {"status": "WATCH_A", "pivot": 1280}
+    record = assemble_stock_record(
+        "7134", "T", CONFIG_LATEST, {}, vcp_result, entry_result, _fund_info(), DRYUP_CONFIG
+    )
+    assert record["dryup"]["badge"] == "dryup"
+
+
+def test_dryup_badge_none_above_threshold():
+    # 0.85 > 0.6 -> no badge, value still present
+    vcp_result = _vcp_with_v5(850.0, 1000.0)
+    entry_result = {"status": "WATCH_A", "pivot": 1280}
+    record = assemble_stock_record(
+        "7134", "T", CONFIG_LATEST, {}, vcp_result, entry_result, _fund_info(), DRYUP_CONFIG
+    )
+    assert record["dryup"]["value"] == 0.85
+    assert record["dryup"]["badge"] is None
+
+
+def test_dryup_badge_missing_diagnostics():
+    vcp_result = {"vcp_score": None, "footprint": None, "must_flags": None, "contractions": []}
+    entry_result = {"status": "WATCH_B", "pivot": None}
+    record = assemble_stock_record(
+        "7134", "T", CONFIG_LATEST, {}, vcp_result, entry_result, _fund_info(tier="pool", full_score=None), DRYUP_CONFIG
+    )
+    assert record["dryup"]["value"] is None
+    assert record["dryup"]["badge"] is None
+
+
 def test_assemble_stock_record_pool_uses_tech_score_for_total():
     tt_flags = {"cond1": True}
     vcp_result = {"vcp_score": 70.0, "footprint": "7W 18/9/4 3T", "must_flags": {"V1": True}, "contractions": []}

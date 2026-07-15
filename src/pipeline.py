@@ -26,8 +26,9 @@ from src.data.fundamentals import (
     score_stock,
     write_public_json,
 )
-from src.indicators import compute_all, rs_percentile_rank
+from src.indicators import build_dryup_layer, compute_all, rs_percentile_rank
 from src.report import build_site
+from src.report import dryup_log as dryup_log_mod
 from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
 from src.report import positions as positions_mod
@@ -171,6 +172,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
     today_str = today.isoformat()
     stock_records = []
+    dryup_records = []  # 本番フォワード検証: WATCH_A/B の枯れ度レイヤーを毎日追記
     watch_count = 0
     actionable_count = 0
     # VCP評価対象(P1)の origin/status 分布を地合い観測用に集計。
@@ -210,6 +212,24 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
             if entry_result["status"] in ("WATCH_A", "WATCH_B"):
                 watch_count += 1
+                # 本番フォワード検証用: 枯れ度レイヤー(indicators.build_dryup_layer が
+                # 唯一の生成点。ここで再実装しない)を1行1レコードで蓄積する。
+                base_days = vcp_result.get("base_days")
+                base_start_idx = (len(df_ind) - base_days) if base_days else None
+                dryup_layer = build_dryup_layer(
+                    df_ind,
+                    -1,
+                    base_start_idx,
+                    entry_result.get("pivot"),
+                    vcp_result.get("shakeout_detected", False),
+                    latest_by_code[code].get("vol_ma50"),
+                )
+                dryup_records.append(
+                    dryup_log_mod.build_log_record(
+                        today_str, code, entry_result["status"], dryup_layer,
+                        entry_result.get("pivot"),
+                    )
+                )
 
             record = build_site.assemble_stock_record(
                 code,
@@ -259,6 +279,17 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         build_site.write_chart_data(code, chart_data)
 
     entry_mod.save_status_history(history)
+
+    # 本番フォワード検証: 既存レコードの outcome を解決 → 当日の WATCH_A/B を追記。
+    # 失敗してもスクリーナー本体は止めない(検証用の副次成果物)。
+    try:
+        dryup_stat = dryup_log_mod.log_and_resolve(dryup_records, indicator_by_code, config)
+        print(
+            f"Dry-up log: appended {dryup_stat['appended']}, "
+            f"resolved {dryup_stat['resolved']}, total {dryup_stat['total']}."
+        )
+    except Exception as e:
+        print(f"Dry-up log update failed (ignored): {e}")
 
     # 機能B: セクターヒートマップ生成 + セクター強度属性の付与。
     # 失敗してもスクリーナー本体は止めない。

@@ -90,6 +90,113 @@ def compute_all(df: pd.DataFrame, benchmark_close: pd.Series | None = None) -> p
     return df
 
 
+# ---------------------------------------------------------------------------
+# 枯れ度(DRY-UP)レイヤー: VCP MUST判定(V1〜V7)とも vcp_score とも独立した
+# バッジ/ソート用メトリクス。閾値の予測力検証(バックテスト)と本番フォワード
+# ログの両方が、必ずこの共通関数から値を取得する(summary.py事故=再実装ドリフト
+# の再発防止。バックテスト側・pipeline側で決して再実装しないこと)。
+# ---------------------------------------------------------------------------
+
+def _window(arr: np.ndarray, end_idx: int, k: int) -> np.ndarray:
+    lo = max(0, end_idx - k + 1)
+    return arr[lo : end_idx + 1]
+
+
+def dryup_metrics(
+    df: pd.DataFrame,
+    idx: int = -1,
+    base_start_idx: int | None = None,
+    vol_ma50: float | None = None,
+) -> dict:
+    """指定行 idx 時点の枯れ度/タイトネス素メトリクスを算出する(point-in-time)。
+
+    - dryup_avg_5_50 : 直近5日平均出来高 / vol_ma50
+    - dryup_med_10_50: 直近10日出来高中央値 / vol_ma50  (V5(a)と同一系列)
+    - tightness_10d  : 直近10日の (max(high)-min(low)) / close
+    - is_tightest_in_base: tightness_10d が base_start_idx〜idx のベース内10日窓で
+      最小か(bool)。base_start_idx=None なら None。
+
+    `df` は単一銘柄の指標付きフレーム(vol_ma50 列を持つ)。idx は位置インデックス
+    (負値は末尾からの相対)。全て backward-looking なので、フルhistoryに対して
+    任意の idx を渡してもルックアヘッドは起きない。
+    """
+    n = len(df)
+    empty = {
+        "dryup_avg_5_50": None,
+        "dryup_med_10_50": None,
+        "tightness_10d": None,
+        "is_tightest_in_base": None,
+    }
+    if n == 0:
+        return empty
+    i = idx if idx >= 0 else n + idx
+    if i < 0 or i >= n:
+        return empty
+
+    vol = df["volume"].to_numpy(dtype="float64")
+    high = df["high"].to_numpy(dtype="float64")
+    low = df["low"].to_numpy(dtype="float64")
+    close = df["close"].to_numpy(dtype="float64")
+
+    if vol_ma50 is None and "vol_ma50" in df.columns:
+        vm = float(df["vol_ma50"].to_numpy(dtype="float64")[i])
+        vol_ma50 = vm if not np.isnan(vm) else None
+
+    last5 = _window(vol, i, 5)
+    last10 = _window(vol, i, 10)
+    dryup_avg_5_50 = float(last5.mean()) / vol_ma50 if vol_ma50 else None
+    dryup_med_10_50 = float(np.median(last10)) / vol_ma50 if vol_ma50 else None
+
+    w_high = float(_window(high, i, 10).max())
+    w_low = float(_window(low, i, 10).min())
+    tightness_10d = (w_high - w_low) / close[i] if close[i] else None
+
+    is_tightest_in_base = None
+    if base_start_idx is not None and tightness_10d is not None:
+        # ベース内の各10日窓(末尾 j)を走査し、現在窓が最小タイトネスか判定する。
+        # 10日ぶんのバーが必要なので窓末尾は max(base_start_idx+9, 9) から。
+        start = max(base_start_idx + 9, 9)
+        is_tightest_in_base = True
+        for j in range(start, i + 1):
+            jh = float(_window(high, j, 10).max())
+            jl = float(_window(low, j, 10).min())
+            if close[j]:
+                t = (jh - jl) / close[j]
+                if t < tightness_10d - 1e-9:
+                    is_tightest_in_base = False
+                    break
+
+    return {
+        "dryup_avg_5_50": round(float(dryup_avg_5_50), 4) if dryup_avg_5_50 is not None else None,
+        "dryup_med_10_50": round(float(dryup_med_10_50), 4) if dryup_med_10_50 is not None else None,
+        "tightness_10d": round(float(tightness_10d), 4) if tightness_10d is not None else None,
+        "is_tightest_in_base": is_tightest_in_base,
+    }
+
+
+def build_dryup_layer(
+    df: pd.DataFrame,
+    idx: int,
+    base_start_idx: int | None,
+    pivot: float | None,
+    shakeout_detected: bool,
+    vol_ma50: float | None = None,
+) -> dict:
+    """枯れ度レイヤーの完全レコード(バックテスト・pipeline共通の唯一の生成点)。
+
+    dryup_metrics の4指標に、既存の正準ソースから取る shakeout_detected(vcp)と
+    dist_to_pivot(entry)を束ねる。dist_to_pivot は entry.dist_to_pivot_pct を再利用
+    (再実装しない)。
+    """
+    from src.screener.entry import dist_to_pivot_pct  # 遅延import(循環回避)
+
+    m = dryup_metrics(df, idx, base_start_idx, vol_ma50)
+    close = float(df["close"].to_numpy(dtype="float64")[idx if idx >= 0 else len(df) + idx])
+    m["shakeout_detected"] = bool(shakeout_detected)
+    m["dist_to_pivot"] = dist_to_pivot_pct(pivot, close) if pivot else None
+    return m
+
+
 def rs_percentile_rank(rs_raw_by_code: dict[str, float]) -> dict[str, int]:
     """Cross-sectional percentile rank -> integer RS 1-99, per design doc 2.3.
 

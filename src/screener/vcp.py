@@ -459,6 +459,17 @@ def vcp_quality_score(
         if depths
         else 0.0
     )
+    # 案Y(2026-07-15採用): tightness加点は「枯れ」銘柄にのみ与える。dryup_med_10_50
+    # (=V5(a)の recent10_median/vol_ma50。再算出せずV5診断から取得し系列ドリフトを回避)が
+    # dryup.dryup_badge_mild 以上(=枯れ不足)なら加点をゼロにする。足切りではなく加点の条件化。
+    # dryup_med が取れない場合は保守側(従来どおり加点)。
+    if tightness > 0 and vcp_cfg.get("tightness_requires_dryup"):
+        v5d = diagnostics.get("v5", {})
+        r10, vma = v5d.get("recent10_median"), v5d.get("vol_ma50")
+        dryup_med = (r10 / vma) if (r10 is not None and vma) else None
+        mild = config.get("dryup", {}).get("dryup_badge_mild", 0.77)
+        if dryup_med is not None and dryup_med >= mild:
+            tightness = 0.0
 
     if len(depths) >= 2:
         ratios = [depths[i] / depths[i - 1] for i in range(1, len(depths)) if depths[i - 1] > 0]

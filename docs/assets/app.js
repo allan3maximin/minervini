@@ -49,6 +49,17 @@ function sectorStrengthHtml(s) {
   return `${escapeHtml(s.sector33)} ${badge}`;
 }
 
+// 枯れ度列: dryup_med_10_50 の値と2段階バッジ(枯れ気味/激枯れ)を表示する。
+// バッジ種別(dryup.badge)はサーバ側(build_site._build_dryup_badge)がconfig閾値で確定済み。
+function dryupBadgeHtml(s) {
+  const d = s.dryup;
+  if (!d || d.value == null) return "-";
+  const v = Number(d.value).toFixed(2);
+  if (d.badge === "extreme") return `<span class="dryup-badge dryup-badge-extreme">激枯れ ${v}</span>`;
+  if (d.badge === "dryup") return `<span class="dryup-badge dryup-badge-dry">枯れ気味 ${v}</span>`;
+  return v; // 閾値超(枯れていない)は数値のみ
+}
+
 const COLUMNS = [
   { key: "name", label: "銘柄名", value: (s) => trimName(s.name), title: (s) => s.name },
   { key: "code", label: "コード", value: (s) => s.code },
@@ -76,6 +87,17 @@ const COLUMNS = [
       const depthLast = s.vcp_detail && s.vcp_detail.depth_last_pct;
       return depthLast != null ? `${s.footprint} (最終${depthLast}%)` : s.footprint;
     },
+  },
+  {
+    key: "dryup",
+    label: "枯れ度",
+    html: true,
+    // バッジ値=dryup_med_10_50(直近10日出来高中央値/vol_ma50)。小さいほど枯れている。
+    // VCP MUST・vcp_scoreとは独立の表示専用レイヤー(スコア融合なし)。
+    value: (s) => dryupBadgeHtml(s),
+    // 枯れているほど上位に来るよう -value でソート(高値距離列と同じ向き)。値なしは最下段。
+    sortValue: (s) =>
+      s.dryup && s.dryup.value != null ? -s.dryup.value : -Infinity,
   },
   { key: "pivot", label: "ピボット", value: (s) => s.pivot ?? "-" },
   { key: "buy_stop", label: "推奨逆指値", value: (s) => s.buy_stop ?? "-" },

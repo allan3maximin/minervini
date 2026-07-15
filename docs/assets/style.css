@@ -671,6 +671,24 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--accent);
 }
 
+/* 枯れ度(DRY-UP)バッジ。VCP MUST/vcp_scoreとは独立の表示専用。2段階(枯れ気味/激枯れ)。 */
+.dryup-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dryup-badge-dry {
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+}
+.dryup-badge-extreme {
+  background: rgba(56, 189, 248, 0.34);
+  color: #e0f2fe;
+}
+
 /* ---------------------------------------------- ポジションサイジング計算機 */
 
 .sizing-inputs {

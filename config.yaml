@@ -92,6 +92,13 @@ vcp:
   # (コンポーネント自身の0-1比率換算・上限1.0でクリップ)。
   vol_trend_bonus_fraction: 0.15
   score_weights: {tightness: 30, halving: 20, vol_trend: 20, first_depth: 15, duration: 15}
+  # 2026-07-15採用(案Y): tightness配点の条件化。直近10日出来高中央値/vol_ma50
+  # (dryup_med_10_50, V5(a)同一系列)が dryup.dryup_badge_mild 未満の「枯れ」銘柄にのみ
+  # tightness加点を与え、枯れ不足銘柄は加点ゼロにする。足切りではなく加点の条件化。
+  # 背景: 交絡調査でタイト単独は無価値〜逆効果。検証で加点コホート期待R 0.73→1.05、
+  # 総合スコア上位50%期待R 0.53→0.86(+0.33R)。MUST(V1〜V7)は不変。dryup値が
+  # 取れない(None)場合は従来どおり加点(ゲート無効=保守側)。
+  tightness_requires_dryup: true
 
 entry:
   breakout_vol_mult: 1.4
@@ -147,6 +154,17 @@ edinetdb:
   earnings_limit: 8         # /earnings の limit (default 8, max 30)
   codemap_refresh_days: 30  # 証券コード→EDINETコード表の再取得間隔
   max_quarters_keep: 12     # jquants と同じ
+
+# 枯れ度(DRY-UP)ダッシュボード表示レイヤー。VCP MUST条件(V1〜V7)とも vcp_score とも
+# 独立したバッジ/ソート用メトリクス(スコア融合はしない=「スコアは順位付け、フラグは事実」)。
+# 判定・表示・ソートは全て dryup_med_10_50(直近10日出来高中央値/vol_ma50)に統一。
+# 閾値は 2026-07-15 バックテスト(全992銘柄/400日/日次、値ありセットアップ n=167)の
+# 実分布パーセンタイル由来: strong≒p25(0.6598)、mild≒p50(0.7672)を丸めて採用。
+# 米株仮置きの固定 0.4/0.6 は東証実分布(中央値0.77)では厳しすぎ、ほぼ点灯しないため置換。
+# 四半期ごとに data/dryup_log.jsonl の本番フォワード実測と突合して再検証すること(次回 2026-10)。
+dryup:
+  dryup_badge_strong: 0.66  # dryup_med_10_50 <= この値で「激枯れ」(濃い方、≒p25)
+  dryup_badge_mild: 0.77    # <= この値で「枯れ気味」(≒p50/中央値以下)
 
 scoring:
   phase1_weight: 0.5

@@ -4,7 +4,12 @@ import pytest
 
 from src.config import load_config
 from src.indicators import add_atr, add_moving_averages
-from src.screener.vcp import _check_v5, evaluate_vcp, merge_shallow_pivots
+from src.screener.vcp import (
+    _check_v5,
+    evaluate_vcp,
+    merge_shallow_pivots,
+    vcp_quality_score,
+)
 
 # T0 (base origin) sits after a 100-day gradual run-up from 70 -> ~100.
 RUNUP_DAYS = 100
@@ -203,6 +208,39 @@ def test_vcp_v7_shakeout_detected_and_scored():
     assert result["shakeout_detected"] is True
     assert result["vcp_diagnostics"]["v7"]["shakeout_detected"] is True
     assert result["components"]["shakeout_bonus"] == pytest.approx(5.0, abs=0.1)
+
+
+def _tightness_gate_score(dryup_med: float | None):
+    """案Y検証用ヘルパ: dryup_med(=recent10_median/vol_ma50)を与えて
+    vcp_quality_score の tightness コンポーネントを返す。depths[-1]=3% は
+    last_depth_perfect(5%)未満なので、加点されれば満点(30)になる。"""
+    config = load_config()
+    contractions = [
+        {"depth": 0.24, "high_price": 100.0, "low_price": 76.0},
+        {"depth": 0.03, "high_price": 83.5, "low_price": 80.7},
+    ]
+    base_df = pd.DataFrame({"volume": [150.0] * 30, "vol_ma50": [200.0] * 30})
+    if dryup_med is None:
+        v5 = {"recent10_median": None, "vol_ma50": None}
+    else:
+        v5 = {"recent10_median": dryup_med * 200.0, "vol_ma50": 200.0}
+    diagnostics = {"v5": v5}
+    return vcp_quality_score(contractions, 30, base_df, config, diagnostics)["components"]["tightness"]
+
+
+def test_tightness_credited_when_dry():
+    # dryup_med 0.50 < mild(0.77): 枯れ銘柄なので tightness 満点が付く。
+    assert _tightness_gate_score(0.50) == pytest.approx(30.0, abs=0.1)
+
+
+def test_tightness_zeroed_when_not_dry():
+    # dryup_med 0.90 >= mild(0.77): 枯れ不足なので tightness 加点はゼロ(案Y)。
+    assert _tightness_gate_score(0.90) == 0.0
+
+
+def test_tightness_credited_when_dryup_unknown():
+    # dryup_med が取れない(None)場合はゲート無効=保守側で従来どおり加点。
+    assert _tightness_gate_score(None) == pytest.approx(30.0, abs=0.1)
 
 
 def test_vcp_v4_relaxed_ceiling_but_tightness_score_not_perfect():
