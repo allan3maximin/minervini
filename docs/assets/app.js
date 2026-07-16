@@ -712,24 +712,73 @@ function renderTable(stocks, tier, options = {}) {
   return wrapper;
 }
 
-// トラックパッドの斜めスワイプで表が縦横同時に動く(斜め移動)のを禁止する。
-// wheelイベント1回ごとに縦横で絶対値が大きい方の軸だけ適用し、もう片方は無視する。
+// 表の斜めスクロール禁止(ジェスチャー単位の軸ロック)。
+// スクロールし始めた方向(縦 or 横)にそのジェスチャー中はずっと固定する。
+// - wheel(トラックパッド): 連続イベントを1ジェスチャーとみなし(250ms空いたら
+//   リセット)、開始時の優勢軸だけ適用する。イベントごと判定だと途中で軸が
+//   切り替わってフラつくため。
+// - touch(スマホ): 最初の指の動きで軸を決め、scrollイベントで逆軸を開始位置に
+//   戻し続ける(慣性スクロール中も効く)。次のtouchstartでロック解除。
 // initDashboard()はモーダル保存後に再実行されることがあるため、二重登録防止に
 // dataset フラグでガードする。
 function lockDiagonalScroll(el) {
   if (!el || el.dataset.axisLockWired) return;
   el.dataset.axisLockWired = "1";
+
+  // --- wheel: ジェスチャー開始時の優勢軸に固定 ---
+  let wheelAxis = null;
+  let wheelLast = 0;
   el.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        el.scrollLeft += e.deltaX;
-      } else {
-        el.scrollTop += e.deltaY;
-      }
+      const now = performance.now();
+      if (now - wheelLast > 250) wheelAxis = null; // ジェスチャー切れ目
+      wheelLast = now;
+      if (!wheelAxis) wheelAxis = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? "x" : "y";
+      if (wheelAxis === "x") el.scrollLeft += e.deltaX;
+      else el.scrollTop += e.deltaY;
     },
     { passive: false }
+  );
+
+  // --- touch: 最初の動きで軸を決め、逆軸をscrollで固定し続ける ---
+  let touchAxis = null; // null=未確定 / "x" / "y"
+  let startX = 0, startY = 0;
+  let lockLeft = 0, lockTop = 0;
+  el.addEventListener(
+    "touchstart",
+    (e) => {
+      touchAxis = null;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lockLeft = el.scrollLeft;
+      lockTop = el.scrollTop;
+    },
+    { passive: true }
+  );
+  el.addEventListener(
+    "touchmove",
+    (e) => {
+      if (touchAxis) return;
+      const dx = Math.abs(e.touches[0].clientX - startX);
+      const dy = Math.abs(e.touches[0].clientY - startY);
+      if (dx < 6 && dy < 6) return; // 誤判定防止のあそび
+      touchAxis = dx > dy ? "x" : "y";
+      // 軸確定時点の位置で逆軸を固定(確定までの微小な斜めズレを引き継がない)
+      lockLeft = el.scrollLeft;
+      lockTop = el.scrollTop;
+    },
+    { passive: true }
+  );
+  // 慣性スクロール中もtouchAxisは残るので、次のtouchstartまで逆軸を戻し続ける
+  el.addEventListener(
+    "scroll",
+    () => {
+      if (touchAxis === "y" && el.scrollLeft !== lockLeft) el.scrollLeft = lockLeft;
+      else if (touchAxis === "x" && el.scrollTop !== lockTop) el.scrollTop = lockTop;
+    },
+    { passive: true }
   );
 }
 

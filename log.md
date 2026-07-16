@@ -24,6 +24,19 @@ sandboxのマウント経由では `.git/` 配下にファイルを**作成は�
 注意: GitHub MCP が「Bad credentials」を返す場合はトークン切れ。
 ユーザーにGitHubコネクタの再連携を依頼すること。
 
+## 2026-07-16 (50): 銘柄リスト表の斜めスクロール禁止をジェスチャー単位の軸ロックに強化
+
+銘柄リスト表(*-tier-body)が斜めにスクロールできてしまう件。既存の
+`lockDiagonalScroll`(app.js)はwheelイベント1回ごとの優勢軸判定だったため、
+①ジェスチャー途中で軸が切り替わりフラつく、②タッチ操作(スマホ)には無効、だった。
+
+- **wheel**: 連続イベントを1ジェスチャー扱い(250ms空白でリセット)し、開始時の
+  優勢軸にジェスチャー中ずっと固定。
+- **touch**: touchstart/touchmoveで最初の指の動き(あそび6px)から軸を確定し、
+  scrollイベントで逆軸を開始位置へ戻し続ける(慣性中も有効)。次のtouchstartで解除。
+- 対象は従来どおり confirmed/pool/watchlist の3つの *-tier-body。二重登録ガード
+  (dataset.axisLockWired)も従来どおり。node --check OK。未コミット。
+
 ## 2026-07-15 (49): tightness条件化(案Y)を本採用+v1.0-frozen タグ
 
 (48)の検証で案Y優位を確認したのを受け、萩山が**本採用を判断**。configに反映した。
