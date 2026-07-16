@@ -576,12 +576,13 @@ function renderStatusSection(status, stocks, tier) {
 }
 
 // 終値の前日比%(report.jsonのchange_pct)。旧report.json(フィールドなし)は空表示。
+// 表記は「終値（±X.XX%）」で、%部分だけ色付けする。
 function changePctHtml(s) {
   const v = s.change_pct;
   if (v == null) return "";
   const cls = v > 0 ? "chg-pos" : v < 0 ? "chg-neg" : "chg-flat";
   const sign = v > 0 ? "+" : "";
-  return ` <span class="sc-chg ${cls}">${sign}${Number(v).toFixed(2)}%</span>`;
+  return `<span class="sc-chg-wrap">（<span class="sc-chg ${cls}">${sign}${Number(v).toFixed(2)}%</span>）</span>`;
 }
 
 // リスト画面: 横スクロール表を廃止し、1銘柄=薄型2段カードでスマホ幅に収める。
@@ -609,10 +610,11 @@ function renderCardList(stocks, tier, options = {}) {
     } else {
       card.classList.add("row-static");
     }
+    // 上段: 「銘柄名（コード）」+ SC/RS
+    // 下段: 終値（±前日比%）+ セクター(強度) + 枯れ度
     card.innerHTML = `
       <div class="sc-row">
-        <span class="sc-name">${escapeHtml(s.name ?? "-")}</span>
-        <span class="sc-code">${escapeHtml(s.code)}</span>
+        <span class="sc-name">${escapeHtml(s.name ?? "-")}（${escapeHtml(s.code)}）</span>
         <span class="sc-metrics">SC <b>${s.total_score ?? "-"}</b>・RS <b>${s.rs ?? "-"}</b></span>
       </div>
       <div class="sc-row sc-row-sub">
@@ -1481,8 +1483,11 @@ function formatChartDate(time) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// クロスヘア/凡例の時刻ラベルは実日付(MM/DD)のまま。
+// 軸ティックだけを「当日 / -N営業日」の相対表示にするため、tickMarkFormatterは
+// renderCharts側で銘柄毎に生成し、makeChartに渡す(モジュール定数からは外す)。
 const CHART_LOCALIZATION = { timeFormatter: formatChartDate };
-const CHART_TIME_SCALE = { tickMarkFormatter: formatChartDate };
+const CHART_TIME_SCALE = {};
 const CHART_COLORS = {
   bg: "#131720",
   grid: "#232a38",
@@ -1533,7 +1538,7 @@ function colorizeVolume(chart) {
   }));
 }
 
-function makeChart(el, { showTimeAxis }) {
+function makeChart(el, { showTimeAxis, tickMarkFormatter }) {
   return LightweightCharts.createChart(el, {
     width: el.clientWidth,
     height: el.clientHeight,
@@ -1544,7 +1549,15 @@ function makeChart(el, { showTimeAxis }) {
     localization: CHART_LOCALIZATION,
     // fixRightEdge: the latest bar stays pinned to the right edge, so the
     // axis dates always count back from the newest date.
-    timeScale: { ...CHART_TIME_SCALE, visible: showTimeAxis, borderColor: CHART_COLORS.grid, fixRightEdge: true, rightOffset: 0 },
+    // tickMarkFormatter: 「当日/-N営業日」の相対表示 (renderCharts側で生成)。
+    timeScale: {
+      ...CHART_TIME_SCALE,
+      tickMarkFormatter: tickMarkFormatter || formatChartDate,
+      visible: showTimeAxis,
+      borderColor: CHART_COLORS.grid,
+      fixRightEdge: true,
+      rightOffset: 0,
+    },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     // 価格軸ドラッグでの縮尺変更を無効化(オートスケール固定)。時間軸は可。
     handleScale: {
@@ -1637,12 +1650,39 @@ function renderCharts(chart) {
   const rsCard = document.getElementById("rs-card");
   if (rsCard) rsCard.hidden = !hasRs;
 
+  // 相対表示用の time→"当日/-N営業日" 変換マップ。
+  // 日足: chart.candles の末尾を「当日」(N=0)、そこから 1本ずつ遡って -N営業日 とする。
+  // 月足: monthly.candles の末尾を「当月」、遡って -Nヶ月 とする。
+  const dailyBackByTime = new Map();
+  for (let i = 0; i < chart.candles.length; i++) {
+    dailyBackByTime.set(chart.candles[i].time, chart.candles.length - 1 - i);
+  }
+  const monthlyBackByTime = new Map();
+  for (let i = 0; i < monthly.candles.length; i++) {
+    monthlyBackByTime.set(monthly.candles[i].time, monthly.candles.length - 1 - i);
+  }
+  // 現在の足種(D=日足, M=月足)。crosshair/凡例と共有するので renderCharts の
+  // ローカル状態。ここで先に宣言しておかないと、下の relativeTickFormatter が
+  // 初回createChart時に呼ばれた場合に TDZ で落ちる。
+  let currentTf = "D";
+
+  // 軸ティック用フォーマッタ(モジュール定数だと currentTf を参照できないので
+  // ここでクロージャとして作る)。crosshair や凡例の日付は formatChartDate のまま。
+  function relativeTickFormatter(time) {
+    const key = timeKey(time);
+    const isMonthly = currentTf === "M";
+    const back = isMonthly ? monthlyBackByTime.get(key) : dailyBackByTime.get(key);
+    if (back == null) return formatChartDate(time); // 想定外はフォールバック
+    if (back === 0) return isMonthly ? "当月" : "当日";
+    return isMonthly ? `-${back}ヶ月` : `-${back}営業日`;
+  }
+
   // 日付軸は最下段のペイン(RSがあればRS、無ければ出来高)だけに表示する。
   // 3ペイン全部に出すと同じ日付が重複するため。パン/ズームはtimeScale.visible
   // と独立してsyncTimeScales()で同期されるので、表示を1つに絞っても連動は保たれる。
-  const priceChart = makeChart(priceEl, { showTimeAxis: false });
-  const volChart = makeChart(volEl, { showTimeAxis: !hasRs });
-  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true }) : null;
+  const priceChart = makeChart(priceEl, { showTimeAxis: false, tickMarkFormatter: relativeTickFormatter });
+  const volChart = makeChart(volEl, { showTimeAxis: !hasRs, tickMarkFormatter: relativeTickFormatter });
+  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true, tickMarkFormatter: relativeTickFormatter }) : null;
 
   const candleSeries = priceChart.addCandlestickSeries({
     upColor: CHART_COLORS.up,
@@ -1726,7 +1766,7 @@ function renderCharts(chart) {
     D: new Map((chart.rs_line || []).map((p) => [p.time, p.value])),
     M: new Map((monthly.rs_line || []).map((p) => [p.time, p.value])),
   };
-  let currentTf = "D";
+  // currentTf は上方(相対軸フォーマッタ定義の直前)に前倒し宣言済み。
 
   const legendEl = document.getElementById("ohlc-legend");
 
@@ -2191,17 +2231,56 @@ function initDockSwipe(dock) {
   );
 }
 
+// ドック小型化: スクロールコンテナ毎に前回スクロール位置を保持し、
+// 下方向へ動いたら .compact を付与、上方向で剥がす。ページ最上部に戻ったら
+// 必ず展開状態に戻す(ユーザーが「上に戻ったのに小さいまま」で困惑しないため)。
+// 対象は view-section 配下の要素含む全ての scroll イベントで、
+// stock-panel など複数スクロール要素があってもキャプチャで拾える。
+const DOCK_SHRINK_DELTA = 8;
+const DOCK_SHRINK_TOP_RESET = 24;
+function initDockScrollShrink(dock) {
+  const lastByTarget = new WeakMap();
+  let raf = 0;
+  let pending = null;
+  function applyState(target) {
+    const y = (target && typeof target.scrollTop === "number") ? target.scrollTop : (window.scrollY || 0);
+    const prev = lastByTarget.get(target) ?? y;
+    lastByTarget.set(target, y);
+    if (y < DOCK_SHRINK_TOP_RESET) {
+      dock.classList.remove("compact");
+      return;
+    }
+    const d = y - prev;
+    if (d > DOCK_SHRINK_DELTA) dock.classList.add("compact");
+    else if (d < -DOCK_SHRINK_DELTA) dock.classList.remove("compact");
+  }
+  function onScroll(e) {
+    pending = e.target;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      applyState(pending);
+    });
+  }
+  // capture=trueで view-section 内スクロール(=各ビューのoverflow-y:auto)も拾う。
+  document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+}
+
 function initRouter() {
   const dock = document.getElementById("dock-nav");
   if (!dock) return;
   initDockSwipe(dock);
+  initDockScrollShrink(dock);
   dock.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.location.hash = btn.dataset.view;
+      // ビュー切替時はドックを元に戻す(前ビューで小さくなった状態を引きずらない)。
+      dock.classList.remove("compact");
     });
   });
   window.addEventListener("hashchange", () => {
     showView(window.location.hash.replace("#", "") || "dashboard");
+    dock.classList.remove("compact");
   });
   showView(window.location.hash.replace("#", "") || "dashboard");
 }

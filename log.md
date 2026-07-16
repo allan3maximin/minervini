@@ -2,6 +2,23 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-16 (52): UI改善 — ドック小型化/カード表記統合/チャート下部化+相対軸
+
+- **ドックのスクロール連動小型化**: view-section 内スクロールでも拾えるよう
+  document への capture:true scroll リスナーで scrollTop 差分を監視し、
+  下方向>8pxで `.dock-nav.compact` 付与/上方向>8pxで剥がす。scrollTop<24 の
+  トップ付近では必ず解除。ビュー切替(hashchange/dock click)でも compact 解除。
+- **銘柄カード**: 上段の「名前」と「コード」を「銘柄名（コード）」の1スパンに統合。
+  前日比%は「(±X.XX%)」の括弧付きで色付け表示に変更(sc-chg-wrap 新設)。
+- **チャート**: `chart-toolbar` を chart-card の下(chart-toolbar-bottom)に移動。
+  日付軸ティックを「当日 / -N営業日」の相対表示に変更(月足は「当月 / -Nヶ月」)。
+  CHART_TIME_SCALE から tickMarkFormatter を外し、renderCharts 内で
+  candles を走査した back マップ(0=当日)を捕まえるクロージャに差し替え。
+  crosshair 時刻ラベルは formatChartDate(MM/DD) のまま。
+- **TDZ対策**: `let currentTf = "D";` を relativeTickFormatter 参照より前へ前倒し。
+- キャッシュバスター: style.css v30→v31, app.js v33→v34。
+- node --check OK。テストにJSアサーションはなし。
+
 ## 恒久ルール: Cowork(sandbox)からの git commit/push 手順
 
 sandboxのマウント経由では `.git/` 配下にファイルを**作成はできるが削除(unlink)できない**。
