@@ -971,20 +971,13 @@ a.nav-btn:hover { border-color: var(--link); }
   border-radius: 19px;
   padding: 0;
   color: var(--text-dim);
-  transition: background 0.18s, color 0.18s, width 0.18s, height 0.18s, gap 0.18s, border-radius 0.18s;
+  transition: background 0.18s, color 0.18s;
 }
-.dock-btn .dock-icon { font-size: 18px; line-height: 1; transition: font-size 0.18s; }
-.dock-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; transition: font-size 0.18s, max-height 0.18s, opacity 0.18s; }
+.dock-btn .dock-icon { font-size: 18px; line-height: 1; }
+.dock-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
 .dock-btn:hover { color: var(--text); }
 .dock-btn.active { background: rgba(52, 211, 153, 0.14); color: var(--accent); }
 .dock-btn.active .dock-label { font-weight: 600; }
-
-/* 下スクロール時の小型化。ボタンを縮めラベルは隠す(アイコンのみ)。 */
-.dock-nav { transition: padding 0.18s, gap 0.18s, border-radius 0.18s; }
-.dock-nav.compact { padding: 3px; gap: 0; border-radius: 20px; }
-.dock-nav.compact .dock-btn { width: 40px; height: 36px; gap: 0; border-radius: 13px; }
-.dock-nav.compact .dock-btn .dock-icon { font-size: 15px; }
-.dock-nav.compact .dock-label { max-height: 0; opacity: 0; overflow: hidden; }
 
 /* SPAビュー本体: mainの残り高さを使い切り、必要なビューだけ内部で縦スクロール。 */
 .view-section {
@@ -1328,10 +1321,6 @@ a.nav-btn:hover { border-color: var(--link); }
   .dock-btn { width: 48px; height: 46px; gap: 2px; border-radius: 17px; }
   .dock-btn .dock-icon { font-size: 16px; }
   .dock-label { font-size: 8.5px; }
-  /* モバイルでの小型時サイズ */
-  .dock-nav.compact { padding: 3px; border-radius: 17px; }
-  .dock-nav.compact .dock-btn { width: 36px; height: 32px; border-radius: 12px; }
-  .dock-nav.compact .dock-btn .dock-icon { font-size: 14px; }
   /* 下部ピルタブも少し詰める */
   .stock-tab { padding: 5px 9px; font-size: 12px; }
   .list-tab { padding: 5px 16px; font-size: 12.5px; }

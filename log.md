@@ -2,6 +2,23 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-16 (53): UI再修正 — ドック小型化撤去+軸を実日付に復帰
+
+(52)で入れたうち2点を萩山フィードバックで巻き戻し。**カード表記統合**と
+**チャート下部化**(chart-toolbar-bottom)は維持。
+
+- **ドック小型化を撤去**: `.dock-nav.compact` 系CSS(通常+モバイル用オーバーライド)と
+  `initDockScrollShrink`/ビュー切替時の `remove("compact")` を全て削除。
+  `.dock-btn` の transition は元の `background 0.18s, color 0.18s` に戻す。
+- **チャート日付軸を実日付表示に戻す**: 「-N営業日」相対表示ではなく、
+  Lightweight Charts の自動ティック位置に対して formatChartDate(M/D) を出す元の形。
+  1ヶ月表示(22本)なら例 "6/26 7/6 7/16" のように実日付が並ぶ。
+  - `CHART_TIME_SCALE` に `tickMarkFormatter: formatChartDate` を戻す。
+  - `makeChart` の `tickMarkFormatter` パラメータを削除。
+  - `renderCharts` の `dailyBackByTime`/`monthlyBackByTime`/`relativeTickFormatter` を削除。
+  - `let currentTf = "D";` を元の位置(barLookup/rsLookupの直後)に戻す。
+- キャッシュバスター: style.css v31→v32, app.js v34→v35。node --check OK。
+
 ## 2026-07-16 (52): UI改善 — ドック小型化/カード表記統合/チャート下部化+相対軸
 
 - **ドックのスクロール連動小型化**: view-section 内スクロールでも拾えるよう
