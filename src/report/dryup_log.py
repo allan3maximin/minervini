@@ -254,6 +254,10 @@ def log_and_resolve(new_records: list[dict], frames: dict, config: dict | None =
     config = config or load_config()
     existing = load_records(path)
     resolved = resolve_outcomes(existing, frames, config)
-    all_records = existing + list(new_records)
+    # 同日再実行ガード: 同じ(date, code)が既にあれば追記しない(パイプラインを
+    # 同日に複数回走らせるとフォワードログが重複していく問題の再発防止)。
+    seen = {(r.get("date"), r.get("code")) for r in existing}
+    appended = [r for r in new_records if (r.get("date"), r.get("code")) not in seen]
+    all_records = existing + appended
     write_records(all_records, path)
-    return {"resolved": resolved, "appended": len(new_records), "total": len(all_records)}
+    return {"resolved": resolved, "appended": len(appended), "total": len(all_records)}

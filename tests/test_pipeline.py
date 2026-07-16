@@ -96,7 +96,18 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(build_site, "CHARTS_DIR", tmp_path / "charts")
     monkeypatch.setattr(pipeline.heatmap_mod, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
+    # 公開版(docs/data/sector_history.json)も実リポジトリを汚さない。
+    monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PUBLIC_PATH", tmp_path / "sector_history_public.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
+    # 指数取得はネットワークに出さず、実リポジトリの docs/data/indices.json も書かない。
+    monkeypatch.setattr(pipeline.indices_mod, "update_indices", lambda config: {"failed": []})
+    # 枯れ度フォワードログ: 実リポジトリの data/dryup_log.jsonl に追記させない
+    # (log_and_resolveのpathデフォルト引数はdef時に束縛済みのため、定数の
+    # 差し替えでは効かない。関数ごと差し替える)。
+    monkeypatch.setattr(
+        pipeline.dryup_log_mod, "log_and_resolve",
+        lambda new_records, frames, config=None, path=None: {"appended": len(new_records), "resolved": 0, "total": len(new_records)},
+    )
     # J-Quants自動取得はネットワークに出さない。
     monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})
     # EDINET DB自動取得もネットワークに出さない。

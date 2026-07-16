@@ -266,6 +266,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
         build_site.attach_priority(record, pr_eval)
         record["momentum"] = summary_mod.compute_momentum(df_ind)
+        # リスト画面カード用の前日比%。終値2本から素直に計算(旧データ・上場直後
+        # 等で前日終値が取れない場合はNone=フロントは空表示)。
+        closes = df_ind["close"]
+        record["change_pct"] = (
+            round(float(closes.iloc[-1] / closes.iloc[-2] - 1.0) * 100.0, 2)
+            if len(closes) >= 2 and closes.iloc[-2] else None
+        )
         shares = shares_by_code.get(code)
         close = latest_by_code[code].get("close")
         record["market_cap_oku"] = (

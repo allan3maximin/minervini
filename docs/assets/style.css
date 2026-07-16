@@ -1144,60 +1144,74 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .list-panel .tier-section > h2,
 .list-panel .tier-note { flex: 0 0 auto; }
-/* 本文(表の入る領域)がこのパネルの唯一のスクロールコンテナ。
-   縦(行)と横(列)の両方をここでスクロールさせ、thead/銘柄名列をstickyにする。 */
+/* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
+   横スクロール表は廃止したので縦のみ(横は明示的に禁止)。 */
 .list-panel [id$="-tier-body"] {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
-/* 本文がスクロールコンテナなので内側のtable-scrollはただの枠に(枠線は二重になるため消す) */
-.list-panel .table-scroll { overflow: visible; border: none; border-radius: 0; }
 
-/* border-collapse:collapse + position:sticky はスクロール中にボーダーが
-   明滅/ズレる既知のレンダリング不具合があるため、tier-tableだけseparateに
-   切り替える(このテーブルはborder-bottomのみなので見た目の差異は無い)。
-   あわせてtable-layout:fixedにし、ステータスごとに複数生成される<table>
-   (renderStatusSection)間や、ソート時のdraw()再描画のたびに列幅が
-   ずれない(=表が「揺れる」)ようにする。 */
-.tier-table {
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
+/* ------------------------------------------ リスト画面 銘柄カード(薄型2段) */
+/* 1銘柄=カード1枚。スマホ幅に収まるよう項目を7つに絞り、上段=銘柄名/コード/
+   スコア/RS、下段=終値(前日比%)/セクター(強度)/枯れ度 の2行で構成する。 */
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.tier-table th:nth-child(2), .tier-table td:nth-child(2) { width: 70px; }
-.tier-table th:nth-child(3), .tier-table td:nth-child(3) { width: 78px; }
-.tier-table th:nth-child(4), .tier-table td:nth-child(4) { width: 92px; }
-.tier-table th:nth-child(5), .tier-table td:nth-child(5) { width: 54px; }
-.tier-table th:nth-child(6), .tier-table td:nth-child(6) { width: 168px; }
-.tier-table th:nth-child(7), .tier-table td:nth-child(7) { width: 112px; }
-.tier-table th:nth-child(8), .tier-table td:nth-child(8) { width: 150px; }
-.tier-table th:nth-child(9), .tier-table td:nth-child(9) { width: 82px; }
-.tier-table th:nth-child(10), .tier-table td:nth-child(10) { width: 92px; }
-.tier-table th:nth-child(11), .tier-table td:nth-child(11) { width: 92px; }
-.tier-table th:nth-child(12), .tier-table td:nth-child(12) { width: 72px; }
-.tier-table th:nth-child(13), .tier-table td:nth-child(13) { width: 104px; }
-/* 固定幅化で長い文字列がはみ出さないよう、全列に省略表示の受け皿を用意 */
-.tier-table td { overflow: hidden; text-overflow: ellipsis; }
-
-/* スクロールしても列名(thead)と銘柄名列が見えるように sticky 固定。
-   スクロールコンテナは *-tier-body。固定するのは1列目(銘柄名)のみ。 */
-.tier-table th { top: 0; z-index: 3; }
-.tier-table th:nth-child(1), .tier-table td:nth-child(1) {
-  position: sticky;
-  left: 0;
+.stock-card {
   background: var(--panel);
-  width: 92px;
-  min-width: 92px;
-  max-width: 92px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.stock-card:hover { background: rgba(96, 165, 250, 0.06); }
+.stock-card.fund-stale { background: rgba(251, 191, 36, 0.08); }
+.stock-card.row-static { cursor: default; }
+.stock-card.row-static:hover { background: var(--panel); }
+
+.sc-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sc-row-sub { font-size: 12px; color: var(--text-dim); }
+
+/* 銘柄名だけ伸縮させ、あふれたら省略。他は成り行き幅 */
+.sc-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
 }
-/* 左上の角セル(銘柄名の列名)は縦横両方の交点なので最前面 */
-.tier-table th:nth-child(1) { z-index: 4; background: var(--panel-2); }
-/* fund-stale行のsticky列はtr背景(半透明アンバー)が透けないため近似色で塗る */
-.tier-table tr.fund-stale td:nth-child(1) { background: #232219; }
+.sc-code { flex: 0 0 auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sc-metrics { flex: 0 0 auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sc-metrics b { color: var(--text); font-weight: 600; }
+
+.sc-close { flex: 0 0 auto; color: var(--text); font-variant-numeric: tabular-nums; }
+.sc-chg { font-variant-numeric: tabular-nums; }
+.chg-pos { color: var(--accent); }
+.chg-neg { color: var(--danger); }
+.chg-flat { color: var(--text-dim); }
+.sc-sector {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.sc-dryup { flex: 0 0 auto; white-space: nowrap; }
 
 /* ------------------------------------------------------- 投資法ページ */
 

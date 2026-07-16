@@ -24,18 +24,8 @@ const STATUS_ORDER = [
   "NO_BASE",
 ];
 
-// 本命/候補プール/監視(旧P1)の3ティア共通の列定義。以前はCOLUMNS(本命/候補プール)
-// とPRIORITY_COLUMNS(監視)が別々だったが、表示列を統一するために1本化した。
-// value()が表示文字列(またはhtml:trueならHTML)を返し、sortValue()があれば
-// それをソートキーとして使う(無ければ s[key] を直接参照)。
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-// 銘柄名は横幅を取りすぎるため6文字でトリムする。フルネームはtitle属性(ホバー)で確認可能。
-function trimName(name) {
-  const s = String(name ?? "");
-  return s.length > 6 ? s.slice(0, 6) + "…" : s;
 }
 
 const SECTOR_STRENGTH_CLASS = { 強: "sector-strength-strong", 中: "sector-strength-mid", 弱: "sector-strength-weak" };
@@ -60,61 +50,12 @@ function dryupBadgeHtml(s) {
   return v; // 閾値超(枯れていない)は数値のみ
 }
 
-const COLUMNS = [
-  { key: "name", label: "銘柄名", value: (s) => trimName(s.name), title: (s) => s.name },
-  { key: "code", label: "コード", value: (s) => s.code },
-  { key: "close", label: "終値", value: (s) => formatClose(s.close) },
-  { key: "total_score", label: "総合スコア", value: (s) => s.total_score ?? "-" },
-  { key: "rs", label: "RS", value: (s) => s.rs ?? "-" },
-  {
-    key: "sector",
-    label: "セクター(強度)",
-    value: sectorStrengthHtml,
-    html: true,
-    sortValue: (s) => ({ 強: 2, 中: 1, 弱: 0 }[s.sector_strength] ?? -1),
-  },
-  {
-    key: "high_dist",
-    label: "52週高値距離",
-    value: (s) => (s.high52w_distance_pct != null ? `-${s.high52w_distance_pct}%` : "-"),
-    sortValue: (s) => (s.high52w_distance_pct != null ? -s.high52w_distance_pct : -Infinity),
-  },
-  {
-    key: "footprint",
-    label: "フットプリント",
-    value: (s) => {
-      if (!s.footprint) return "-";
-      const depthLast = s.vcp_detail && s.vcp_detail.depth_last_pct;
-      return depthLast != null ? `${s.footprint} (最終${depthLast}%)` : s.footprint;
-    },
-  },
-  {
-    key: "dryup",
-    label: "枯れ度",
-    html: true,
-    // バッジ値=dryup_med_10_50(直近10日出来高中央値/vol_ma50)。小さいほど枯れている。
-    // VCP MUST・vcp_scoreとは独立の表示専用レイヤー(スコア融合なし)。
-    value: (s) => dryupBadgeHtml(s),
-    // 枯れているほど上位に来るよう -value でソート(高値距離列と同じ向き)。値なしは最下段。
-    sortValue: (s) =>
-      s.dryup && s.dryup.value != null ? -s.dryup.value : -Infinity,
-  },
-  { key: "pivot", label: "ピボット", value: (s) => s.pivot ?? "-" },
-  { key: "buy_stop", label: "推奨逆指値", value: (s) => s.buy_stop ?? "-" },
-  { key: "stop_loss", label: "推奨損切り", value: (s) => s.stop_loss ?? "-" },
-  { key: "risk_pct", label: "リスク%", value: (s) => s.risk_pct ?? "-" },
-  {
-    key: "fund_status",
-    label: "ファンダ状態",
-    value: fundStatusLabel,
-    sortValue: (s) =>
-      s.fund_stale ? -1
-      : s.fund_strong === false ? 0.5 // データありだが基準未達(ファンダ弱)は none と partial の間
-      : s.fund_coverage === "full" ? 2
-      : s.fund_coverage === "partial" ? 1
-      : 0,
-  },
-];
+// リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
+// カード側(renderCardList)に直書きし、ここには並び順の定義だけ残す。
+const CARD_SORTS = {
+  total_score: (s) => s.total_score ?? -Infinity,
+  rs: (s) => s.rs ?? -Infinity,
+};
 
 // ---------------------------------------------------------------------------
 // Dashboard (index.html)
@@ -160,9 +101,6 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
-  // 縦横の同時スクロール(斜め移動)を禁止する対象は、実際のスクロールコンテナ
-  // である *-tier-body 要素(style.css: .list-panel [id$="-tier-body"])。
-  ["confirmed-tier-body", "pool-tier-body", "watchlist-tier-body"].forEach((id) => lockDiagonalScroll(document.getElementById(id)));
   startLiveIndices();
 }
 
@@ -633,177 +571,68 @@ function renderStatusSection(status, stocks, tier) {
   const h3 = document.createElement("h3");
   h3.textContent = `${STATUS_LABELS[status] || status} (${stocks.length})`;
   section.appendChild(h3);
-  section.appendChild(renderTable(stocks, tier));
+  section.appendChild(renderCardList(stocks, tier));
   return section;
 }
 
-function renderTable(stocks, tier, options = {}) {
-  let sortKey = options.initialSortKey || "total_score";
-  let sortDesc = options.initialSortDesc ?? true;
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "table-scroll";
-  const table = document.createElement("table");
-  table.className = "tier-table"; // リスト表: コード/銘柄名列とヘッダをsticky固定する対象
-  wrapper.appendChild(table);
-
-  function sortValueFor(s, col) {
-    if (col.sortValue) return col.sortValue(s);
-    return s[col.key] ?? -Infinity;
-  }
-
-  function draw() {
-    const activeCol = COLUMNS.find((c) => c.key === sortKey) || COLUMNS[0];
-    const sorted = [...stocks].sort((a, b) => {
-      const av = sortValueFor(a, activeCol);
-      const bv = sortValueFor(b, activeCol);
-      if (av === bv) return 0;
-      const cmp = av > bv ? 1 : -1;
-      return sortDesc ? -cmp : cmp;
-    });
-
-    table.innerHTML = "";
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const col of COLUMNS) {
-      const th = document.createElement("th");
-      th.textContent = col.label + (sortKey === col.key ? (sortDesc ? " ▼" : " ▲") : "");
-      th.addEventListener("click", () => {
-        if (sortKey === col.key) sortDesc = !sortDesc;
-        else {
-          sortKey = col.key;
-          sortDesc = true;
-        }
-        draw();
-      });
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    for (const s of sorted) {
-      const row = document.createElement("tr");
-      if (s.fund_stale) row.classList.add("fund-stale");
-      // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
-      const navigable = s.has_chart !== false;
-      if (navigable) {
-        row.addEventListener("click", (e) => {
-          if (e.target.tagName === "BUTTON") return;
-          window.location.hash = `stock/${encodeURIComponent(s.code)}`;
-        });
-      } else {
-        row.classList.add("row-static");
-      }
-      for (const col of COLUMNS) {
-        const td = document.createElement("td");
-        const val = col.value(s);
-        if (col.html) td.innerHTML = val;
-        else td.textContent = val;
-        if (col.title) td.title = col.title(s);
-        row.appendChild(td);
-      }
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-  }
-
-  draw();
-  return wrapper;
+// 終値の前日比%(report.jsonのchange_pct)。旧report.json(フィールドなし)は空表示。
+function changePctHtml(s) {
+  const v = s.change_pct;
+  if (v == null) return "";
+  const cls = v > 0 ? "chg-pos" : v < 0 ? "chg-neg" : "chg-flat";
+  const sign = v > 0 ? "+" : "";
+  return ` <span class="sc-chg ${cls}">${sign}${Number(v).toFixed(2)}%</span>`;
 }
 
-// 表の斜めスクロール禁止(ジェスチャー単位の軸ロック)。
-// スクロールし始めた方向(縦 or 横)にそのジェスチャー中はずっと固定する。
-// - wheel(トラックパッド): 連続イベントを1ジェスチャーとみなし(250ms空いたら
-//   リセット)、開始時の優勢軸だけ適用する。イベントごと判定だと途中で軸が
-//   切り替わってフラつくため。
-// - touch(スマホ): 最初の指の動きで軸を決め、scrollイベントで逆軸を開始位置に
-//   戻し続ける(慣性スクロール中も効く)。次のtouchstartでロック解除。
-// initDashboard()はモーダル保存後に再実行されることがあるため、二重登録防止に
-// dataset フラグでガードする。
-function lockDiagonalScroll(el) {
-  if (!el || el.dataset.axisLockWired) return;
-  el.dataset.axisLockWired = "1";
+// リスト画面: 横スクロール表を廃止し、1銘柄=薄型2段カードでスマホ幅に収める。
+// 表示項目はコード/銘柄名/総合スコア/RS/終値(前日比%)/セクター(強度)/枯れ度のみ。
+// 並びは総合スコア降順(監視タブはRS降順)固定。列ヘッダソートは表とともに廃止。
+function renderCardList(stocks, tier, options = {}) {
+  const sortVal = CARD_SORTS[options.initialSortKey || "total_score"] || CARD_SORTS.total_score;
+  const sorted = [...stocks].sort((a, b) => {
+    const av = sortVal(a);
+    const bv = sortVal(b);
+    return av === bv ? 0 : av > bv ? -1 : 1;
+  });
 
-  // --- wheel: ジェスチャー開始時の優勢軸に固定 ---
-  let wheelAxis = null;
-  let wheelLast = 0;
-  el.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      const now = performance.now();
-      if (now - wheelLast > 250) wheelAxis = null; // ジェスチャー切れ目
-      wheelLast = now;
-      if (!wheelAxis) wheelAxis = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? "x" : "y";
-      if (wheelAxis === "x") el.scrollLeft += e.deltaX;
-      else el.scrollTop += e.deltaY;
-    },
-    { passive: false }
-  );
-
-  // --- touch: 最初の動きで軸を決め、逆軸をscrollで固定し続ける ---
-  let touchAxis = null; // null=未確定 / "x" / "y"
-  let startX = 0, startY = 0;
-  let lockLeft = 0, lockTop = 0;
-  el.addEventListener(
-    "touchstart",
-    (e) => {
-      touchAxis = null;
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      lockLeft = el.scrollLeft;
-      lockTop = el.scrollTop;
-    },
-    { passive: true }
-  );
-  el.addEventListener(
-    "touchmove",
-    (e) => {
-      if (touchAxis) return;
-      const dx = Math.abs(e.touches[0].clientX - startX);
-      const dy = Math.abs(e.touches[0].clientY - startY);
-      if (dx < 6 && dy < 6) return; // 誤判定防止のあそび
-      touchAxis = dx > dy ? "x" : "y";
-      // 軸確定時点の位置で逆軸を固定(確定までの微小な斜めズレを引き継がない)
-      lockLeft = el.scrollLeft;
-      lockTop = el.scrollTop;
-    },
-    { passive: true }
-  );
-  // 慣性スクロール中もtouchAxisは残るので、次のtouchstartまで逆軸を戻し続ける
-  el.addEventListener(
-    "scroll",
-    () => {
-      if (touchAxis === "y" && el.scrollLeft !== lockLeft) el.scrollLeft = lockLeft;
-      else if (touchAxis === "x" && el.scrollTop !== lockTop) el.scrollTop = lockTop;
-    },
-    { passive: true }
-  );
+  const list = document.createElement("div");
+  list.className = "card-list";
+  for (const s of sorted) {
+    const card = document.createElement("div");
+    card.className = "stock-card";
+    if (s.fund_stale) card.classList.add("fund-stale");
+    // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
+    if (s.has_chart !== false) {
+      card.addEventListener("click", () => {
+        window.location.hash = `stock/${encodeURIComponent(s.code)}`;
+      });
+    } else {
+      card.classList.add("row-static");
+    }
+    card.innerHTML = `
+      <div class="sc-row">
+        <span class="sc-name">${escapeHtml(s.name ?? "-")}</span>
+        <span class="sc-code">${escapeHtml(s.code)}</span>
+        <span class="sc-metrics">SC <b>${s.total_score ?? "-"}</b>・RS <b>${s.rs ?? "-"}</b></span>
+      </div>
+      <div class="sc-row sc-row-sub">
+        <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
+        <span class="sc-sector">${sectorStrengthHtml(s)}</span>
+        <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
+      </div>`;
+    list.appendChild(card);
+  }
+  return list;
 }
 
 function formatClose(v) {
   return v == null ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: 1 });
 }
 
-function fundStatusLabel(s) {
-  if (s.fund_stale) return "再確認推奨";
-  if (s.fund_coverage === "full" || s.fund_coverage === "partial") {
-    // fund_strong=false: データはあるが本命昇格基準(EPS YoY+25%/売上YoY+20%)未達。
-    // 旧report.json(fund_strongフィールドなし)は従来表示にフォールバック。
-    if (s.fund_strong === false) {
-      const eps = s.fund_eps_yoy != null ? `EPS ${s.fund_eps_yoy > 0 ? "+" : ""}${s.fund_eps_yoy}%` : "EPS 計算不能";
-      return `ファンダ弱 (${eps})`;
-    }
-    return s.fund_coverage;
-  }
-  return "-";
-}
-
 // ---------------------------------------------------------------------------
 // 〔監視〕8条件合格・セットアップ形成待ち(旧P1)一覧。P2〜P4はUI廃止(データは
 // report.jsonに残るがダッシュボードには出さない)。全件をRS降順で表示する。
-// 列は本命/候補プールと共通のCOLUMNSを使い、renderTableのみ初期ソートをRS降順に上書きする。
+// カードは本命/候補プールと共通のrenderCardListを使い、初期ソートをRS降順に上書きする。
 // ---------------------------------------------------------------------------
 
 function renderPriorityTier(report, containerId) {
@@ -822,7 +651,7 @@ function renderPriorityTier(report, containerId) {
   note.className = "tier-note";
   note.textContent = `全${stocks.length}件 (RS降順)`;
   container.appendChild(note);
-  container.appendChild(renderTable(stocks, "watchlist", { initialSortKey: "rs", initialSortDesc: true }));
+  container.appendChild(renderCardList(stocks, "watchlist", { initialSortKey: "rs" }));
 }
 
 // ---------------------------------------------------------------------------

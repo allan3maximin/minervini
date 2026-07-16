@@ -99,6 +99,8 @@ def test_weighted_returns_all_none():
 def patched_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(hm, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(hm, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
+    # 公開版(docs/data/sector_history.json)も実リポジトリを汚さない。
+    monkeypatch.setattr(hm, "SECTOR_HISTORY_PUBLIC_PATH", tmp_path / "sector_history_public.json")
     monkeypatch.setattr(hm, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
     return tmp_path
 

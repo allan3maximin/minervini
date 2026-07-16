@@ -24,6 +24,43 @@ sandboxのマウント経由では `.git/` 配下にファイルを**作成は�
 注意: GitHub MCP が「Bad credentials」を返す場合はトークン切れ。
 ユーザーにGitHubコネクタの再連携を依頼すること。
 
+## 2026-07-16 (51): リスト画面を横スクロール表→薄型カードに全面変更(軸ロック撤去)
+
+(50)の軸ロックがかくつく(scrollイベントでの逆軸巻き戻しがジャンクの原因)ため、
+横スクロール自体を廃止する方針に転換。1銘柄=薄型2段カードでスマホ幅に収める。
+
+- **表示項目を7つに絞る**: コード/銘柄名/総合スコア(SC)/RS/終値(前日比%)/
+  セクター(強度)/枯れ度。上段=銘柄名・コード・SC・RS、下段=終値(前日比%)・
+  セクター・枯れ度バッジ。
+- **app.js**: COLUMNS定義+renderTable(ソート可能テーブル)+lockDiagonalScrollを
+  削除し、renderCardList に置き換え。並びは総合スコア降順固定(監視タブはRS降順)。
+  **列ヘッダのタップソートは廃止**(必要になったら並び替えチップで再実装)。
+  クリック遷移(#stock/CODE)/fund-staleアンバー背景/row-static無効化は踏襲。
+  trimName/fundStatusLabelは未使用になったため削除。
+- **style.css**: .tier-table一式(sticky列/固定列幅)を削除し .card-list/.stock-card
+  スタイルを追加。*-tier-body は overflow-y:auto / overflow-x:hidden(縦のみ)。
+- **前日比%は新フィールド**: pipeline.py で record["change_pct"] を追加
+  (df_indの終値2本から計算)。**次回の日次バッチ実行までは既存report.jsonに
+  フィールドが無いため「-」ではなく空表示**(changePctHtmlがnull安全)。
+- pytest 281 passed / node --check OK。
+
+### 【重要】pytestが実データを汚染していた問題の発見と修正
+コミット前の差分確認で、pytest実行のたびに実リポジトリのデータファイルが
+書き換わっていたことが発覚(test_pipeline.pyのwiredフィクスチャのパッチ漏れ)。
+
+- **data/dryup_log.jsonl(フォワード検証ログ)が17行中15行テスト銘柄「1111」の
+  偽レコードだった**。過去セッションのpytest実行分もbot経由でpush済みだった。
+  1111全行を除去し、残った本物(9247, 07-16)の重複2行も1行にdedup。
+  **フォワードログは実質 2026-07-16 の9247 1件から再スタート**。
+- パッチ漏れ3点を修正:
+  - `pipeline.indices_mod.update_indices` → 未パッチでネット取得+実docs/data/indices.json書き込み。固定値lambdaに差し替え。
+  - `pipeline.dryup_log_mod.log_and_resolve` → 未パッチで実data/dryup_log.jsonlに追記。
+    **pathデフォルト引数はdef時束縛のためDRYUP_LOG_PATH定数の差し替えでは効かない**。関数ごと差し替えた。
+  - `SECTOR_HISTORY_PUBLIC_PATH`(docs/data/sector_history.json公開版) → test_pipeline/test_heatmap両方で未パッチ。tmp_pathに向けた。
+- **再発防止(本体側)**: `dryup_log.log_and_resolve` に同日同銘柄(date, code)の
+  追記ガードを追加(同日再実行でログが重複していく問題。9247の重複2行の原因)。
+- 修正後: pytest 281 passed、実行後も `git status` クリーンを確認。
+
 ## 2026-07-16 (50): 銘柄リスト表の斜めスクロール禁止をジェスチャー単位の軸ロックに強化
 
 銘柄リスト表(*-tier-body)が斜めにスクロールできてしまう件。既存の
