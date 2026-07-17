@@ -30,6 +30,7 @@ import requests
 
 from src.config import REPO_ROOT, load_config
 from src.data.fundamentals import AUTO_PATH, load_auto_store
+from src.utils_io import atomic_write_json, safe_load_json
 
 STATE_PATH = REPO_ROOT / "data" / "jquants_state.json"
 CALENDAR_PATH = REPO_ROOT / "data" / "earnings_calendar.json"
@@ -46,25 +47,15 @@ def _jq_cfg(config: dict) -> dict:
 
 
 def save_auto_store(store: dict, path=None) -> None:
-    path = path or AUTO_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=1, sort_keys=True)
+    atomic_write_json(path or AUTO_PATH, store, indent=1, sort_keys=True)
 
 
 def load_state(path=None) -> dict:
-    path = path or STATE_PATH
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return safe_load_json(path or STATE_PATH, {})
 
 
 def save_state(state: dict, path=None) -> None:
-    path = path or STATE_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=1)
+    atomic_write_json(path or STATE_PATH, state, indent=1)
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +202,17 @@ def record_to_guidance(rec: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def derive_quarters(ytd_points: list[dict]) -> list[dict]:
-    """会計年度ごとにYTD点を昇順に並べ、隣接差分でラベル値を導出する。"""
+    """会計年度ごとにYTD点を昇順に並べ、隣接差分でラベル値を導出する。
+
+    2026-07-17変更: n>=2 の点は「同一年度内に直前(n-1)のYTD点がある」場合のみ
+    出力する。従来は基準が無いと base=0 扱いで、例えば年度内にFY(n=4)点しか
+    無い銘柄は通期値がそのままQ4単四半期として登録され、YoY(confirmed昇格判定に
+    直結)が大きく歪んでいた。単四半期値が導出不能な点は黙って破棄する
+    (Q1はYTD=単四半期なのでそのまま出力)。日次増分では _refetch_incomplete が
+    年度前半の点をcode指定で補完するため、通常はここで破棄されるのはrefetch
+    でも埋まらなかった点のみ。副作用として、年度前半の開示がJ-Quantsに存在
+    しない銘柄(上場直後・変則決算等)は該当四半期のcoverageが落ちる。
+    """
     by_fy: dict[str, list[dict]] = {}
     for p in ytd_points:
         by_fy.setdefault(p["fy_start"], []).append(p)
@@ -226,6 +227,12 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
         prev: dict | None = None
         for n in sorted(dedup):
             p = dedup[n]
+            if n >= 2 and (n - 1) not in dedup:
+                # 直前のYTD点が無い -> 単四半期値が導出不能。誤った通期=単四半期
+                # 登録を避けるため出力しない。ただし次の点の差分基準にはなり得る
+                # ので prev は更新する(例: {2,3}ならQ3は正しく導出できる)。
+                prev = p
+                continue
             rec = {"fiscal_quarter": p["label"], "eps": None, "revenue": None}
             for key in ("eps", "revenue"):
                 cur = p.get(key)
@@ -333,11 +340,7 @@ def next_dates_from_calendar(records: list[dict], code_set: set[str], today: dat
 
 
 def load_earnings_calendar(path=None) -> dict:
-    path = path or CALENDAR_PATH
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return safe_load_json(path or CALENDAR_PATH, {})
 
 
 def update_earnings_calendar(codes: list[str], config: dict | None = None) -> dict[str, str]:
@@ -361,9 +364,7 @@ def update_earnings_calendar(codes: list[str], config: dict | None = None) -> di
 
     by_code = next_dates_from_calendar(records, set(codes), today)
     payload = {"fetched_at": today.isoformat(), "by_code": by_code}
-    CALENDAR_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CALENDAR_PATH, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1, sort_keys=True)
+    atomic_write_json(CALENDAR_PATH, payload, indent=1, sort_keys=True)
     print(f"J-Quants earnings calendar: {len(by_code)} upcoming dates for universe codes.")
     return by_code
 

@@ -194,7 +194,14 @@ def build_report(
     generated_at: str | None = None,
     priority_counts: dict | None = None,
     p1_scarce: bool | None = None,
+    source_freshness: dict | None = None,
 ) -> dict:
+    """report.json を組み立てて書き出す。
+
+    source_freshness (2026-07-17追加、省略可=後方互換): データソースごとの
+    最終成功日 {"jquants": {"last_success": ...}, "edinetdb": {...}, "prices": {...}}。
+    パイプライン側 (pipeline.run_daily) が state ファイルから組み立てて渡す。
+    """
     ordered = sorted(stocks, key=_sort_key)
     report = {
         "generated_at": generated_at or datetime.now().astimezone().isoformat(),
@@ -202,7 +209,11 @@ def build_report(
         "template_pass": template_pass,
         "priority_counts": priority_counts,
         "p1_scarce": p1_scarce,
-        "data_warnings": data_warnings or {"failed_tickers": [], "stale_tickers": [], "csv_errors": []},
+        "data_warnings": data_warnings or {
+            "failed_tickers": [], "stale_tickers": [], "csv_errors": [],
+            "fundamentals_mismatch": [],
+        },
+        "source_freshness": source_freshness,
         "stocks": ordered,
     }
     write_docs_json(REPORT_PATH, report)

@@ -4,8 +4,21 @@ See design doc section 1.1 / 1.4. Key behaviors implemented here:
 - 50-ticker chunked yfinance downloads with randomized sleep between chunks
 - exponential backoff retry (5s -> 15s -> 45s) per failed chunk
 - incremental fetch (only new days) using the local Parquet cache, with the
-  most recent 30 days always re-fetched and overwritten to absorb splits /
-  corrections
+  most recent 30 days always re-fetched and overwritten to absorb late
+  corrections. NOTE: this recent-window overwrite alone does NOT absorb
+  splits -- see the split detection note below.
+- split/dividend-adjustment detection (2026-07-17): yfinance auto_adjust=True
+  prices are adjusted retroactively, so a split or ex-dividend changes the
+  *entire* history. Rows older than the re-fetch window would silently stay
+  on the pre-split basis and poison MA200 / 52-week high-low / RS. To detect
+  this, the incremental fetch compares closes on the dates shared by the new
+  data and the cache; if any row's relative error exceeds
+  config data.split_check_tolerance, the ticker's full history is re-fetched
+  and the cache replaced.
+  Caveat: cache rows sourced from the stooq fallback use a different
+  adjustment basis than yfinance, so a mixed cache can trip this check and
+  cause an extra (harmless) full re-fetch that normalizes the cache back to
+  a single basis.
 - stooq fallback (direct CSV endpoint, custom User-Agent, 2s/ticker sleep)
   for tickers that fail all yfinance retries
 - job-level failure if more than `max_fail_ratio` of the universe has no data
@@ -37,6 +50,8 @@ class PriceUpdateResult:
     failed_tickers: list[str] = field(default_factory=list)
     stale_tickers: list[str] = field(default_factory=list)
     illiquid_tickers: list[str] = field(default_factory=list)
+    # 分割・調整基準変更を検知して全履歴を再取得した銘柄(観測用)。
+    split_refetched_tickers: list[str] = field(default_factory=list)
     insufficient_history_count: int = 0
     job_failed: bool = False
 
@@ -149,6 +164,33 @@ def fetch_stooq(code: str) -> pd.DataFrame | None:
     return df
 
 
+def detect_cache_divergence(
+    cached: pd.DataFrame | None, new: pd.DataFrame | None, tolerance: float
+) -> bool:
+    """増分取得データとキャッシュの重複日で終値を突合し、調整基準のズレを検知する。
+
+    yfinance auto_adjust=True の調整済み価格は、株式分割・配当落ちが起きると
+    全履歴が変わる。増分取得(直近約40日)より古いキャッシュ行が旧基準のまま
+    残ると MA200 / 52週高安 / RS が汚染されるため、重複期間の終値の相対誤差が
+    tolerance を超える行が1つでもあれば True(=全履歴再取得が必要)を返す。
+    """
+    if cached is None or cached.empty or new is None or new.empty:
+        return False
+    overlap = cached[["date", "close"]].merge(
+        new[["date", "close"]], on="date", suffixes=("_cached", "_new")
+    )
+    if overlap.empty:
+        return False
+    new_close = overlap["close_new"].astype(float)
+    old_close = overlap["close_cached"].astype(float)
+    # 分母ゼロ(異常データ)行は比較対象外。
+    valid = new_close != 0
+    if not valid.any():
+        return False
+    rel_err = ((old_close[valid] - new_close[valid]).abs() / new_close[valid].abs())
+    return bool((rel_err > tolerance).any())
+
+
 def _merge_new_data(cached: pd.DataFrame | None, new: pd.DataFrame) -> pd.DataFrame:
     if cached is None or cached.empty:
         return new
@@ -200,6 +242,34 @@ def update_prices(codes: list[str], config: dict | None = None) -> PriceUpdateRe
                 fetched[code] = chunk_result.get(ticker)
             if i + chunk_size < len(group_codes):
                 time.sleep(random.uniform(sleep_lo, sleep_hi))
+
+    # 分割・調整基準変更の検知: 増分取得できた銘柄について、キャッシュとの
+    # 重複期間で終値を突合。ズレていれば全履歴を再取得してキャッシュを置き換える
+    # (caches[code] = None にすることで下のマージがキャッシュを捨てて全置換になる)。
+    split_tolerance = data_cfg.get("split_check_tolerance", 0.01)
+    diverged_codes = [
+        c for c in incr_codes
+        if fetched.get(c) is not None
+        and detect_cache_divergence(caches[c], fetched[c], split_tolerance)
+    ]
+    for i in range(0, len(diverged_codes), chunk_size):
+        chunk = diverged_codes[i : i + chunk_size]
+        tickers = [f"{c}.T" for c in chunk]
+        chunk_result = fetch_yfinance_chunk(tickers, None, "2y", config)
+        for code, ticker in zip(chunk, tickers):
+            full = chunk_result.get(ticker)
+            if full is not None:
+                print(f"Split/adjustment change detected for {code}; cache replaced with full re-fetch.")
+                fetched[code] = full
+                caches[code] = None
+                result.split_refetched_tickers.append(code)
+            else:
+                # 再取得失敗: 従来どおり増分マージにフォールバック(旧基準の
+                # 古い行が残る既知の汚染だが、銘柄を落とすよりは保守的。
+                # ズレは翌日以降も検知され続けるので後日リトライされる)。
+                print(f"Split/adjustment change detected for {code} but full re-fetch failed; kept incremental merge.")
+        if i + chunk_size < len(diverged_codes):
+            time.sleep(random.uniform(sleep_lo, sleep_hi))
 
     stooq_needed = [c for c in codes if fetched.get(c) is None]
     for code in stooq_needed:

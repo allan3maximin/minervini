@@ -225,6 +225,51 @@ def test_merge_fundamentals_checked_date_uses_max_of_auto_and_tanshin_when_no_ma
     assert merged["1111"]["checked_date"] == "2026-07-05"  # tanshinの方が新しい
 
 
+def test_merge_fundamentals_mismatch_over_20pct_emits_warning():
+    auto_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 10.0, "revenue": 1000.0}],
+            "checked_date": "2026-07-06",
+        }
+    }
+    tanshin_by_code = {
+        "1111": {
+            # eps 10.0 vs 5.0 -> 相対乖離50% (>20%)。revenueは一致。
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 5.0, "revenue": 1000.0}],
+            "checked_date": "2026-07-05",
+        }
+    }
+    warnings_out: list[str] = []
+    merged = merge_fundamentals(auto_by_code, {}, tanshin_by_code=tanshin_by_code,
+                                warnings_out=warnings_out)
+
+    assert len(warnings_out) == 1
+    assert "1111 2026Q1 eps" in warnings_out[0]
+    assert "jquants=10.0" in warnings_out[0]
+    # マージ結果は従来どおり auto(jquants) 値が勝つ
+    assert merged["1111"]["quarters"][0]["eps"] == 10.0
+
+
+def test_merge_fundamentals_small_mismatch_emits_no_warning():
+    auto_by_code = {
+        "1111": {
+            # eps 10.0 vs 9.0 -> 相対乖離10% (<20%)
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 10.0, "revenue": 1000.0}],
+            "checked_date": "2026-07-06",
+        }
+    }
+    tanshin_by_code = {
+        "1111": {
+            "quarters": [{"fiscal_quarter": "2026Q1", "eps": 9.0, "revenue": 950.0}],
+            "checked_date": "2026-07-05",
+        }
+    }
+    warnings_out: list[str] = []
+    merge_fundamentals(auto_by_code, {}, tanshin_by_code=tanshin_by_code,
+                       warnings_out=warnings_out)
+    assert warnings_out == []
+
+
 def test_write_public_json_includes_only_codes_with_quarters(tmp_path):
     # code "1111" has real J-Quants-sourced quarters and should be exported;
     # code "2222" has an entry but no quarters (e.g. a failed/empty auto

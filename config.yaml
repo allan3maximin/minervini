@@ -13,6 +13,10 @@ data:
   stooq_sleep_sec: 2.0
   backoff_sec: [5, 15, 45]
   topix_proxy_ticker: "1306.T"
+  # 株式分割・配当落ち検知(2026-07-17): 増分取得とキャッシュの重複期間で終値を
+  # 突合し、相対誤差がこの値を超える行があればその銘柄は全履歴を再取得して
+  # キャッシュを置き換える(auto_adjust価格は分割で全履歴が変わるため)。
+  split_check_tolerance: 0.01
 
 trend_template:
   ma200_up_days_min: 21

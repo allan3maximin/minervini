@@ -110,6 +110,11 @@ def wired(tmp_path, monkeypatch):
     )
     # J-Quants自動取得はネットワークに出さない。
     monkeypatch.setattr(pipeline.jquants_mod, "update_fundamentals_auto", lambda codes, config: {})
+    # source_freshness用のstate読み取り: 実リポジトリの data/*.json に触れない
+    # (conftest.pyのautouseでも差し替え済みだが、この読み取りシームは
+    # run_daily が直接依存するためここでも明示しておく)。
+    monkeypatch.setattr(pipeline.jquants_mod, "STATE_PATH", tmp_path / "jquants_state.json")
+    monkeypatch.setattr(pipeline.edinetdb_mod, "STATE_PATH", tmp_path / "edinetdb_state.json")
     # EDINET DB自動取得もネットワークに出さない。
     monkeypatch.setattr(
         pipeline.edinetdb_mod, "update_fundamentals_auto",
@@ -161,6 +166,13 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert report["universe_size"] == 3
     assert report["template_pass"] == 2
+
+    # 2026-07-17追加: ファンダ乖離warning枠(この構成では空)とデータソース鮮度。
+    assert report["data_warnings"]["fundamentals_mismatch"] == []
+    # stateファイル無し -> jquants/edinetdb は null、価格は当日取得成功 -> 今日の日付。
+    assert report["source_freshness"]["jquants"] == {"last_success": None}
+    assert report["source_freshness"]["edinetdb"] == {"last_success": None}
+    assert report["source_freshness"]["prices"]["last_success"] is not None
     # "1111" (actionable, confirmed/pool tier) sorts ahead of "3333" (watchlist)
     assert [s["code"] for s in report["stocks"]] == ["1111", "3333"]
     assert report["stocks"][0]["footprint"] == "6W 20/10/4 3T"
@@ -202,6 +214,23 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     assert codes_in_hm == {"1111", "2222", "3333"}
     assert "sector33" in report["stocks"][0]
     assert (tmp_path / "sector_history.json").exists()
+
+
+def test_run_daily_source_freshness_reads_state_files(wired, monkeypatch):
+    # jquants/edinetdb の state ファイルが存在する場合、その進捗日付が
+    # report.json の source_freshness に載る(2026-07-17追加)。
+    tmp_path, codes = wired
+    (tmp_path / "jquants_state.json").write_text(
+        json.dumps({"last_list_date": "2026-04-20"}), encoding="utf-8")
+    (tmp_path / "edinetdb_state.json").write_text(
+        json.dumps({"last_events_date": "2026-07-15", "backlog": []}), encoding="utf-8")
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert report["source_freshness"]["jquants"] == {"last_success": "2026-04-20"}
+    assert report["source_freshness"]["edinetdb"] == {"last_success": "2026-07-15"}
 
 
 def test_run_daily_writes_positions_report(wired, monkeypatch):

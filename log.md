@@ -2,6 +2,72 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-17 (55): 外部視点レビュー19項目の一括改善 — バックエンド+ワークフロー完了
+
+(54)のフロント改修と同一バッチの締め。外部視点レビュー(機能/UI/UX/データ取扱)で
+挙げた19項目のうちコードで対処可能なもの全てを実装完了。pytest **295 passed**
+(baseline 281 → +14)、node --check OK、data/・docs/data/ 汚染なしを確認。
+
+### ワークフロー
+- **`daily - コピー.yml` 撤去**: 重複ワークフローをリポジトリ外
+  (`daily-copy.yml.attic`)へ退避。mountはrm不可のためfilesystem MCPでmove。
+- **daily.yml 当日実行済みガード復旧**: 2026-07-08からskip=false固定で無効化
+  されたまま放置(平日最大5回フル実行)だったのを、git logで当日分
+  "chore: daily screener run YYYY-MM-DD" コミットを探す方式で復旧。
+
+### バックエンド
+- **株式分割検知 (prices.py)**: キャッシュとの重複期間close比較で相対誤差>
+  `data.split_check_tolerance`(config.yaml新設、0.01)なら全履歴再取得。
+  分割後の調整済み価格とキャッシュの未調整価格の混在を防ぐ。
+- **derive_quarters 仕様変更 (jquants.py)**: 同一FY内に先行YTD点が無い
+  n>=2 点は破棄(通期値がQ4単独四半期として登録される歪みを防止)。
+  {Q2,Q3}のようなgapは従来どおり導出可。既存テスト1本を仕様に合わせ更新+2本追加。
+- **ソース間乖離検知 (fundamentals.py)**: merge_fundamentals に warnings_out
+  引数追加。jquants と edinetdb が同一(code,四半期)で eps/revenue 相対20%超
+  乖離なら警告文字列を追加(採用値は従来どおり jquants)。マージ結果は後方互換。
+- **アトミック書込 (utils_io.py 新設)**: atomic_write_json/atomic_write_text
+  (tmp→os.replace)+safe_load_json(破損→warning+default)。entry/dryup_log/
+  heatmap/secure_io/edinetdb/jquants の state 書込を置換。書込途中クラッシュで
+  壊れたJSONがコミットされ翌日以降のrunが死ぬ問題への対処。
+- **report.json 拡張 (pipeline.py/build_site.py)**: `source_freshness`
+  (jquants/edinetdb/prices の最終成功日)と `data_warnings.fundamentals_mismatch`
+  を追加。build_report は省略可引数で後方互換。
+- **tests/conftest.py 新設**: autouse fixture で書込先定数を tmp_path へ
+  リダイレクト(テストによる data/ docs/data/ 汚染の恒久防止)。
+- **テスト追加**: test_utils_io.py(6本)、fundamentals乖離2本、prices分割
+  シナリオ、pipeline配線(freshness/mismatch)。
+
+### 残タスク(ユーザー対応・別セッション)
+- **tools/add_sri.py をローカル実行**(sandboxはCDN接続不可。偽ハッシュ厳禁)。
+- **positions.csv 平文問題**: repo private化はユーザー判断・操作。
+- **app.js 4分割**: フロントテスト無しでの分割はリスク過大のため意図的に見送り。
+- push後の初回daily runで分割検知/freshnessの本番動作を要確認。
+
+## 2026-07-17 (54): フロント改修の残作業完了 — a11y/PWA/キャッシュバスター自動化
+
+前セッション(並び替えチップ/reportCache/PWAメタタグ等)の続き。今回で完了:
+
+- **initStockPage で reportCache 再利用** (app.js): 銘柄詳細への遷移ごとの
+  report.json fetch+復号をやめ、キャッシュが無い時(直リンク等)だけfetchして格納。
+- **アクセシビリティ**: 銘柄カード(has_chart!==false)に role="button"+tabindex=0+
+  Enter/Space遷移。保有ビューの行も同様(data_missing行=row-staticは対象外、
+  クリックリスナーも非staticのみに変更)。Dockのアクティブボタンに aria-current="page"。
+- **batch.js renderHistory 並列化**: ワークフローごとの直列awaitを
+  Promise.all(個別エラーは該当セクションのみ表示)+config順描画に変更。
+- **style.css**: .card-sort-chips の余白、.hm-meta(dim小テキスト+:empty非表示)、
+  .stock-card:focus-visible / 保有行 tr[tabindex]:focus-visible のアウトライン追加。
+  (.page-header-actions/.meta-line は既存定義ありのため追加なし)
+- **PWA本体**: docs/manifest.json 新設(name ミネルヴィニ式スクリーナー/standalone/
+  背景・テーマ色 #0b0e14)。Pillowでダーク背景+アクセント色Mの icon-192.png /
+  icon-512.png を生成。Service Workerは意図的に無し(暗号化データと相性が悪い)。
+- **tools/update_cache_busters.py 新設+実行**: index.html の assets/*.css|js の
+  ?v= を内容md5先頭8文字へ自動更新(冪等)。実行済み — 全9アセットがハッシュ化
+  (app.js v35→0d3a0772 等)。以後アセット変更時はこれを実行するだけ。
+- **tools/add_sri.py 新設(未実行)**: CDN参照(unpkg/jsdelivr)にsha384 integrity+
+  crossorigin を実測ダウンロードで付与するスクリプト。sandboxは外部CDN接続不可
+  のため**ユーザーがローカルで実行する**(偽ハッシュ手書きは全画面死のため厳禁)。
+- node --check app.js/batch.js OK。manifest.json はjson.loadで検証OK。
+
 ## 2026-07-16 (53): UI再修正 — ドック小型化撤去+軸を実日付に復帰
 
 (52)で入れたうち2点を萩山フィードバックで巻き戻し。**カード表記統合**と

@@ -49,6 +49,7 @@ import requests
 
 from src.config import REPO_ROOT, load_config
 from src.data.fundamentals import load_auto_store
+from src.utils_io import atomic_write_json, safe_load_json
 
 STATE_PATH = REPO_ROOT / "data" / "edinetdb_state.json"
 STORE_PATH = REPO_ROOT / "data" / "edinetdb_auto.json"
@@ -88,18 +89,11 @@ def _ed_cfg(config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def load_state(path=None) -> dict:
-    path = path or STATE_PATH
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return safe_load_json(path or STATE_PATH, {})
 
 
 def save_state(state: dict, path=None) -> None:
-    path = path or STATE_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=1)
+    atomic_write_json(path or STATE_PATH, state, indent=1)
 
 
 def load_store(path=None) -> dict:
@@ -107,10 +101,7 @@ def load_store(path=None) -> dict:
 
 
 def save_store(store: dict, path=None) -> None:
-    path = path or STORE_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=1, sort_keys=True)
+    atomic_write_json(path or STORE_PATH, store, indent=1, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------

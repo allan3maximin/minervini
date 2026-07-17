@@ -11,10 +11,8 @@ doc's own description of EXTENDED as an automatic downgrade.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from src.config import REPO_ROOT, load_config
+from src.utils_io import atomic_write_json, safe_load_json
 
 STATUS_HISTORY_PATH = REPO_ROOT / "data" / "status_history.json"
 
@@ -89,16 +87,12 @@ def market_guard_triggered(topix_return: float, config: dict | None = None) -> b
 # ---------------------------------------------------------------------------
 
 def load_status_history() -> dict:
-    if not STATUS_HISTORY_PATH.exists():
-        return {}
-    with open(STATUS_HISTORY_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # 破損時は空dictから再構築(warningはsafe_load_json側でprintされる)。
+    return safe_load_json(STATUS_HISTORY_PATH, {})
 
 
 def save_status_history(history: dict) -> None:
-    STATUS_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(STATUS_HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    atomic_write_json(STATUS_HISTORY_PATH, history, indent=2)
 
 
 def record_status(

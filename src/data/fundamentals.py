@@ -35,12 +35,10 @@ _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
 
 
 def load_auto_store(path=None) -> dict:
-    """data/fundamentals_auto.json を読む。無ければ空dict(=手動CSVのみで動作)。"""
-    path = path or AUTO_PATH
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    """data/fundamentals_auto.json を読む。無い・壊れている場合は空dict
+    (=手動CSVのみで動作。破損時はwarningをprintして空から再構築)。"""
+    from src.utils_io import safe_load_json
+    return safe_load_json(path or AUTO_PATH, {})
 
 
 def load_fundamentals_csv(path=None) -> tuple[pd.DataFrame, list[str]]:
@@ -111,8 +109,22 @@ def build_fundamentals_by_code(df: pd.DataFrame) -> dict[str, dict]:
     return result
 
 
+MISMATCH_REL_THRESHOLD = 0.20  # auto/tanshin間の乖離警告閾値(相対20%超)
+
+
+def _relative_mismatch(a: float | None, b: float | None, threshold: float) -> bool:
+    """2値の相対乖離が threshold を超えるか。None・分母ゼロは比較不能=False。"""
+    if a is None or b is None:
+        return False
+    denom = max(abs(a), abs(b))
+    if denom == 0:
+        return False
+    return abs(a - b) / denom > threshold
+
+
 def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
-                       tanshin_by_code: dict | None = None) -> dict:
+                       tanshin_by_code: dict | None = None,
+                       warnings_out: list | None = None) -> dict:
     """自動取得ストア(J-Quants) + EDINET DB決算短信補完 + 手動CSVを統合する。
 
     優先度: manual > auto(jquants) > tanshin(edinetdb) -- 同一(code,
@@ -121,6 +133,12 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
     暫定速報の扱いになる(DESIGN_EDINETDB.md 0節)。
     monthly_yoy は従来どおり手動のみ。checked_date は manual があれば manual、
     無ければ auto と tanshin の新しい方 (ISO日付文字列は辞書順比較で正しく比較可)。
+
+    warnings_out (2026-07-17追加): list を渡すと、auto と tanshin の両方が同一
+    (code, fiscal_quarter) を持ち eps または revenue の相対乖離が
+    MISMATCH_REL_THRESHOLD(20%)を超える場合に警告文字列を追加する。従来は
+    黙って上書きされソース間の食い違いが検知不能だった。マージ結果自体は
+    従来と同一(後方互換)。
     """
     tanshin_by_code = tanshin_by_code or {}
     result: dict[str, dict] = {}
@@ -128,6 +146,24 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
         tanshin = tanshin_by_code.get(code) or {}
         auto = auto_by_code.get(code) or {}
         manual = manual_by_code.get(code) or {}
+
+        if warnings_out is not None:
+            tanshin_by_label = {
+                q.get("fiscal_quarter"): q for q in tanshin.get("quarters", [])
+                if q.get("fiscal_quarter")
+            }
+            for q in auto.get("quarters", []):
+                fq = q.get("fiscal_quarter")
+                t = tanshin_by_label.get(fq)
+                if t is None:
+                    continue
+                for key in ("eps", "revenue"):
+                    a_val, t_val = q.get(key), t.get(key)
+                    if _relative_mismatch(a_val, t_val, MISMATCH_REL_THRESHOLD):
+                        warnings_out.append(
+                            f"{code} {fq} {key}: jquants={a_val} と edinetdb={t_val} "
+                            f"が20%超乖離 (jquants値を採用)"
+                        )
 
         by_label: dict[str, dict] = {}
         for q in tanshin.get("quarters", []):

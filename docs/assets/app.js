@@ -55,13 +55,51 @@ function dryupBadgeHtml(s) {
 const CARD_SORTS = {
   total_score: (s) => s.total_score ?? -Infinity,
   rs: (s) => s.rs ?? -Infinity,
+  change_pct: (s) => s.change_pct ?? -Infinity,
 };
+
+// 並び替えチップ(リスト画面)。tierごとの選択をlocalStorageに保存し、
+// リロード後も維持する。既定は従来の並び(本命/候補=総合スコア、監視=RS)。
+const CARD_SORT_STORAGE_KEY = "minervini-card-sort";
+const CARD_SORT_DEFAULTS = { confirmed: "total_score", pool: "total_score", watchlist: "rs" };
+const CARD_SORT_LABELS = { total_score: "スコア", rs: "RS", change_pct: "前日比" };
+
+function getCardSortKey(tier) {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
+    const key = prefs[tier];
+    if (key && CARD_SORTS[key]) return key;
+  } catch (e) {
+    /* 破損データ・プライベートブラウズ等は既定値へフォールバック */
+  }
+  return CARD_SORT_DEFAULTS[tier] || "total_score";
+}
+
+function setCardSortKey(tier, key) {
+  let prefs = {};
+  try {
+    prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
+  } catch (e) {
+    prefs = {};
+  }
+  prefs[tier] = key;
+  try {
+    localStorage.setItem(CARD_SORT_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (e) {
+    /* 保存できなくても表示上の並び替えは機能する */
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Dashboard (index.html)
 // ---------------------------------------------------------------------------
 
 let pendingFund = {};
+
+// report.json の取得+復号結果のキャッシュ。initStockPage(銘柄詳細)が遷移の
+// たびにfetch+復号し直すのを避ける。データは日次更新なのでTTLは持たず、
+// initDashboard(ダッシュボード再訪)が常に再fetchして上書きする。
+let reportCache = null;
 
 async function initDashboard() {
   if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
@@ -85,6 +123,7 @@ async function initDashboard() {
     // positions.json only exists once manual/positions.csv has at least one row.
     window.MinerviniData.fetchJson("data/positions.json", { optional: true }),
   ]);
+  reportCache = { data: report, fetchedAt: Date.now() };
 
   pendingFund = window.MinerviniFundamentalsUI
     ? window.MinerviniFundamentalsUI.reconcilePending(report.generated_at)
@@ -101,6 +140,7 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
+  initCardSortChips();
   startLiveIndices();
 }
 
@@ -378,13 +418,18 @@ function marketBigSparkline(series, isUp) {
 // ---------------------------------------------------------------------------
 const LIVE_INDICES_POLL_MS = 60_000; // ポーリング自体は60秒毎(データの更新頻度自体は15分毎)
 
+// initDashboardはダッシュボード再訪のたびに呼ばれるため、interval IDを保持して
+// 開始前に必ず止める(多重登録するとポーリングが呼ばれた回数分だけ増殖する)。
+let liveIndicesTimer = null;
+
 function startLiveIndices() {
   const section = document.getElementById("market-overview");
   const badge = document.getElementById("market-live-badge");
   if (!section) return;
   if (badge) badge.hidden = false;
 
-  setInterval(async () => {
+  if (liveIndicesTimer) clearInterval(liveIndicesTimer);
+  liveIndicesTimer = setInterval(async () => {
     if (document.hidden) return; // バックグラウンドタブでは無駄にフェッチしない
     try {
       const indices = await window.MinerviniData.fetchJson("data/indices.json", { optional: true });
@@ -558,21 +603,61 @@ function renderTier(report, tier, containerId) {
     container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
     return;
   }
+  const sortKey = getCardSortKey(tier);
   for (const status of STATUS_ORDER) {
     const group = stocks.filter((s) => s.status === status);
     if (!group.length) continue;
-    container.appendChild(renderStatusSection(status, group, tier));
+    container.appendChild(renderStatusSection(status, group, tier, sortKey));
   }
 }
 
-function renderStatusSection(status, stocks, tier) {
+function renderStatusSection(status, stocks, tier, sortKey) {
   const section = document.createElement("div");
   section.className = "status-section status-" + status;
   const h3 = document.createElement("h3");
   h3.textContent = `${STATUS_LABELS[status] || status} (${stocks.length})`;
   section.appendChild(h3);
-  section.appendChild(renderCardList(stocks, tier));
+  section.appendChild(renderCardList(stocks, tier, { initialSortKey: sortKey }));
   return section;
+}
+
+// ---------------------------------------------------------------------------
+// リスト画面の並び替えチップ(スコア/RS/前日比)。クリックで該当ティアの
+// カードリストを再描画し、選択はlocalStorageへ保存する。initDashboardの
+// 描画後に呼ばれ、再描画はreportCache(復号済みreport.json)を使う。
+// ---------------------------------------------------------------------------
+
+function rerenderTierBody(tier) {
+  const report = reportCache && reportCache.data;
+  if (!report) return;
+  if (tier === "watchlist") {
+    renderPriorityTier(report, "watchlist-tier-body");
+  } else {
+    renderTier(report, tier, `${tier}-tier-body`);
+  }
+}
+
+function initCardSortChips() {
+  document.querySelectorAll(".card-sort-chips").forEach((chips) => {
+    const tier = chips.dataset.tier;
+    const sync = () => {
+      const key = getCardSortKey(tier);
+      chips.querySelectorAll("button[data-sort]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.sort === key);
+      });
+    };
+    sync(); // 保存済みの選択をHTMLの初期activeへ反映
+
+    if (chips.dataset.wired) return;
+    chips.dataset.wired = "1";
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-sort]");
+      if (!btn || !CARD_SORTS[btn.dataset.sort]) return;
+      setCardSortKey(tier, btn.dataset.sort);
+      sync();
+      rerenderTierBody(tier);
+    });
+  });
 }
 
 // 終値の前日比%(report.jsonのchange_pct)。旧report.json(フィールドなし)は空表示。
@@ -604,8 +689,18 @@ function renderCardList(stocks, tier, options = {}) {
     if (s.fund_stale) card.classList.add("fund-stale");
     // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
     if (s.has_chart !== false) {
-      card.addEventListener("click", () => {
+      const go = () => {
         window.location.hash = `stock/${encodeURIComponent(s.code)}`;
+      };
+      // キーボード操作対応: divのままフォーカス可能+Enter/Spaceで遷移。
+      card.setAttribute("role", "button");
+      card.tabIndex = 0;
+      card.addEventListener("click", go);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go();
+        }
       });
     } else {
       card.classList.add("row-static");
@@ -689,8 +784,16 @@ async function initStockPage(codeOverride) {
   }
   if (titleEl) titleEl.textContent = "読み込み中...";
 
+  // report.jsonはダッシュボード表示時のキャッシュ(reportCache)を再利用し、
+  // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。
+  const reportPromise = reportCache
+    ? Promise.resolve(reportCache.data)
+    : window.MinerviniData.fetchJson("data/report.json").then((r) => {
+        reportCache = { data: r, fetchedAt: Date.now() };
+        return r;
+      });
   const [report, chart] = await Promise.all([
-    window.MinerviniData.fetchJson("data/report.json"),
+    reportPromise,
     window.MinerviniData.fetchJson(`data/charts/${encodeURIComponent(code)}.json`, { optional: true }),
   ]);
   const stock = report.stocks.find((s) => s.code === code);
@@ -2043,9 +2146,10 @@ async function initPositionsView() {
         })
         .join(" ");
       const signalsCell = badges || (p.data_missing ? "データなし" : "-");
-      const rowClass = p.data_missing ? "row-static" : "";
+      // data_missing行は詳細ページが無いのでクリック/フォーカス不可(row-static)。
+      const rowAttrs = p.data_missing ? 'class="row-static"' : 'tabindex="0" role="button"';
       return `
-        <tr class="${rowClass}" data-code="${escapeHtml(p.code)}">
+        <tr ${rowAttrs} data-code="${escapeHtml(p.code)}">
           <td>${escapeHtml(p.code)}</td>
           <td>${escapeHtml(p.name || "")}</td>
           <td>${formatClose(p.entry_price)}</td>
@@ -2074,9 +2178,16 @@ async function initPositionsView() {
       </table>
     </div>
   `;
-  container.querySelectorAll("tr[data-code]").forEach((tr) => {
-    tr.addEventListener("click", () => {
+  container.querySelectorAll("tr[data-code]:not(.row-static)").forEach((tr) => {
+    const go = () => {
       window.location.hash = "stock/" + tr.dataset.code;
+    };
+    tr.addEventListener("click", go);
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        go();
+      }
     });
   });
 
@@ -2115,7 +2226,14 @@ function showView(hash) {
   const pageHeader = document.querySelector(".page-header");
   if (pageHeader) pageHeader.hidden = name !== "dashboard";
   document.querySelectorAll(".dock-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.view === name);
+    const active = btn.dataset.view === name;
+    btn.classList.toggle("active", active);
+    // スクリーンリーダー向けに現在地を通知(見た目の.activeと常に同期)。
+    if (active) {
+      btn.setAttribute("aria-current", "page");
+    } else {
+      btn.removeAttribute("aria-current");
+    }
   });
   // ヒートマップは独立ページ。コンテナが見えて初めてclientWidthが
   // 正しく取れるため、ヒートマップ表示のたびに再init。

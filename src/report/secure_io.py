@@ -76,12 +76,13 @@ def write_docs_json(path, obj, indent: int = 2) -> None:
 
     DASHBOARD_DATA_KEY があれば暗号化封筒を、無ければ平文を書く。
     既存の `json.dump(obj, f, ensure_ascii=False, indent=N)` の置き換え。
+    2026-07-17: tmp書き込み→os.replace のアトミック置換に変更(途中クラッシュで
+    壊れたJSONがコミットされるのを防ぐ。暗号化ロジックは不変)。
     """
     key = load_data_key()
     payload = encrypt_envelope(obj, key) if key else obj
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=indent)
+    from src.utils_io import atomic_write_json
+    atomic_write_json(path, payload, indent=indent)
 
 
 def read_docs_json(path, default=None):

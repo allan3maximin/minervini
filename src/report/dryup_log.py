@@ -108,22 +108,29 @@ def load_records(path: Path = DRYUP_LOG_PATH) -> list[dict]:
         return []
     out = []
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_no, line in enumerate(f, 1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 rec = json.loads(line)
-                # 2026-07-15追加キーを旧レコードにも補完(writeback時の形状統一)。
-                rec.setdefault("vol_ratio_at_breakout", None)
-                out.append(rec)
+            except json.JSONDecodeError as e:
+                # 破損行(途中クラッシュの書きかけ等)はスキップして継続。
+                print(f"WARNING: {path}:{line_no} corrupted JSONL line skipped ({e})")
+                continue
+            # 2026-07-15追加キーを旧レコードにも補完(writeback時の形状統一)。
+            rec.setdefault("vol_ratio_at_breakout", None)
+            out.append(rec)
     return out
 
 
 def write_records(records: list[dict], path: Path = DRYUP_LOG_PATH) -> None:
-    """全レコードを書き戻す(outcome 解決後の一括更新に使う)。1行1JSONは不変。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    """全レコードを書き戻す(outcome 解決後の一括更新に使う)。1行1JSONは不変。
+
+    tmp書き込み→os.replace のアトミック置換(途中クラッシュで全ログ消失しない)。"""
+    from src.utils_io import atomic_write_text
+    text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+    atomic_write_text(path, text)
 
 
 # ---------------------------------------------------------------------------

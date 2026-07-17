@@ -108,10 +108,30 @@ def test_derive_quarters_separates_fiscal_years():
     ]
     out = jq.derive_quarters(points)
     labels = {q["fiscal_quarter"] for q in out}
-    assert labels == {"2024Q4", "2025Q1"}
+    # 2026-07-17仕様変更: 年度内にFY(n=4)点しか無い場合、通期値をQ4単四半期として
+    # 出力しない(YoY歪み防止)。2024Q4は破棄され、2025Q1のみ出力される。
+    assert labels == {"2025Q1"}
     # 年度をまたいで差分しない: 2025Q1は0基準
     q1 = next(q for q in out if q["fiscal_quarter"] == "2025Q1")
     assert q1["eps"] == 10.0
+
+
+def test_derive_quarters_fy_only_year_emits_nothing():
+    # 年度内にFY点しか無い -> 単四半期値が導出不能なので出力ゼロ(通期=Q4登録の禁止)
+    out = jq.derive_quarters([_point(4, 100.0, 1000.0, fy="2024-04-01")])
+    assert out == []
+
+
+def test_derive_quarters_gap_mid_year_still_derives_next():
+    # {Q2, Q3}のみ: Q2は基準(Q1)欠落で破棄されるが、Q3はQ2との差分で正しく導出できる
+    points = [
+        _point(2, 20.0, 200.0),
+        _point(3, 35.0, 320.0),
+    ]
+    out = jq.derive_quarters(points)
+    assert [q["fiscal_quarter"] for q in out] == ["2025Q3"]
+    assert out[0]["eps"] == 15.0
+    assert out[0]["revenue"] == 120.0
 
 
 def test_derive_quarters_none_values_skip_key():

@@ -69,22 +69,31 @@
     if (!container) return;
     container.innerHTML = "";
     const workflows = window.MINERVINI_CONFIG.workflows || [];
-    for (const wf of workflows) {
+    // ワークフローごとに直列awaitするとワークフロー数×往復時間かかるため、
+    // 全件を並列fetchしてから表示順(config順)に描画する。失敗は該当
+    // セクションだけエラー表示にして他を巻き込まない。
+    const results = await Promise.all(
+      workflows.map((wf) =>
+        GH.listWorkflowRuns(wf.file, 5).then(
+          (runs) => ({ runs }),
+          (e) => ({ error: e })
+        )
+      )
+    );
+    workflows.forEach((wf, i) => {
+      const { runs, error } = results[i];
       const section = document.createElement("div");
       const h3 = document.createElement("h3");
       h3.textContent = wf.label;
       section.appendChild(h3);
 
-      let runs = [];
-      try {
-        runs = await GH.listWorkflowRuns(wf.file, 5);
-      } catch (e) {
+      if (error) {
         const p = document.createElement("p");
         p.className = "tier-note";
-        p.textContent = `実行履歴の取得に失敗しました: ${e.message || e}`;
+        p.textContent = `実行履歴の取得に失敗しました: ${error.message || error}`;
         section.appendChild(p);
         container.appendChild(section);
-        continue;
+        return;
       }
 
       if (!runs.length) {
@@ -93,7 +102,7 @@
         p.textContent = "実行履歴なし";
         section.appendChild(p);
         container.appendChild(section);
-        continue;
+        return;
       }
 
       const wrapper = document.createElement("div");
@@ -129,7 +138,7 @@
       wrapper.appendChild(table);
       section.appendChild(wrapper);
       container.appendChild(section);
-    }
+    });
   }
 
   // SPAルーターから毎回呼ばれる想定。カード自体は静的なのでwiredガードで

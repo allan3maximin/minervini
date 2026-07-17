@@ -38,6 +38,7 @@ from src.screener import priority as priority_mod
 from src.screener import trend_template
 from src.screener import vcp as vcp_mod
 from src.universe import build_universe, load_universe
+from src.utils_io import safe_load_json
 
 DEBUG_PATH = REPO_ROOT / "data" / "trend_template_debug.json"
 
@@ -144,8 +145,12 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         print(f"EDINET DB fundamentals update failed (ignored): {e}")
         tanshin_by_code = {}
 
+    # jquants(auto)とedinetdb(tanshin)が同一四半期で20%超乖離した場合の警告を
+    # 受け取り、report.json の data_warnings.fundamentals_mismatch に載せる。
+    fundamentals_mismatch_warnings: list[str] = []
     fundamentals_by_code = merge_fundamentals(
-        auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code)
+        auto_by_code, build_fundamentals_by_code(csv_df), tanshin_by_code=tanshin_by_code,
+        warnings_out=fundamentals_mismatch_warnings)
     write_public_json(fundamentals_by_code)
 
     # 決算発表予定日カレンダー(J-Quants /equities/earnings-calendar、日次1〜数req)。
@@ -346,6 +351,17 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         "failed_tickers": price_result.failed_tickers,
         "stale_tickers": price_result.stale_tickers,
         "csv_errors": csv_warnings,
+        "fundamentals_mismatch": fundamentals_mismatch_warnings,
+    }
+    # データソースの鮮度: 各ソースの「最後に成功した日」をダッシュボードへ渡す。
+    # jquants/edinetdb は state ファイルの進捗日付(壊れていれば safe_load_json が
+    # 空dictを返すので null)、prices は当日 update_prices が1銘柄でも取れたか。
+    jq_state = safe_load_json(jquants_mod.STATE_PATH, {})
+    ed_state = safe_load_json(edinetdb_mod.STATE_PATH, {})
+    source_freshness = {
+        "jquants": {"last_success": jq_state.get("last_list_date")},
+        "edinetdb": {"last_success": ed_state.get("last_events_date")},
+        "prices": {"last_success": today_str if price_result.frames else None},
     }
     build_site.build_report(
         stock_records,
@@ -354,6 +370,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         data_warnings=data_warnings,
         priority_counts=pr_counts,
         p1_scarce=p1_scarce,
+        source_freshness=source_freshness,
     )
     build_site.update_breadth(
         today_str, len(codes), template_pass, watch_count, history,

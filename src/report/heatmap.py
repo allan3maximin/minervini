@@ -284,11 +284,12 @@ def publish_sector_history(history: dict) -> dict:
 def update_sector_history(
     date_str: str, sectors: list[dict], topix_returns: dict, cfg: dict
 ) -> dict:
-    """セクター集計値の日次履歴 (data/sector_history.json)。同日再実行は上書き。"""
-    if SECTOR_HISTORY_PATH.exists():
-        with open(SECTOR_HISTORY_PATH, "r", encoding="utf-8") as f:
-            history = json.load(f)
-    else:
+    """セクター集計値の日次履歴 (data/sector_history.json)。同日再実行は上書き。
+
+    破損時は空履歴から再開する(safe_load_json。当日以降の蓄積は継続できる)。"""
+    from src.utils_io import safe_load_json
+    history = safe_load_json(SECTOR_HISTORY_PATH, {"history": []})
+    if not isinstance(history, dict) or "history" not in history:
         history = {"history": []}
 
     entry = {
@@ -309,7 +310,6 @@ def update_sector_history(
     history["history"].append(entry)
     history["history"] = history["history"][-cfg["history_keep_days"]:]
 
-    SECTOR_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(SECTOR_HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    from src.utils_io import atomic_write_json
+    atomic_write_json(SECTOR_HISTORY_PATH, history, indent=2)
     return history
