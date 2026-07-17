@@ -106,6 +106,8 @@ def assemble_stock_record(
         # 枯れ度(DRY-UP)バッジ/ソート用。VCP MUST・vcp_scoreとは独立(表示専用、
         # スコア融合なし)。バッジ値=dryup_med_10_50。
         "dryup": _build_dryup_badge(vcp_result, config),
+        # 監視タブ分類用(actionableならNone)。stage/near/missing/detail。
+        "setup_stage": build_setup_stage(vcp_result, config),
     }
 
 
@@ -157,6 +159,75 @@ def _build_vcp_detail(vcp_result: dict, config: dict) -> dict:
         },
         "shakeout_detected": vcp_result.get("shakeout_detected", False),
     }
+
+
+# ---------------------------------------------------------------------------
+# 監視(watchlist)分類: セットアップ進行度 (2026-07-17 新設)
+# ---------------------------------------------------------------------------
+# 監視タブ100件超を毎日全部見るのは不可能なので、VCP評価の非アクショナブル
+# ステータス+診断値から「今どの段階で、何が足りないか」を機械分類する。
+# stage:
+#   forming    = IMMATURE (ベース形成中。base_min_daysまでの残日数を出す)
+#   fresh_high = TOO_RECENT (高値更新直後でベース自体が未開始)
+#   rejected   = REJECTED (ベースはあるがV1〜V7のどれかで不合格。missingに列挙)
+#   volatile   = TOO_VOLATILE (ATR過大で評価対象外)
+#   no_base    = NO_BASE (スキャン窓に基準高値なし)
+# near: 「あと一歩」フラグ。forming で残日数<=near_days、rejected で未達フラグが
+#       ちょうど1個のときTrue。フロントはこのグループだけ最上段に出す。
+
+SETUP_STAGE_NEAR_DAYS_DEFAULT = 5
+
+
+def build_setup_stage(vcp_result: dict, config: dict | None = None) -> dict | None:
+    """非アクショナブルVCP結果を進行度ステージへ分類する。actionableならNone。"""
+    config = config or load_config()
+    status = vcp_result.get("status")
+    vcp_cfg = config.get("vcp", {})
+
+    if status == "IMMATURE":
+        base_min = vcp_cfg.get("base_min_days", 15)
+        near_days = vcp_cfg.get("setup_stage_near_days", SETUP_STAGE_NEAR_DAYS_DEFAULT)
+        bd = vcp_result.get("base_days") or 0
+        remain = max(0, base_min - bd)
+        return {
+            "stage": "forming",
+            "near": remain <= near_days,
+            "missing": [],
+            "detail": f"ベース{bd}日目 (最短{base_min}日まであと{remain}日)",
+        }
+    if status == "TOO_RECENT":
+        dfh = vcp_result.get("days_from_high")
+        suffix = f" (高値から{dfh}日)" if dfh is not None else ""
+        return {
+            "stage": "fresh_high",
+            "near": False,
+            "missing": [],
+            "detail": f"高値更新直後・押し待ち{suffix}",
+        }
+    if status == "REJECTED":
+        flags = vcp_result.get("must_flags") or {}
+        missing = [k for k, v in flags.items() if not v]
+        return {
+            "stage": "rejected",
+            "near": len(missing) == 1,
+            "missing": missing,
+            "detail": "VCP未達: " + "/".join(missing) if missing else "VCP未達",
+        }
+    if status == "TOO_VOLATILE":
+        return {
+            "stage": "volatile",
+            "near": False,
+            "missing": [],
+            "detail": "ボラティリティ過大 (評価対象外)",
+        }
+    if status == "NO_BASE":
+        return {
+            "stage": "no_base",
+            "near": False,
+            "missing": [],
+            "detail": "基準となる高値/ベースなし",
+        }
+    return None  # WATCH_A/B・BREAKOUT等のactionableステータス
 
 
 def attach_priority(record: dict, priority_eval: dict | None) -> dict:

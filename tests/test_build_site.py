@@ -207,3 +207,57 @@ def test_build_chart_data_includes_ma_and_markers():
     assert chart["pivot"] == 14.0
     assert len(chart["markers"]) == 2
     assert len(chart["ma50"]) == 1  # only the non-null value
+
+
+# ---------------------------------------------------------------------------
+# build_setup_stage (監視タブ進行度分類)
+# ---------------------------------------------------------------------------
+
+from src.report.build_site import build_setup_stage  # noqa: E402
+
+STAGE_CONFIG = {"vcp": {"base_min_days": 15, "setup_stage_near_days": 5}}
+
+
+def test_setup_stage_immature_near():
+    st = build_setup_stage({"status": "IMMATURE", "base_days": 12}, STAGE_CONFIG)
+    assert st["stage"] == "forming"
+    assert st["near"] is True  # あと3日 <= 5
+    assert "あと3日" in st["detail"]
+
+
+def test_setup_stage_immature_far():
+    st = build_setup_stage({"status": "IMMATURE", "base_days": 6}, STAGE_CONFIG)
+    assert st["stage"] == "forming"
+    assert st["near"] is False  # あと9日 > 5
+
+
+def test_setup_stage_too_recent():
+    st = build_setup_stage({"status": "TOO_RECENT", "days_from_high": 3}, STAGE_CONFIG)
+    assert st["stage"] == "fresh_high"
+    assert st["near"] is False
+    assert "高値から3日" in st["detail"]
+
+
+def test_setup_stage_rejected_single_missing_is_near():
+    flags = {"V1": True, "V2": True, "V3": True, "V4": False, "V5": True, "V6": True, "V7": True}
+    st = build_setup_stage({"status": "REJECTED", "must_flags": flags}, STAGE_CONFIG)
+    assert st["stage"] == "rejected"
+    assert st["near"] is True
+    assert st["missing"] == ["V4"]
+
+
+def test_setup_stage_rejected_multi_missing_not_near():
+    flags = {"V1": False, "V2": True, "V3": True, "V4": False, "V5": True, "V6": True, "V7": True}
+    st = build_setup_stage({"status": "REJECTED", "must_flags": flags}, STAGE_CONFIG)
+    assert st["near"] is False
+    assert st["missing"] == ["V1", "V4"]
+
+
+def test_setup_stage_volatile_and_no_base():
+    assert build_setup_stage({"status": "TOO_VOLATILE"}, STAGE_CONFIG)["stage"] == "volatile"
+    assert build_setup_stage({"status": "NO_BASE"}, STAGE_CONFIG)["stage"] == "no_base"
+
+
+def test_setup_stage_actionable_returns_none():
+    assert build_setup_stage({"status": "WATCH_A"}, STAGE_CONFIG) is None
+    assert build_setup_stage({"status": "BREAKOUT"}, STAGE_CONFIG) is None

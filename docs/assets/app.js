@@ -707,6 +707,11 @@ function renderCardList(stocks, tier, options = {}) {
     }
     // 上段: 「銘柄名（コード）」+ SC/RS
     // 下段: 終値（±前日比%）+ セクター(強度) + 枯れ度
+    // 監視タブ(stageBadgeオプション時)のみ3段目: セットアップ進行度・不足理由
+    const stageLine =
+      options.stageBadge && s.setup_stage
+        ? `<div class="sc-row sc-row-stage${s.setup_stage.near ? " sc-stage-near" : ""}">${escapeHtml(setupStageBadgeText(s))}</div>`
+        : "";
     card.innerHTML = `
       <div class="sc-row">
         <span class="sc-name">${escapeHtml(s.name ?? "-")}（${escapeHtml(s.code)}）</span>
@@ -716,7 +721,7 @@ function renderCardList(stocks, tier, options = {}) {
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
         <span class="sc-sector">${sectorStrengthHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
-      </div>`;
+      </div>${stageLine}`;
     list.appendChild(card);
   }
   return list;
@@ -728,9 +733,42 @@ function formatClose(v) {
 
 // ---------------------------------------------------------------------------
 // 〔監視〕8条件合格・セットアップ形成待ち(旧P1)一覧。P2〜P4はUI廃止(データは
-// report.jsonに残るがダッシュボードには出さない)。全件をRS降順で表示する。
-// カードは本命/候補プールと共通のrenderCardListを使い、初期ソートをRS降順に上書きする。
+// report.jsonに残るがダッシュボードには出さない)。
+// 2026-07-17: 100件超を毎日全部見るのは不可能なので、report.jsonの
+// setup_stage(バックエンドbuild_setup_stageが付与)でセットアップ進行度別に
+// グループ表示する。毎日見るべき「あと一歩」を最上段に、実質見送りの
+// ボラ過大/ベース無しは折りたたみに隔離する。setup_stage未付与の旧データは
+// 従来どおりの単一リスト(RS降順)へフォールバックする。
 // ---------------------------------------------------------------------------
+
+// 表示順: あと一歩(near=true横断) -> ベース形成中 -> 高値直後 -> VCP未達 -> 対象外
+const SETUP_STAGE_GROUPS = [
+  { key: "near", label: "🔥 あと一歩", desc: "ベース熟成間近 or VCP残り1条件", collapsed: false },
+  { key: "forming", label: "ベース形成中", desc: "最短日数まで熟成待ち", collapsed: false },
+  { key: "fresh_high", label: "高値更新直後", desc: "押し・ベース開始待ち", collapsed: false },
+  { key: "rejected", label: "VCP条件未達", desc: "ベースはあるが2条件以上不足", collapsed: true },
+  { key: "inactive", label: "対象外 (ボラ過大/ベース無し)", desc: "実質見送り", collapsed: true },
+];
+
+function setupStageGroupKey(s) {
+  const st = s.setup_stage;
+  if (!st) return null;
+  if (st.near) return "near";
+  if (st.stage === "volatile" || st.stage === "no_base") return "inactive";
+  if (st.stage === "forming" || st.stage === "fresh_high" || st.stage === "rejected") return st.stage;
+  return "inactive";
+}
+
+// カード下段に出す進行度バッジ文言。REJECTEDはVコード -> 日本語ラベルに展開。
+function setupStageBadgeText(s) {
+  const st = s.setup_stage;
+  if (!st) return "";
+  if (st.stage === "rejected" && st.missing && st.missing.length) {
+    const labels = st.missing.map((m) => MUST_FLAG_LABELS.vcp[m] || m);
+    return `未達: ${labels.join(" / ")}`;
+  }
+  return st.detail || "";
+}
 
 function renderPriorityTier(report, containerId) {
   const container = document.getElementById(containerId);
@@ -738,17 +776,55 @@ function renderPriorityTier(report, containerId) {
   container.innerHTML = "";
   // 8条件合格(旧P1)のみ。priority未設定の旧データも合格扱いで拾う。
   const stocks = report.stocks
-    .filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null))
-    .sort((a, b) => (b.rs ?? 0) - (a.rs ?? 0));
+    .filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null));
   if (!stocks.length) {
     container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
     return;
   }
+  const sortKey = getCardSortKey("watchlist");
+
+  // 旧report.json(setup_stage無し)へのフォールバック: 従来の単一リスト。
+  if (!stocks.some((s) => s.setup_stage)) {
+    const note = document.createElement("p");
+    note.className = "tier-note";
+    note.textContent = `全${stocks.length}件`;
+    container.appendChild(note);
+    container.appendChild(renderCardList(stocks, "watchlist", { initialSortKey: sortKey }));
+    return;
+  }
+
+  const byGroup = new Map(SETUP_STAGE_GROUPS.map((g) => [g.key, []]));
+  for (const s of stocks) {
+    const key = setupStageGroupKey(s) || "inactive";
+    byGroup.get(key).push(s);
+  }
+
   const note = document.createElement("p");
   note.className = "tier-note";
-  note.textContent = `全${stocks.length}件 (RS降順)`;
+  const nearCount = byGroup.get("near").length;
+  note.textContent = `全${stocks.length}件 — 毎日見るのは「あと一歩」${nearCount}件だけでOK`;
   container.appendChild(note);
-  container.appendChild(renderCardList(stocks, "watchlist", { initialSortKey: "rs" }));
+
+  for (const g of SETUP_STAGE_GROUPS) {
+    const group = byGroup.get(g.key);
+    if (!group.length) continue;
+    container.appendChild(renderStageSection(g, group, sortKey));
+  }
+}
+
+function renderStageSection(groupDef, stocks, sortKey) {
+  const details = document.createElement("details");
+  details.className = "stage-section stage-" + groupDef.key;
+  details.open = !groupDef.collapsed;
+  const summary = document.createElement("summary");
+  summary.innerHTML =
+    `<span class="stage-label">${groupDef.label} (${stocks.length})</span>` +
+    `<span class="stage-desc">${groupDef.desc}</span>`;
+  details.appendChild(summary);
+  details.appendChild(
+    renderCardList(stocks, "watchlist", { initialSortKey: sortKey, stageBadge: true })
+  );
+  return details;
 }
 
 // ---------------------------------------------------------------------------

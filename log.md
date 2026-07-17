@@ -2,6 +2,32 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-17 (56): 監視タブのセットアップ進行度分類 — setup_stage
+
+「監視118件を毎日全部は見られない/候補2件では見識が広がらない」(萩山)への対処。
+VCP評価が既に持っている非アクショナブル理由を機械分類してグループ表示にした。
+
+- **build_site.build_setup_stage 新設**: 非アクショナブルVCPステータスを分類し
+  assemble_stock_record が `setup_stage` {stage, near, missing, detail} を付与。
+  - IMMATURE → forming (「ベースN日目 (最短15日まであとM日)」)
+  - TOO_RECENT → fresh_high (高値からの日数付き)
+  - REJECTED → rejected (must_flagsの未達Vコードを missing に列挙)
+  - TOO_VOLATILE/NO_BASE → volatile/no_base
+  - **near=「あと一歩」**: forming で残日数<=5 (config `vcp.setup_stage_near_days`
+    で変更可、未設定デフォルト5)、rejected で未達がちょうど1条件。
+  - actionable(WATCH_A/B等)は None。
+- **フロント (app.js renderPriorityTier 書き換え)**: 5グループの<details>セクション
+  「🔥あと一歩(near横断) / ベース形成中 / 高値更新直後 / VCP条件未達(初期折りたたみ)
+  / 対象外(折りたたみ)」。ヘッダに件数、tier-noteに「毎日見るのは『あと一歩』N件
+  だけでOK」。カード3段目に不足理由バッジ(rejectedはVコード→日本語ラベル展開、
+  nearはアクセント色)。setup_stage無しの旧report.jsonは従来の単一リストへ
+  フォールバック。並び替えチップは各グループ内ソートとして機能維持。
+- style.css: .stage-section/.stage-label/.sc-row-stage 系を追加。
+- テスト: build_setup_stage 7本追加。**302 passed**。node --check OK、
+  キャッシュバスター更新済み(app.js 939055a2 / style.css d8c11ba6)。
+- 注意: 実データでの各グループ件数は次回daily run後のダッシュボードで初めて
+  見える(report.jsonは暗号化されておりローカルでは検証不能)。
+
 ## 2026-07-17 (55): 外部視点レビュー19項目の一括改善 — バックエンド+ワークフロー完了
 
 (54)のフロント改修と同一バッチの締め。外部視点レビュー(機能/UI/UX/データ取扱)で

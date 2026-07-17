@@ -150,6 +150,41 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .status-section { margin-bottom: 14px; }
 .status-section:last-child { margin-bottom: 0; }
+
+/* 監視タブ: セットアップ進行度グループ(2026-07-17)。<details>で折りたたみ可。 */
+.stage-section { margin-bottom: 14px; }
+.stage-section:last-child { margin-bottom: 0; }
+.stage-section > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.stage-section > summary::-webkit-details-marker { display: none; }
+.stage-section > summary::before {
+  content: "▸";
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.stage-section[open] > summary::before { content: "▾"; }
+.stage-label {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+  font-size: 13px;
+}
+.stage-near .stage-label { border-color: var(--accent); color: var(--accent); }
+.stage-desc { color: var(--text-dim); font-size: 11px; }
+
+/* カード3段目: 進行度・不足理由(監視タブのみ) */
+.sc-row-stage { font-size: 11px; color: var(--text-dim); }
+.sc-row-stage.sc-stage-near { color: var(--accent); }
+
 .status-section h3 {
   display: inline-block;
   margin: 6px 0 8px;
