@@ -8,6 +8,11 @@ on:
     # 間で毎時リトライし、下記「当日実行済みチェック」で二重実行を防ぐ構成に変更(2026-07-08)。
     - cron: "0 7-11 * * 1-5"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "当日実行済みでも強制再実行 (コード変更を即日反映したい時用)"
+        type: boolean
+        default: false
 
 concurrency:
   group: minervini-daily
@@ -31,6 +36,13 @@ jobs:
           # 当日分の "chore: daily screener run YYYY-MM-DD" コミットが既にあればスキップ
           # (hourly cronの二重実行防止。2026-07-16にガード復旧 — 2026-07-08から
           # skip=false固定で無効化されたまま放置され、平日最大5回フル実行されていた)
+          # 手動実行で force=true が指定された場合はガードを迂回する
+          # (当日run後にコードを変えて即日反映したいケース。2026-07-17追加)。
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Force run requested; bypassing same-day guard."
+            exit 0
+          fi
           today="$(date -u +%Y-%m-%d)"
           if git log --format=%s -20 | grep -qF "chore: daily screener run ${today}"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
