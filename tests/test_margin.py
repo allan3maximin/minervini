@@ -158,6 +158,162 @@ def test_fetch_latest_no_link_found_returns_none(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# fetch_all_available
+# ---------------------------------------------------------------------------
+
+_MULTI_LINK_HTML = (
+    '<a href="/markets/.../syumatsu2026061200.pdf">a</a>'
+    '<a href="/markets/.../syumatsu2026061900.pdf">b</a>'
+    '<a href="/markets/.../syumatsu2026062600.pdf">c</a>'
+)
+
+
+def test_fetch_all_available_returns_all_missing_dates_ascending(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+
+    def fake_get(url, timeout=30):
+        if url.endswith(".html") or "05.html" in url:
+            return FakeResp(text=_MULTI_LINK_HTML)
+        return FakeResp(content=f"pdf-for-{url}".encode())
+
+    monkeypatch.setattr(margin_mod.requests, "get", fake_get)
+    config = {"margin": {"enabled": True, "page_url": "https://www.jpx.co.jp/markets/statistics-equities/margin/05.html"}}
+    results = margin_mod.fetch_all_available(config)
+    dates = [margin_mod._extract_ymd(url) for url, _content in results]
+    assert dates == ["20260612", "20260619", "20260626"]
+
+
+def test_fetch_all_available_skips_dates_already_in_store(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    store_path.write_text(
+        json.dumps({"history": [{"date": "2026-06-12", "by_code": {}}, {"date": "2026-06-19", "by_code": {}}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+
+    def fake_get(url, timeout=30):
+        if url.endswith(".html") or "05.html" in url:
+            return FakeResp(text=_MULTI_LINK_HTML)
+        return FakeResp(content=b"dummy")
+
+    monkeypatch.setattr(margin_mod.requests, "get", fake_get)
+    config = {"margin": {"enabled": True, "page_url": "https://www.jpx.co.jp/markets/statistics-equities/margin/05.html"}}
+    results = margin_mod.fetch_all_available(config)
+    assert len(results) == 1
+    assert margin_mod._extract_ymd(results[0][0]) == "20260626"
+
+
+def test_fetch_all_available_disabled_returns_empty():
+    assert margin_mod.fetch_all_available({"margin": {"enabled": False}}) == []
+
+
+def test_fetch_all_available_page_failure_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", tmp_path / "margin_weekly.json")
+
+    def boom(url, timeout=30):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(margin_mod.requests, "get", boom)
+    result = margin_mod.fetch_all_available({"margin": {"enabled": True, "page_url": "https://example.com/05.html"}})
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# backfill_margin_history
+# ---------------------------------------------------------------------------
+
+def test_backfill_margin_history_adds_multiple_weeks(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+    monkeypatch.setattr(
+        universe_mod, "load_universe", lambda: {"stocks": [{"code": "1301"}, {"code": "166A"}]}
+    )
+
+    fetched = [
+        ("https://www.jpx.co.jp/.../syumatsu2026061200.pdf", b"pdf-0612"),
+        ("https://www.jpx.co.jp/.../syumatsu2026061900.pdf", b"pdf-0619"),
+        ("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"pdf-0626"),
+    ]
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
+
+    def fake_parse(content, universe_codes):
+        return {"1301": {"buy": len(content), "sell": 1}}, []
+
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf", fake_parse)
+
+    store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 13}})
+    dates = [h["date"] for h in store["history"]]
+    assert dates == ["2026-06-12", "2026-06-19", "2026-06-26"]
+    assert store["last_url"] == fetched[-1][0]
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert [h["date"] for h in on_disk["history"]] == dates
+
+
+def test_backfill_margin_history_respects_keep_weeks_trim(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+    monkeypatch.setattr(universe_mod, "load_universe", lambda: {"stocks": []})
+
+    fetched = [
+        ("https://www.jpx.co.jp/.../syumatsu2026061200.pdf", b"a"),
+        ("https://www.jpx.co.jp/.../syumatsu2026061900.pdf", b"b"),
+        ("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"c"),
+    ]
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes: ({}, []))
+
+    store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 2}})
+    dates = [h["date"] for h in store["history"]]
+    assert dates == ["2026-06-19", "2026-06-26"]
+
+
+def test_backfill_margin_history_does_not_duplicate_existing_dates(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "updated_at": "2026-01-01T00:00:00+09:00",
+                "last_url": "https://old",
+                "warnings": [],
+                "history": [{"date": "2026-06-26", "by_code": {"1301": {"buy": 999, "sell": 1}}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+    monkeypatch.setattr(universe_mod, "load_universe", lambda: {"stocks": []})
+    # fetch_all_available自体が既存日付をスキップする前提だが、念のためbackfill側の
+    # 重複ガードも検証(同一日付が二重に混ざっても壊れないこと)。
+    fetched = [("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"new-content")]
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes: ({"1301": {"buy": 1, "sell": 1}}, []))
+
+    store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 13}})
+    assert len(store["history"]) == 1
+    assert store["history"][0]["by_code"]["1301"]["buy"] == 999  # 既存値のまま(上書きされない)
+
+
+def test_backfill_margin_history_no_fetch_keeps_existing(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    existing = {
+        "updated_at": "2026-01-01T00:00:00+09:00",
+        "last_url": "https://old",
+        "warnings": [],
+        "history": [{"date": "2026-06-19", "by_code": {"1301": {"buy": 1, "sell": 2}}}],
+    }
+    store_path.write_text(json.dumps(existing), encoding="utf-8")
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+    monkeypatch.setattr(universe_mod, "load_universe", lambda: {"stocks": []})
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: [])
+
+    result = margin_mod.backfill_margin_history({"margin": {}})
+    assert result["history"] == existing["history"]
+    assert result["last_url"] == "https://old"
+
+
+# ---------------------------------------------------------------------------
 # update_margin_store
 # ---------------------------------------------------------------------------
 

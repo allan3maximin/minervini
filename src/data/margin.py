@@ -111,6 +111,53 @@ def fetch_latest(config: dict | None = None) -> tuple[str, bytes] | None:
     return pdf_url, resp.content
 
 
+def fetch_all_available(config: dict | None = None) -> list[tuple[str, bytes]]:
+    """05.html にある週末残高PDFリンクのうち、まだstoreに無い日付分をすべて
+    ダウンロードして (url, bytes) のリストを日付昇順で返す。
+
+    fetch_latest() と違い最新1件に絞らない。ただし実測ではJPXのページ自体が
+    直近5週分程度しかバックナンバーを保持しないため、拾えるのは常にページに
+    現存する分だけ(それより古い週は元データがJPX側に無く取得不能)。
+    通信失敗時は例外を投げず、取れた分だけ(0件もありうる)を返す。
+    """
+    config = config or load_config()
+    mcfg = config.get("margin", {})
+    if not mcfg.get("enabled", True):
+        return []
+    page_url = mcfg.get("page_url", DEFAULT_PAGE_URL)
+
+    try:
+        resp = requests.get(page_url, timeout=30)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as e:
+        print(f"WARNING: margin.fetch_all_available: page request failed ({e})")
+        return []
+
+    matches = _LINK_RE.findall(html)
+    if not matches:
+        return []
+    matches = sorted(set(matches), key=lambda m: m[1])  # 日付昇順・重複排除
+
+    store = safe_load_json(MARGIN_STORE_PATH, {})
+    existing_dates = {h.get("date") for h in store.get("history", [])}
+
+    results: list[tuple[str, bytes]] = []
+    for href, ymd in matches:
+        date_str = _ymd_to_iso(ymd)
+        if date_str in existing_dates:
+            continue
+        pdf_url = urljoin(page_url, href)
+        try:
+            resp = requests.get(pdf_url, timeout=60)
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"WARNING: margin.fetch_all_available: PDF download failed for {pdf_url} ({e})")
+            continue
+        results.append((pdf_url, resp.content))
+    return results
+
+
 def _extract_ymd(pdf_url: str) -> str | None:
     m = re.search(r"syumatsu(\d{8})00\.pdf", pdf_url, re.IGNORECASE)
     return m.group(1) if m else None
@@ -273,6 +320,74 @@ def update_margin_store(config: dict | None = None) -> dict:
         "history": history,
     }
     atomic_write_json(MARGIN_STORE_PATH, store)
+    return store
+
+
+def backfill_margin_history(config: dict | None = None) -> dict:
+    """05.htmlに現存する過去分PDFをまとめて取得し、historyへ一気に追加する。
+
+    通常運用の update_margin_store() は日次バッチから呼ばれ1週分ずつしか
+    進めない設計。こちらは初回導入時などに、ページ上にまだ残っている過去分
+    (実測で直近5週分程度)を一括で埋めたい場合に使う一回限りの関数。
+    日次パイプラインからは呼ばれない。
+    """
+    config = config or load_config()
+    mcfg = config.get("margin", {})
+    keep_weeks = int(mcfg.get("keep_weeks", DEFAULT_KEEP_WEEKS))
+
+    store = safe_load_json(
+        MARGIN_STORE_PATH,
+        {"updated_at": None, "last_url": None, "warnings": [], "history": []},
+    )
+    warnings: list[str] = []
+
+    try:
+        from src.universe import load_universe
+
+        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
+    except Exception as e:
+        universe_codes = set()
+        warnings.append(f"universe load failed: {e}")
+
+    fetched = fetch_all_available(config)
+    if not fetched:
+        print("margin backfill: nothing new available on page")
+        return store
+
+    history = list(store.get("history", []))
+    existing_dates = {h.get("date") for h in history}
+    last_url = store.get("last_url")
+    added = 0
+
+    for pdf_url, content in fetched:
+        ymd = _extract_ymd(pdf_url)
+        if ymd is None:
+            warnings.append(f"could not extract date from url: {pdf_url}")
+            continue
+        date_str = _ymd_to_iso(ymd)
+        if date_str in existing_dates:
+            continue
+        by_code, parse_warnings = parse_margin_pdf(content, universe_codes)
+        warnings.extend(parse_warnings)
+        history.append({"date": date_str, "by_code": by_code})
+        existing_dates.add(date_str)
+        last_url = pdf_url
+        added += 1
+
+    history.sort(key=lambda h: h["date"])
+    history = history[-keep_weeks:]
+
+    store = {
+        "updated_at": datetime.now().astimezone().isoformat(),
+        "last_url": last_url,
+        "warnings": warnings,
+        "history": history,
+    }
+    if added:
+        atomic_write_json(MARGIN_STORE_PATH, store)
+        print(f"margin backfill: added {added} week(s), history now {len(history)} entries")
+    else:
+        print("margin backfill: nothing new to add (all already present)")
     return store
 
 

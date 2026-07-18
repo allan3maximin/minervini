@@ -2,6 +2,93 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (66): 信用残・地合いの過去データbackfillスクリプト作成(実行はユーザー側)
+
+### 要望
+ユーザー報告: 「まだデータがなくて表示されてないっぽいので信用残とか地合いの
+過去データを入れたい」。地合い詳細(task3, (63))・信用残(タスク1)ともに
+「追加された日以降のエントリにしか値が入らない」設計のため、追加直後は
+グラフ・パネルがしばらく空/未表示になる。AskUserQuestionで方針確認済み:
+地合いは「遡って再計算して埋める(推奨)」、信用残は「JPXページを確認して
+遡り取得を試す(推奨)」を選択。
+
+### 実装内容
+
+**地合い(breadth.json) — `scripts/backfill_breadth_history.py` + テスト**
+- `src/backtest.py`と同じ「backward-looking rolling計算はフルhistoryを
+  一度計算してから任意の過去日でスライスしても同じ値になる(look-aheadなし)」
+  性質を使い、`data/prices/*.parquet`・`data/indices/*.parquet`の既存キャッシュ
+  だけで`compute_market_signal()`をtask3新規フィールド
+  (advancers/decliners/up_down_ratio_25/breadth_trend_20d/net_new_highs/
+  nh_nl_cumulative/index_trends/growth_rel_20d/market_score/score_breakdown/
+  score_trend)についてのみ過去日再計算する。pre-task3フィールドは一切触らず、
+  各フィールドは現在値がNoneの場合のみ埋める(上書きしない)。`market_score`が
+  非Noneなら「計算済み」として丸ごとスキップする冪等設計。
+- 純粋ロジック`backfill_history()`とI/Oラッパー`backfill()`を分離
+  (`compute_market_signal`自身のテスト容易性設計を踏襲)。
+- **ブロッカー**: `docs/data/breadth.json`はAES-256-GCM暗号化されており、
+  復号鍵`DASHBOARD_DATA_KEY`はGitHub Secretsにのみ存在しローカルには無い
+  (`.github/workflows/daily.yml`確認済み)。HANDOFF.md/(60)で「平文をコミット
+  すると公開リポジトリで漏洩するため、ローカルからは生成・コミットしない」と
+  明記されている設計とも整合する制約。AskUserQuestionで対応方針を確認したところ
+  ユーザー回答: 「一旦バイパスするようにして。PUSHはこっちでやる」。
+  → 合成データのみ(実データ・暗号化breadth.jsonには一切触れない)でロジックを
+  完全にテストし、スクリプトの実行(鍵を持つ環境で`DASHBOARD_DATA_KEY=<鍵>
+  python scripts/backfill_breadth_history.py`)とpushはユーザー側で行う。
+- `tests/test_backfill_breadth_history.py`: 合成frames/historyのみ使用する
+  6テスト(冪等スキップ/pre-task3フィールド非破壊/既存task3値の非上書き/
+  データ無し日付の安全スキップ/advancers・decliners蓄積とup_down_ratio_25が
+  25エントリ目で初めて埋まること/market_scoreが常にdone markerとして入ること)、
+  全通過。
+
+**信用残(margin_weekly.json) — `src/data/margin.py`拡張 + `scripts/backfill_margin_history.py`**
+- `data/margin_weekly.json`は`docs/data/`配下ではなく暗号化されていない平文
+  JSON(`safe_load_json`/`atomic_write_json`)なので暗号鍵の制約は無い。
+- JPXの05.htmlページを実機確認(`mcp__workspace__web_fetch`)したところ、
+  ページに現存するバックナンバーPDFリンクは実測5週分のみ(確認日時点で
+  2026-06-12〜2026-07-10)。`config.yaml`の`margin.keep_weeks: 13`には届かず、
+  それより古い週はJPX側に元データが無く原理的に取得不能と判明。
+- `fetch_all_available()`(ページ上の全PDFリンクのうちstore未取得の日付分のみ
+  日付昇順でダウンロード)と`backfill_margin_history()`(それらをまとめて
+  history にマージし`keep_weeks`でtrim、既存日付は上書きしない)を追加。
+  既存の日次運用`update_margin_store()`/`fetch_latest()`(最新1件のみ)は無変更。
+- **ブロッカー**: サンドボックスの発信ネットワークが`jpx.co.jp`をブロックして
+  おり(プロキシ403 Forbidden)、`scripts/backfill_margin_history.py`をこちらの
+  環境で実行しても実データは取れない。スクリプト自体はクラッシュせず警告を
+  出して正常終了(exit 0)する設計なので安全。実際の取得・書き込みは通常の
+  インターネット接続がある環境(ユーザーのローカル、またはGitHub Actions)で
+  `python scripts/backfill_margin_history.py`を実行する必要がある。
+- `tests/test_margin.py`に8テスト追加(fetch_all_available: 全件取得/既存日付
+  スキップ/disabled時空リスト/通信失敗時空リスト。backfill_margin_history:
+  複数週追加/keep_weeks trim/重複日付ガード/新規取得無しなら既存維持)、
+  全通過。
+
+### 方針
+地合い・信用残とも「本体ロジックはこちらで実装・合成データで完全にテスト
+完了、実データに触れる実行(鍵が要る/外部ネットワークが要る)はユーザー側の
+環境で行う」という同じ設計判断。理由は異なる(暗号鍵 vs サンドボックスの
+ネットワーク制限)が、どちらも「ローカルで実データを生成・コミットしない」
+という既存のセキュリティ方針(HANDOFF.md)と整合させた。
+
+### 検証
+- `pytest -q` → 356 passed(地合いbackfillテスト6件込みの348 + 信用残backfillテスト8件を追加)。
+- `python -c "ast.parse(...)"` で両スクリプトの構文チェックOK。
+- `scripts/backfill_breadth_history.py --dry-run`を実リポジトリに対して実行し、
+  ドキュメント通りの`RuntimeError`(鍵未設定)で安全に失敗することを確認
+  (実データには一切書き込まれていない)。
+- `scripts/backfill_margin_history.py`を実リポジトリに対して実行し、
+  ネットワーク遮断で警告を出しつつexit 0で正常終了することを確認
+  (`data/margin_weekly.json`は作成/変更されていない)。
+
+### 次にやること(ユーザー側作業)
+- 地合い: `DASHBOARD_DATA_KEY=<鍵> python scripts/backfill_breadth_history.py`
+  (まず`--dry-run`で件数確認 → 本番実行)を鍵を持つ環境で実行し、
+  `docs/data/breadth.json`の更新をpush。
+- 信用残: 通常のインターネット接続がある環境で
+  `python scripts/backfill_margin_history.py`を実行し、
+  `data/margin_weekly.json`の更新をpush(ページ上に残っている分、実測で
+  最大5週分程度しか埋まらない点に留意)。
+
 ## 2026-07-18 (65): 地合い詳細パネルの右オーバーフロー修正
 
 ### 要望
