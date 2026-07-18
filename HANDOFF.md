@@ -169,6 +169,31 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   「⚠ 新規エントリーは控えるのが原則です。」を追加表示。CSSは`.market-signal-card`と
   `.signal-green/-yellow/-red`修飾子(style.css)。
 
+**地合い詳細化 (2026-07-18タスク3/4追加)**: 上記の green/yellow/red 判定ロジック本体は
+1文字も変更せず、`compute_market_signal`の出力dictへ表示専用の詳細指標を追加した。
+- `market_signal.py`: `breadth_today`(当日advancers/decliners、pipeline.pyが
+  indicator_by_codeのdf末尾2行終値比較でカウント)・`breadth_history`(既存history、
+  I/Oはpipeline側)・`nikkei_df`/`growth_df`を新規引数に追加し、
+  `up_down_ratio_25`(騰落レシオ、history25件揃うまでNone)、`breadth_trend_20d`
+  (pct_above_ma200の20エントリ前比較)、`net_new_highs`/`nh_nl_cumulative`(旧
+  エントリにフィールド無しなら当日netから再スタート=null安全)、`index_trends`
+  {topix, nikkei225, growth250}の3指数マルチトレンド、`growth_rel_20d`(グロース250-
+  TOPIXの20日リターン差)、`market_score`(0-100、config `market_signal.detail_weights`
+  で配点breadth/index_trend/momentum/risk_appetite、`detail_scale`で線形クリップ境界を
+  設定化。データ欠損時は各サブスコアを中立50%にフォールバックしてnull安全)、
+  `score_breakdown`(内訳)、`score_trend`(5エントリ前比較、±3以内はflat)を返す。
+- **フロント (app.js)**: `renderMarketSignal`のヘッダーに`market_score`+`score_trend`
+  矢印(↗改善/→横ばい/↘悪化)バッジを追加(market_scoreがnullの旧historyでは非表示)。
+  折りたたみ式`<details class="market-detail">`「地合い詳細」パネル(初期は閉)を新設し、
+  `renderMarketDetailHtml`がサブスコア4本(既存の`.score-bar-row`を再利用)・指標テーブル
+  (○×表示、指数データ不足行は「データ不足」)・`pct_above_ma200`/`nh_nl_cumulative`の
+  スパークライン2本(既存の汎用`sparklineSvg`ヘルパーを再利用、**外部チャートライブラリは
+  使用しない**方針)を描画する。`up_down_ratio_25`/`breadth_trend_20d`が蓄積不足でnullの
+  間は「蓄積中(あとN日)」を表示し、新旧フィールド混在のhistoryでもクラッシュしない
+  (2026-07-18(63)のNode `vm`ハーネスでの検証手順はlog.md参照)。
+- これらの詳細指標・`market_score`はあくまで表示用の補助情報であり、既存の
+  green/yellow/red判定自体には一切使わない(§3冒頭の判定ロジックは不変)。
+
 ### ポジション管理 (src/report/positions.py) — 2026-07-11追加
 
 ツールは従来「エントリーするまで」しかカバーしておらず、保有銘柄のR倍数・ストップ距離・
@@ -210,6 +235,39 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   ダッシュボード側にも導線: `renderPositionsWarningBanner`が保有銘柄に`sell_signals`が1つでも
   あれば`#positions-warning`(市場概況の上)に「⚠ 保有N銘柄に売りシグナル」を表示、
   クリックで`#positions`へ。
+
+### 信用残(信用取引週末残高) (src/data/margin.py) — 2026-07-18追加
+
+需給(買い長/売り長)を見たいという要望を受けて追加。**方針は一貫して「スコアは順位付け、
+フラグは事実」— 信用残バッジ・需給サマリー文はすべて表示専用のレイヤーで、総合スコア
+(`total_score`、scoring/priority/vcp)には一切組み込まない。** これは既存の dryup(枯れ)
+バッジと同じ設計思想を踏襲したもの。
+
+- **取得** `src/data/margin.py`: JPXの信用取引週末残高(週次更新、最大5営業日遅れる)を
+  取得・整形し、銘柄ごとに買残/売残/信用倍率(買残÷売残)/買残回転日数(買残÷平均出来高)/
+  買残前週比を計算。データは `data/margin_weekly.json` に保存(store形式、pipeline.pyが
+  1回だけ読み込んで各処理へ渡す)。
+- **バッジ判定** `build_margin_metrics(code, latest_row, store)` がメトリクスを計算し、
+  `src/report/build_site.py::margin_badge(metrics, config)` が
+  `_build_dryup_badge`と同じ「サーバ側でconfig閾値を見て判定文字列を確定し、フロントは
+  表示のみ」の流儀で判定: `ratio >= high_ratio_warn` かつ `days_to_cover >= dtc_warn` で
+  `"heavy_buy"`(買残重い)、`ratio <= low_ratio_info` で `"short"`(売り長)、それ以外は
+  `None`。`positions.py::_margin_for`もこの`margin_badge`を再利用(保有ビューの信用残
+  バッジも本体と同じ判定基準にするため)。
+- **サマリー文** `src/report/summary.py::build_stock_summary`: `margin`がNoneなら何も
+  出さない。badge=heavy_buyはcautions(「買残が重く上値の重さに注意」)、badge=shortは
+  points(「売り長で踏み上げ余地あり」)、それ以外は中立のpoints行。売残0は「売残なし」表記。
+- **フロント (app.js)**: `marginBadgeHtml(m, {detail})`。一覧カード(`renderCardList`の
+  `sc-row-sub`行、`sc-margin`セル)は場所が窮屈なため「買残重い」のみ表示、「売り長」は
+  個別銘柄詳細ページの需給カードのみで表示(既存の`sell-signal-badge`系クラスを再利用、
+  新規CSSクラス無し)。`renderStockMargin(stock)`が個別銘柄ページ(`data-panel="fund"`、
+  ファンダカードの下)に「需給(信用取引)」カードを追加: 信用倍率(大きく表示)、買残
+  (前週比%色付き)/売残、買残回転日数、「M/D申込時点」+週次データにつき最大5営業日
+  遅れる旨の注記。`record.margin`がnullなら「信用残データなし」のみ表示。
+- **次のタスク候補**: 信用残をスコアに組み込む(逆張り的な「買い長すぎる=過熱」フラグを
+  priorityへ反映する等)かどうかは、`src/backtest.py`(§13)で13週間程度の実績を見てから
+  再検討する(現時点では表示専用のまま様子見。ユーザーからの明示的な指示があるまでは
+  スコア組み込みをしない方針)。
 
 ## 4. J-Quants 自動ファンダ取得 (src/data/jquants.py) — EDINETから移行済み
 
@@ -524,9 +582,10 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
-- `renderMarketSignal(breadth)` (2026-07-11追加): breadth.jsonのhistory最新エントリの
-  `signal`(green/yellow/red)を`#market-signal-card`(market-overviewの直前)へ描画。
-  詳細はデータ生成側の「地合いシグナル」節(§3内)参照。
+- `renderMarketSignal(breadth)` (2026-07-11追加、2026-07-18に地合い詳細パネル+
+  market_score/score_trendバッジ+スパークライン2本を追加): breadth.jsonのhistory
+  最新エントリの`signal`(green/yellow/red)を`#market-signal-card`(market-overviewの
+  直前)へ描画。詳細はデータ生成側の「地合いシグナル」節(§3内)参照。
 - `renderStalenessWarning(report)` (2026-07-11追加): `getStalenessInfo(generatedAt, now)`が
   直近の平日(土日はFriday扱い)21:00 JSTを過ぎてもその日のデータが無い場合を判定し、
   `#staleness-warning`(market-overviewの直前)に警告文言を表示。JSTシフト時計トリック
@@ -621,6 +680,10 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   **既知の注意**: `fundamentals_public.json` の最古の `XXXXQ4` はJ-Quants由来で通期(累計)値が
   混じっているケースがあり、翌年の同 `Q4` とのYoY比較が実態より歪む場合がある(データ層の既知の癖、
   UI側は現状未対処)。
+- **需給(信用取引) (2026-07-18追加、`#margin-detail-body`)**: ファンダカードの下に
+  `renderStockMargin(stock)`が「需給(信用取引)」カードを描画(表示専用、総合スコアには
+  一切影響しない。詳細は§3「信用残」節参照)。信用倍率・買残(前週比)/売残・買残回転日数・
+  申込日(週次データにつき最大5営業日遅れる旨の注記)。データが無い銘柄は「信用残データなし」。
 - **分析用データコピー (2026-07-09 追加、`#copy-stock-data-btn`)**: stock-metaチップの直下に
   「分析用データをコピー」ボタンを設置(`setupStockCopyButton`、report.jsonに銘柄が無い場合は非表示)。
   クリック時に fundamentals_public.json / breadth.json / indices.json を`cache: "no-store"`で追加fetchし、
@@ -765,6 +828,15 @@ node --check docs/assets/app.js   # JS構文チェック
      RSのより厳密なpoint-in-time化(フェーズ2、計算量が大きく増える点に注意)。
    - 地合いシグナル: 現状は閾値ベースの単純合成。将来的に履歴(breadth.json)を使った
      シグナルの精度検証(バックテストとの組み合わせ)が考えられる。
+9. **2026-07-18新機能の次候補(宿題)**:
+   - 信用残(§3「信用残」節参照)は現時点では表示専用(スコア非組み込み)。13週間程度
+     `data/margin_weekly.json`が蓄積したら、`src/backtest.py`(§13)で「買残重い/売り長
+     バッジがブレイク後の成績にどう影響するか」を検証し、スコア組み込みの是非を再検討
+     すること。ユーザーからの明示的な指示があるまではスコアに組み込まない。
+   - 地合い詳細パネルの`market_score`も同様に表示専用。ある程度history(score_breakdown
+     付き)が蓄積したら、market_scoreとその後のブレイク成功率/地合い(green/yellow/red)の
+     的中率との相関を見て、閾値(green_pct_above_ma200/red_pct_above_ma200)の妥当性を
+     再検証する材料に使える。
 
 ## 13. 簡易バックテストCLI (src/backtest.py) — 2026-07-11追加
 
