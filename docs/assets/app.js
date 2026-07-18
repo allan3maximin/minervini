@@ -578,14 +578,16 @@ function renderMarketDetailHtml(latest, history) {
         <div class="market-detail-row"><span>NH-NL(当日/累積)</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
         <div class="market-detail-row"><span>グロース-TOPIX 20日相対</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
       </div>
-      <table class="market-detail-table">
-        <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
-        <tbody>
-          ${indexTrendRowHtml("TOPIX", trends.topix)}
-          ${indexTrendRowHtml("日経225", trends.nikkei225)}
-          ${indexTrendRowHtml("グロース250", trends.growth250)}
-        </tbody>
-      </table>
+      <div class="market-detail-table-wrap">
+        <table class="market-detail-table">
+          <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
+          <tbody>
+            ${indexTrendRowHtml("TOPIX", trends.topix)}
+            ${indexTrendRowHtml("日経225", trends.nikkei225)}
+            ${indexTrendRowHtml("グロース250", trends.growth250)}
+          </tbody>
+        </table>
+      </div>
       <div class="market-detail-sparklines">
         <div class="market-detail-spark">
           <div class="market-detail-spark-label">MA200上回り率 推移</div>

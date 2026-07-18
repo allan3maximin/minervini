@@ -681,33 +681,70 @@ a.nav-btn:hover { border-color: var(--link); }
   flex-direction: column;
   gap: 12px;
 }
-.market-detail-scores { display: flex; flex-direction: column; }
-.market-detail-indicators { display: flex; flex-direction: column; gap: 6px; }
+.market-detail-scores { display: flex; flex-direction: column; min-width: 0; }
+/* score-bar-rowは元々120px固定ラベル列(短い和名想定)を他画面と共有しているが、
+   「指数トレンド(30%)」等の長いラベルはgridアイテムのmin-width:auto既定によって
+   列を突き破って右にはみ出す。ここだけ折返し可能にして防ぐ。 */
+.market-detail-scores .score-bar-row > span:first-child {
+  min-width: 0;
+  overflow-wrap: break-word;
+  white-space: normal;
+  line-height: 1.3;
+}
+.market-detail-indicators { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .market-detail-row {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 13px;
   color: var(--text-dim);
+  min-width: 0;
 }
-.market-detail-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
-.market-detail-sub { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
+.market-detail-row span:first-child { flex: 1 1 auto; min-width: 0; }
+.market-detail-row span:last-child {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-align: right;
+}
+.market-detail-sub {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: 4px;
+  display: inline-block;
+}
+.market-detail-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .market-detail-table {
   width: 100%;
+  min-width: 260px;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
 }
 .market-detail-table th, .market-detail-table td {
   padding: 4px 6px;
   text-align: center;
   border-bottom: 1px solid var(--border);
+  overflow-wrap: break-word;
 }
-.market-detail-table th:first-child, .market-detail-table td:first-child { text-align: left; }
+.market-detail-table th:first-child, .market-detail-table td:first-child {
+  text-align: left;
+  width: 34%;
+}
 .market-detail-sparklines {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  min-width: 0;
 }
+.market-detail-spark { min-width: 0; }
 .market-detail-spark-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
 
 /* VCPファネル(P1銘柄の origin/status 内訳 + TOO_RECENT推移) */

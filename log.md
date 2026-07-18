@@ -2,6 +2,62 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (65): 地合い詳細パネルの右オーバーフロー修正
+
+### 要望
+ユーザー報告: 「地合い詳細の表が右にオーバーフローしてる。デザインを調整して。」
+(63)で実装した`.market-detail`パネル(スコアバー/指標行/指数トレンド表/
+スパークライン)がカード幅を右に突き破っていた。
+
+### 原因(Chrome連携が一時的に切れていたため実機screenshot確認はできず、
+CSS構造から論理的に特定):
+1. `.market-detail-scores`が既存`.score-bar-row`(ラベル列120px固定grid、
+   「テクニカルスコア」等の短い和名を想定)を流用しているが、タスク4の
+   ラベルは「指数トレンド(30%)」のように末尾に半角`(30%)`が付き、CSS Gridの
+   grid item既定`min-width: auto`により折り返せない半角部分が列を突き破る。
+2. `.market-detail-row`の値側spanが「52.9%(20日差分 +2.0pt)」のように主値+
+   `.market-detail-sub`を隙間なく連結しており、flexの子要素既定
+   `min-width: auto`で縮まず、狭い画面で右にはみ出す。
+3. `.market-detail-table`に`table-layout`指定がなくcontent依存の列幅
+   だったため、狭い画面で100%を超えて広がりうる。
+
+### 対応 (docs/assets/style.css)
+- `.market-detail-scores .score-bar-row > span:first-child`に
+  `min-width:0; overflow-wrap:break-word; white-space:normal`を追加し
+  長いラベルは折り返すように変更。
+- `.market-detail-row`を`flex-wrap:wrap`+`min-width:0`ベースに変更。
+  `.market-detail-sub`を`display:inline-block`にして折返し可能に。
+- `.market-detail-table`に`table-layout:fixed`+先頭列`width:34%`を指定し
+  content依存の拡大を防止。表自体は新設`.market-detail-table-wrap`
+  (`overflow-x:auto`)でラップし、極端に狭い画面でも表内だけが横スクロール
+  する安全弁を追加(カード全体の右はみ出しにはならない)。
+- `.market-detail-scores` / `.market-detail-indicators` /
+  `.market-detail-sparklines` / `.market-detail-spark`にも
+  `min-width:0`を追加し、flex/grid子要素が縮まず親を突き破る系統の
+  バグを一括で潰した。
+
+### 対応 (docs/assets/app.js)
+- `renderMarketDetailHtml`内の`<table class="market-detail-table">`を
+  `<div class="market-detail-table-wrap">`で囲むようにマークアップ変更。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- 既存の使い捨てNode vmハーネス(test_market_detail.js、リポジトリ非管理)で
+  5シナリオ全て再実行、クラッシュなし・`market-detail-table-wrap`が
+  正しく出力に含まれることを確認。
+- `pytest tests/ -q` → 342 passed(フロントのみの変更、Python側無影響)。
+- Chrome連携が一時的に切断していたため実ブラウザでのスクリーンショット確認は
+  未実施。次回セッションでdocs/index.htmlをブラウザで開いた際、地合い詳細を
+  開いて崩れがないか目視確認すること。
+- `tools/update_cache_busters.py`実行: style.css `e3fe3592→e16c60ad`、
+  app.js `fa134387→743ab24e`。
+
+### 備考
+- 診断用に`docs/_overflow_test.html`を一時作成したがサンドボックスの
+  virtiofs制約でunlinkできず、内容を無害化(コメントのみ)して残置。
+  gitには追跡されていない(untracked)のでコミットには含まれない。
+  不要であればFinderで手動削除可。
+
 ## 2026-07-18 (64): 最終仕上げ — HANDOFF.md更新・全体テスト・宿題メモ
 
 ### 要望
