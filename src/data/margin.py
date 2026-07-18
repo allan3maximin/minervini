@@ -1,0 +1,321 @@
+"""JPX無料公表「銘柄別信用取引週末残高」(週次PDF)の取得・解析。
+
+https://www.jpx.co.jp/markets/statistics-equities/margin/05.html
+毎週第2営業日(通常火曜)16:30頃に前週末(金曜申込時点)分のPDFが公表される。
+
+【設計時の実測に基づく注意】HANDOFF_TASKS_20260718.txt の原仕様は
+`requests + pandas.read_excel` 前提だったが、実際の本体ファイルは全銘柄
+(約4,258銘柄)を収録した85ページ組のPDFだった(log.md (59)参照)。よって本モジュール
+は openpyxl/xlrd ではなく pdfplumber でテキスト抽出→行パースする。関数名
+`parse_margin_pdf` は元仕様の `parse_margin_excel` から実体に合わせて改名した。
+
+PDF 1行(1銘柄)のテキスト形状(実測):
+    [B] 銘柄名(普通株式サフィックス付き、コードと空白無しで連結することがある)
+    コード(5桁。旧4桁銘柄は末尾0埋め "13010"、新英数コードも同様 "166A0")
+    ISIN("JP"+10英数字) 数値12個(半角スペース区切り)
+  数値12個の並び: [sell_total, sell_total_wow, buy_total, buy_total_wow,
+                   general_sell, general_sell_wow, standard_sell, standard_sell_wow,
+                   general_buy, general_buy_wow, standard_buy, standard_buy_wow]
+  Total(合計)列は既に一般信用+制度信用の合算値(実測で検算済み)なので、
+  そのまま使う(手動合算不要)。
+  負数は "▲" が数字と別トークンになって現れる(例: "▲ 300" → -300)。
+
+コード表記の正規化: PDFの5桁表記は末尾が常にチェックディジット"0"(実務上の
+5桁化ルール)。data/universe.json は4桁(新英数含む)表記のため、5桁かつ末尾"0"
+なら末尾を切り落として4桁化する。正規化後に universe_codes と一致しなければ
+その行は自然に捨てられる(様式差異やETF等の非対象銘柄の安全なフォールバック)。
+"""
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from io import BytesIO
+from urllib.parse import urljoin
+
+import requests
+
+from src.config import REPO_ROOT, load_config
+from src.utils_io import atomic_write_json, safe_load_json
+
+MARGIN_STORE_PATH = REPO_ROOT / "data" / "margin_weekly.json"
+
+DEFAULT_PAGE_URL = "https://www.jpx.co.jp/markets/statistics-equities/margin/05.html"
+DEFAULT_KEEP_WEEKS = 13
+
+_LINK_RE = re.compile(r'href="([^"]*syumatsu(\d{8})00\.pdf)"', re.IGNORECASE)
+
+# 銘柄名(貪欲でない)+ コード(英数4桁+チェックディジット0) + ISIN + 残り数値列。
+_ROW_RE = re.compile(
+    r"^B?\s*(?P<name>\S.*?)(?P<code>[0-9][0-9A-Z]{2}[0-9A-Z]0)\s*"
+    r"(?P<isin>JP[0-9A-Z]{10})\s+(?P<rest>.+)$"
+)
+
+_NUM_FIELDS = (
+    "sell_total",
+    "sell_total_wow",
+    "buy_total",
+    "buy_total_wow",
+    "general_sell",
+    "general_sell_wow",
+    "standard_sell",
+    "standard_sell_wow",
+    "general_buy",
+    "general_buy_wow",
+    "standard_buy",
+    "standard_buy_wow",
+)
+
+
+# ---------------------------------------------------------------------------
+# 取得
+# ---------------------------------------------------------------------------
+
+def fetch_latest(config: dict | None = None) -> tuple[str, bytes] | None:
+    """05.html から最新週のPDFリンクを抽出し、未取得なら (url, bytes) を返す。
+
+    state(margin_weekly.json の last_url)と同一URLなら None(週次データを
+    日次バッチで毎日ダウンロードしないため)。通信失敗は例外にせず None を返す。
+    """
+    config = config or load_config()
+    mcfg = config.get("margin", {})
+    if not mcfg.get("enabled", True):
+        return None
+    page_url = mcfg.get("page_url", DEFAULT_PAGE_URL)
+
+    try:
+        resp = requests.get(page_url, timeout=30)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as e:
+        print(f"WARNING: margin.fetch_latest: page request failed ({e})")
+        return None
+
+    matches = _LINK_RE.findall(html)
+    if not matches:
+        print("WARNING: margin.fetch_latest: no weekly PDF link found on page")
+        return None
+    href, _ymd = max(matches, key=lambda m: m[1])
+    pdf_url = urljoin(page_url, href)
+
+    store = safe_load_json(MARGIN_STORE_PATH, {})
+    if store.get("last_url") == pdf_url:
+        return None
+
+    try:
+        resp = requests.get(pdf_url, timeout=60)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"WARNING: margin.fetch_latest: PDF download failed ({e})")
+        return None
+
+    return pdf_url, resp.content
+
+
+def _extract_ymd(pdf_url: str) -> str | None:
+    m = re.search(r"syumatsu(\d{8})00\.pdf", pdf_url, re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def _ymd_to_iso(ymd: str) -> str:
+    return f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"
+
+
+# ---------------------------------------------------------------------------
+# パース
+# ---------------------------------------------------------------------------
+
+def _normalize_code(raw_code: str) -> str:
+    if len(raw_code) == 5 and raw_code.endswith("0"):
+        return raw_code[:4]
+    return raw_code
+
+
+def _parse_numbers(rest: str) -> list[int] | None:
+    """"▲ 300" のような分離符号を再結合しつつ、先頭12個の整数を取り出す。"""
+    raw_tokens = rest.split()
+    tokens: list[str] = []
+    i = 0
+    while i < len(raw_tokens):
+        tok = raw_tokens[i]
+        if tok == "▲":  # ▲
+            if i + 1 < len(raw_tokens):
+                tokens.append("-" + raw_tokens[i + 1])
+                i += 2
+                continue
+            i += 1
+            continue
+        tokens.append(tok)
+        i += 1
+    if len(tokens) < len(_NUM_FIELDS):
+        return None
+    nums: list[int] = []
+    for tok in tokens[: len(_NUM_FIELDS)]:
+        cleaned = tok.replace(",", "").replace("▲", "-")
+        try:
+            nums.append(int(cleaned))
+        except ValueError:
+            return None
+    return nums
+
+
+def _parse_row(line: str) -> dict | None:
+    m = _ROW_RE.match(line.strip())
+    if not m:
+        return None
+    nums = _parse_numbers(m.group("rest"))
+    if nums is None:
+        return None
+    row = dict(zip(_NUM_FIELDS, nums))
+    row["code"] = _normalize_code(m.group("code"))
+    return row
+
+
+def _extract_lines(content: bytes) -> list[str]:
+    """PDFバイト列から全ページのテキスト行を抽出する(I/O境界。テストではここを
+    monkeypatch して合成PDFバイナリ無しでパースロジックだけを検証する)。"""
+    import pdfplumber
+
+    lines: list[str] = []
+    with pdfplumber.open(BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            lines.extend(text.splitlines())
+    return lines
+
+
+def parse_margin_pdf(content: bytes, universe_codes: set) -> tuple[dict, list[str]]:
+    """PDFバイト列から {code: {"buy": int, "sell": int}} を作る。
+
+    1件もパースできなければ空dict + warning(例外は投げない。JPXの様式変更で
+    パイプライン全体を止めないため)。
+    """
+    warnings: list[str] = []
+    try:
+        lines = _extract_lines(content)
+    except Exception as e:
+        return {}, [f"PDF open/extract failed: {e}"]
+
+    by_code: dict = {}
+    matched = 0
+    for line in lines:
+        row = _parse_row(line)
+        if row is None:
+            continue
+        matched += 1
+        code = row["code"]
+        if universe_codes and code not in universe_codes:
+            continue
+        by_code[code] = {"buy": row["buy_total"], "sell": row["sell_total"]}
+
+    if matched == 0:
+        return {}, ["margin PDF format changed: 0 rows parsed"]
+
+    return by_code, warnings
+
+
+# ---------------------------------------------------------------------------
+# ストア更新
+# ---------------------------------------------------------------------------
+
+def update_margin_store(config: dict | None = None) -> dict:
+    config = config or load_config()
+    mcfg = config.get("margin", {})
+    keep_weeks = int(mcfg.get("keep_weeks", DEFAULT_KEEP_WEEKS))
+
+    store = safe_load_json(
+        MARGIN_STORE_PATH,
+        {"updated_at": None, "last_url": None, "warnings": [], "history": []},
+    )
+    warnings: list[str] = []
+
+    try:
+        from src.universe import load_universe
+
+        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
+    except Exception as e:
+        universe_codes = set()
+        warnings.append(f"universe load failed: {e}")
+
+    try:
+        fetched = fetch_latest(config)
+    except Exception as e:
+        fetched = None
+        warnings.append(f"fetch_latest raised: {e}")
+
+    if fetched is None:
+        if warnings:
+            store["warnings"] = warnings
+            atomic_write_json(MARGIN_STORE_PATH, store)
+        return store
+
+    pdf_url, content = fetched
+    ymd = _extract_ymd(pdf_url)
+    if ymd is None:
+        warnings.append(f"could not extract date from url: {pdf_url}")
+        store["warnings"] = warnings
+        atomic_write_json(MARGIN_STORE_PATH, store)
+        return store
+    date_str = _ymd_to_iso(ymd)
+
+    by_code, parse_warnings = parse_margin_pdf(content, universe_codes)
+    warnings.extend(parse_warnings)
+
+    history = list(store.get("history", []))
+    history = [h for h in history if h.get("date") != date_str]  # 同一date置換
+    history.append({"date": date_str, "by_code": by_code})
+    history.sort(key=lambda h: h["date"])
+    history = history[-keep_weeks:]
+
+    store = {
+        "updated_at": datetime.now().astimezone().isoformat(),
+        "last_url": pdf_url,
+        "warnings": warnings,
+        "history": history,
+    }
+    atomic_write_json(MARGIN_STORE_PATH, store)
+    return store
+
+
+# ---------------------------------------------------------------------------
+# メトリクス(表示専用。総合スコアには一切使わない)
+# ---------------------------------------------------------------------------
+
+def build_margin_metrics(code: str, latest_row: dict | None, store: dict | None = None) -> dict | None:
+    """最新週の信用残メトリクスを組み立てる。データが無ければ None。
+
+    store を省略すると data/margin_weekly.json を読む(パイプライン呼び出し用)。
+    テストでは合成 store を直接渡してI/O無しで検証できる。
+    """
+    store = store if store is not None else safe_load_json(MARGIN_STORE_PATH, {})
+    history = store.get("history") or []
+    if not history:
+        return None
+    latest = history[-1]
+    entry = (latest.get("by_code") or {}).get(code)
+    if entry is None:
+        return None
+    buy = entry.get("buy")
+    sell = entry.get("sell")
+    if buy is None or sell is None:
+        return None
+
+    ratio = round(buy / sell, 3) if sell else None
+
+    buy_wow_pct = None
+    if len(history) >= 2:
+        prev_entry = (history[-2].get("by_code") or {}).get(code)
+        prev_buy = prev_entry.get("buy") if prev_entry else None
+        if prev_buy:
+            buy_wow_pct = round((buy / prev_buy - 1.0) * 100.0, 2)
+
+    vol_ma50 = (latest_row or {}).get("vol_ma50")
+    days_to_cover = round(buy / vol_ma50, 2) if vol_ma50 else None
+
+    return {
+        "ratio": ratio,
+        "buy": buy,
+        "sell": sell,
+        "date": latest.get("date"),
+        "buy_wow_pct": buy_wow_pct,
+        "days_to_cover": days_to_cover,
+    }

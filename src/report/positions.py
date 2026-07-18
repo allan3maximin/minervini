@@ -85,16 +85,30 @@ def _compute_sell_signals(close: float, ma50, ma200, current_stop: float, entry_
     return signals
 
 
+def _margin_for(code: str, latest_row: dict | None, margin_store: dict | None) -> dict | None:
+    """表示専用の信用残メトリクス。総合スコアには一切使わない。失敗してもNoneに落とす。"""
+    try:
+        from src.data.margin import build_margin_metrics
+
+        return build_margin_metrics(code, latest_row, store=margin_store)
+    except Exception:
+        return None
+
+
 def build_positions_report(
     positions: list[dict],
     indicator_by_code: dict,
     name_by_code: dict,
     today: date | None = None,
+    margin_store: dict | None = None,
 ) -> dict:
     """各ポジションの現在値・R倍数・売りシグナルを計算する。
 
     indicator_by_code[code] は日足指標付きDataFrame(close/ma50/ma200等を含む)を
     想定。ユニバース外/上場廃止でcodeが無ければ data_missing=True の数値null行を出す。
+
+    margin_store は data/margin_weekly.json の辞書(呼び出し側で1回だけ読み込んで
+    渡す想定)。信用残(需給)は表示専用レイヤーでスコアには使わない。
     """
     today = today or date.today()
     warnings: list[str] = []
@@ -131,6 +145,7 @@ def build_positions_report(
                     "r_multiple": None,
                     "dist_to_stop_pct": None,
                     "sell_signals": [],
+                    "margin": _margin_for(code, None, margin_store),
                 }
             )
             out.append(record)
@@ -158,6 +173,7 @@ def build_positions_report(
                 "r_multiple": r_multiple,
                 "dist_to_stop_pct": round((close - current_stop) / close * 100, 2),
                 "sell_signals": _compute_sell_signals(close, ma50, ma200, current_stop, entry_price, r_multiple),
+                "margin": _margin_for(code, latest.to_dict(), margin_store),
             }
         )
         out.append(record)

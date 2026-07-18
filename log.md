@@ -2,6 +2,112 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (60): タスク1実装完了 — src/data/margin.py(信用残週次取得)
+
+### 要望
+HANDOFF_TASKS_20260718.txt タスク1の実装((59)のPDFレイアウト実測を踏まえて)。
+
+### 実装内容
+- **src/data/margin.py 新規**: JPX「銘柄別信用取引週末残高」PDF(週次、火曜16:30頃
+  公表・前週金曜申込分)を取得・解析。(59)で判明した通りExcelではなくPDF(pdfplumber
+  でテキスト抽出)。主な関数:
+  - `fetch_latest(config)`: 05.htmlから最新PDFリンクを正規表現抽出、`last_url`と
+    同一ならスキップ。失敗しても例外を投げず None + warning。
+  - `parse_margin_pdf(content, universe_codes)`(仕様書の`parse_margin_excel`から
+    実体に合わせ改名): 行正規表現でパース。「▲」+数字トークンの負数再結合、
+    5文字コードの末尾ゼロチェックデジット除去による4桁正規化(`1301` PDF側は
+    `13010`)を実装。ユニバース外コードは除外。0件パースなら空dict+warning
+    (フォーマット変化検知)。
+  - `update_margin_store(config)`: data/margin_weekly.json に書き込み。同日付は
+    置換、keep_weeks(既定13)で古い週をトリム。
+  - `build_margin_metrics(code, latest_row, store=None)`: ratio(買残/売残、売残0は
+    None)、buy_wow_pct(前週比)、days_to_cover(買残/vol_ma50)を算出。表示専用、
+    総合スコアには一切使わない。
+  - テスト用I/O境界として `_extract_lines(content)` を分離(pdfplumber呼び出しの
+    みを担う)。実PDFバイナリなしで合成テキスト行によるパースロジック単体テストを
+    可能にした。
+- **config.yaml**: `margin:` セクション新規(enabled/page_url/keep_weeks/
+  high_ratio_warn/dtc_warn/low_ratio_info)。
+- **requirements.txt**: `pdfplumber>=0.11` 追加。
+- **src/pipeline.py**: indices更新の直後に信用残更新を追加(try/except、失敗して
+  も本体は止めない)。`margin_store` を1回だけ読み込み、`assemble_stock_record`
+  (actionable/watchlist両方)と `positions_mod.build_positions_report` に伝播
+  (銘柄ごとの再読み込みを避けるパフォーマンス対策)。
+- **src/report/build_site.py**: `assemble_stock_record` に `margin_store` 引数追加、
+  `record["margin"]` を設定(`_build_margin_metrics`ヘルパー、失敗時None)。
+- **src/report/positions.py**: `build_positions_report` に `margin_store` 引数追加、
+  data_missing/通常両ブランチの record に `"margin"` を追加(`_margin_for`ヘルパー)。
+- **tests/test_margin.py 新規**: 21ケース(正規化・数値パース・行パース・ユニバース
+  フィルタ・フォーマット崩壊時の空dict+warning・same-URL skip・same-date置換・
+  keep_weeks trim・metrics計算の各分岐)、全パス。
+- **tests/test_pipeline.py**: `wired` フィクスチャに `margin_mod.MARGIN_STORE_PATH`
+  差し替え+`update_margin_store`モック(実ファイルに書く偽実装、pipelineが戻り値
+  ではなくパスを読み直す実装のため)を追加。log.md (51) の実データ汚染事故の教訓
+  通り、新規I/O配線には必ずモックを追加するルールを遵守。
+  `test_run_daily_wires_pipeline_end_to_end` に、"1111"(モックstoreにあり)は
+  margin値が入り"3333"(なし)はNoneに落ちることを確認するアサーション追加。
+- **確認**: `pytest tests/ -q` → 323 passed。`git status` に
+  `data/margin_weekly.json` が一切現れず(実データ非汚染を確認)。
+
+### 方針(再掲、変更なし)
+信用残は総合スコアに組み込まない表示専用レイヤー。13週分蓄積後に
+src/backtest.py で効果検証してから再検討(次回宿題、最終仕上げタスクでも明記)。
+
+## 2026-07-18 (58): 信用倍率+地合い詳細化のタスク仕様書作成(実装は未着手)
+
+### 要望(萩山原文)
+> 信用倍率機能 / 地合いの詳細化(もっとトレンドをいろんな観点からより深く)。
+> 信用倍率をスコアに含むかはアドバイスちょうだい。Sonnetが実装できるように。
+
+- **HANDOFF_TASKS_20260718.txt 新規作成**: Sonnet向けタスク1〜4の実装仕様。
+  - タスク1: JPX無料公表「銘柄別信用取引週末残高」(火曜16:30公表・前週金曜分)を
+    スクレイプする src/data/margin.py。J-QuantsのマージンAPIはStandard(月3,300円)
+    以上でFree不可のため不採用。data/margin_weekly.json に13週保持。
+  - タスク2: 需給カード表示(信用倍率/買残前週比/回転日数/買残重い・売り長バッジ)。
+  - タスク3: market_signal拡張 — 騰落レシオ25日、breadth 20日トレンド、NH-NL累積、
+    日経/グロース250の指数トレンド、グロース−TOPIX相対、market_score 0-100合成。
+    既存green/yellow/red判定は互換維持。
+  - タスク4: 地合い詳細パネル(サブスコアバー+素SVGスパークライン)。
+- **方針決定(合意済み)**: 信用倍率は総合スコアに**入れない**。dryupと同じ
+  「スコアは順位付け、フラグは事実」。週次+最大5営業日ラグ、向きの文脈依存性
+  (買残多=上値重い/売残多=踏み上げ燃料)、予測力未検証が理由。13週蓄積後に
+  バックテストで効果確認→有効なら条件ゲート方式で再検討。
+- 実装・コード変更は一切していない(仕様書とこのログのみ)。
+
+## 2026-07-18 (59): タスク1手順0 — JPX信用残ページの実レイアウト確認(想定と相違、要判断)
+
+### 要望(ユーザー原文)
+> HANDOFF_TASKS_20260718.txt タスク1手順0の実施。
+
+### 実測結果(mcp__workspace__web_fetchでsandboxから直接取得できた。外部接続は生きている)
+- **05.htmlは想定通りHTML一覧ページ**。「銘柄別信用取引週末残高」のリンク一覧が
+  週ごとに並ぶ。直近5件が2026/5/29・6/5・6/12・6/19・6/26申込分(ページ最終更新
+  「2026/07/06」表示)。**7/18時点で7/3・7/10・7/17申込分が未掲載**。単純に
+  fetchが古いキャッシュを拾っている可能性もあるため、次回実装時に再確認要。
+- **【重大な相違】本体ファイルはExcelではなくPDF**(仕様書は
+  `requests + pandas.read_excel`前提だったが実際は`syumatsuYYYYMMDD00.pdf`)。
+  全上場銘柄(全制度信用銘柄3701・投信等533・その他24 = 約4,258銘柄)を1ファイルに
+  収録した**85ページ組のPDF**。pandas.read_excelは使えない。
+- PDFの列構成(実測、2026/6/26分で確認):
+  貸借銘柄マーク(B) / 銘柄名 / コード(4桁、166A0のような新証券コード体系は
+  末尾0付き5桁表記で出現) / 新証券コード(ISIN) /
+  **合計列(Total)に売残高・買残高が既に制度信用+一般信用の合算値で入っている**
+  (前週比付き) / その後に一般信用・制度信用の内訳列(各前週比付き)。
+  → 仕様書が懸念していた「制度信用と一般信用の別行/別列合算」は不要。
+  **合計(Total)列をそのまま使えばよい**。
+- **方針への影響**: pandas.read_excelベースの設計は破棄。PDFテーブル抽出
+  (pdfplumber等、requirements.txt追加要)への設計変更が必要。85ページ×週次は
+  データ量・処理時間・レイアウト崩れへの耐性(HANDOFF_TASKS要求の「様式崩れ→
+  空dict+warning」)の実装難度が当初想定より高い。
+- **要判断(萩山への確認待ち、実装は一旦保留)**:
+  1. PDFテーブル抽出(pdfplumber)で当初仕様通り進めるか。
+  2. 直近5週しか遡及取得できない可能性(過去分PDFへの直接リンクが05.htmlに
+     無く、07.html「公表スケジュール」等の別ページ調査が必要)を踏まえ、
+     初回は最新1件のみ取得しhistoryを日次バッチで13週分自然に貯める方針でよいか。
+  3. 7/3・7/10・7/17分が未掲載に見える点(更新遅延 or fetchキャッシュ)の
+     再確認が先か。
+- 実装(margin.py本体)はこの判断待ちで着手していない。
+
 ## 2026-07-17 (56): 監視タブのセットアップ進行度分類 — setup_stage
 
 「監視118件を毎日全部は見られない/候補2件では見識が広がらない」(萩山)への対処。

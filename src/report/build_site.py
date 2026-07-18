@@ -53,6 +53,7 @@ def assemble_stock_record(
     fund_info: dict,
     config: dict | None = None,
     tier_override: str | None = None,
+    margin_store: dict | None = None,
 ) -> dict:
     """Combine the outputs of trend_template/vcp/entry/fundamentals into one
     report.json stock record.
@@ -60,6 +61,10 @@ def assemble_stock_record(
     `tier_override` lets the caller place a stock in the "watchlist" tier
     (trend template passed, but no actionable VCP/entry setup yet) instead
     of the fundamentals-coverage-derived confirmed/pool tier.
+
+    `margin_store` is data/margin_weekly.json's dict, pre-loaded once by the
+    caller (pipeline.py) so this per-stock function doesn't re-read the file
+    from disk on every call.表示専用(信用残)。総合スコアには一切使わない。
     """
     config = config or load_config()
 
@@ -108,7 +113,20 @@ def assemble_stock_record(
         "dryup": _build_dryup_badge(vcp_result, config),
         # 監視タブ分類用(actionableならNone)。stage/near/missing/detail。
         "setup_stage": build_setup_stage(vcp_result, config),
+        # 信用残(需給)。表示専用レイヤー、総合スコアには一切組み込まない
+        # (「スコアは順位付け、フラグは事実」。dryupと同じ方針)。データ無しはNone。
+        "margin": _build_margin_metrics(code, latest_row, margin_store),
     }
+
+
+def _build_margin_metrics(code: str, latest_row: dict, margin_store: dict | None) -> dict | None:
+    try:
+        from src.data.margin import build_margin_metrics
+
+        return build_margin_metrics(code, latest_row, store=margin_store)
+    except Exception as e:
+        print(f"WARNING: margin metrics build failed for {code} (ignored): {e}")
+        return None
 
 
 def _build_dryup_badge(vcp_result: dict, config: dict) -> dict:

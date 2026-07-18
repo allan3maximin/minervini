@@ -178,3 +178,14 @@ scoring:
 market_signal:
   green_pct_above_ma200: 0.50
   red_pct_above_ma200: 0.30
+
+# 信用残(信用取引週末残高)表示専用レイヤー。dryupと同じ「スコアは順位付け、
+# フラグは事実」原則で、総合スコアには一切組み込まない(HANDOFF_TASKS_20260718.txt)。
+# JPX無料公表「銘柄別信用取引週末残高」(火曜16:30頃、前週金曜申込分)由来。
+margin:
+  enabled: true
+  page_url: "https://www.jpx.co.jp/markets/statistics-equities/margin/05.html"
+  keep_weeks: 13
+  high_ratio_warn: 5.0    # 信用倍率これ以上で「買い長」注意
+  dtc_warn: 3.0           # days_to_cover これ以上で「買残重い」注意
+  low_ratio_info: 1.0     # これ以下で「売り長」(踏み上げ余地)表示

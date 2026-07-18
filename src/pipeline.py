@@ -16,6 +16,7 @@ import jpholiday
 
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
+from src.data import margin as margin_mod
 from src.data import prices as prices_mod
 from src.data import edinetdb as edinetdb_mod
 from src.data import jquants as jquants_mod
@@ -63,6 +64,16 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
             print(f"Index fetch failed (kept cache if any): {idx_result['failed']}")
     except Exception as e:
         print(f"Index update crashed (ignored): {e}")
+
+    # 信用残(週次、火曜16:30頃公表)。表示専用レイヤーで総合スコアには使わない
+    # (config margin セクション参照)。失敗しても本体は止めない(indices/heatmapと同方針)。
+    try:
+        margin_result = margin_mod.update_margin_store(config)
+        if margin_result.get("warnings"):
+            print(f"Margin update warnings: {margin_result['warnings']}")
+    except Exception as e:
+        print(f"Margin update crashed (ignored): {e}")
+    margin_store = safe_load_json(margin_mod.MARGIN_STORE_PATH, {})
 
     if universe_rebuild:
         build_universe(config)
@@ -166,7 +177,9 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     # (data_missing扱いになる。既知の制約 -- HANDOFF §12参照)。
     try:
         positions, positions_csv_warnings = positions_mod.load_positions_csv()
-        positions_report = positions_mod.build_positions_report(positions, indicator_by_code, name_by_code)
+        positions_report = positions_mod.build_positions_report(
+            positions, indicator_by_code, name_by_code, margin_store=margin_store
+        )
         positions_report["warnings"] = positions_csv_warnings + positions_report["warnings"]
         positions_mod.write_positions_json(positions_report)
     except Exception as e:
@@ -245,6 +258,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
                 entry_result,
                 fund_info,
                 config,
+                margin_store=margin_store,
             )
 
             if entry_result["status"] == "BREAKOUT":
@@ -267,6 +281,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
                 fund_info,
                 config,
                 tier_override="watchlist",
+                margin_store=margin_store,
             )
 
         build_site.attach_priority(record, pr_eval)

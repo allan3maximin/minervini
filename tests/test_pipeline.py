@@ -101,6 +101,25 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
     # 指数取得はネットワークに出さず、実リポジトリの docs/data/indices.json も書かない。
     monkeypatch.setattr(pipeline.indices_mod, "update_indices", lambda config: {"failed": []})
+    # 信用残取得はネットワークに出さず、実リポジトリの data/margin_weekly.json も書かない
+    # (log.md (51) の実データ汚染事故の教訓。表示専用レイヤーでも必ずモックする)。
+    # pipeline側は update_margin_store の戻り値ではなく MARGIN_STORE_PATH を読み直す
+    # 実装のため、モックも同じパスへ実際に書き込む。
+    margin_store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(pipeline.margin_mod, "MARGIN_STORE_PATH", margin_store_path)
+    fake_margin_store = {
+        "updated_at": "2026-07-18T00:00:00+09:00",
+        "last_url": "https://example.com/syumatsu2026071700.pdf",
+        "warnings": [],
+        "history": [{"date": "2026-07-17", "by_code": {"1111": {"buy": 1000, "sell": 200}}}],
+    }
+
+    def fake_update_margin_store(config):
+        from src.utils_io import atomic_write_json
+        atomic_write_json(margin_store_path, fake_margin_store)
+        return fake_margin_store
+
+    monkeypatch.setattr(pipeline.margin_mod, "update_margin_store", fake_update_margin_store)
     # 枯れ度フォワードログ: 実リポジトリの data/dryup_log.jsonl に追記させない
     # (log_and_resolveのpathデフォルト引数はdef時に束縛済みのため、定数の
     # 差し替えでは効かない。関数ごと差し替える)。
@@ -176,6 +195,17 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     # "1111" (actionable, confirmed/pool tier) sorts ahead of "3333" (watchlist)
     assert [s["code"] for s in report["stocks"]] == ["1111", "3333"]
     assert report["stocks"][0]["footprint"] == "6W 20/10/4 3T"
+
+    # 信用残(タスク1): "1111" は fake_margin_store の by_code にあるので値が入り、
+    # "3333"(history に無いコード)は None に落ちる。総合スコアには一切影響しない表示専用層。
+    # days_to_cover は _make_df の乱数出来高由来の vol_ma50 に依存するため値までは固定しない。
+    margin_1111 = report["stocks"][0]["margin"]
+    assert margin_1111["ratio"] == 5.0
+    assert margin_1111["buy"] == 1000
+    assert margin_1111["sell"] == 200
+    assert margin_1111["date"] == "2026-07-17"
+    assert margin_1111["buy_wow_pct"] is None  # 前週データなし
+    assert report["stocks"][1]["margin"] is None
 
     watchlist_stock = report["stocks"][1]
     assert watchlist_stock["tier"] == "watchlist"
