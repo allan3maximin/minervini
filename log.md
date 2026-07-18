@@ -2,6 +2,66 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (63): タスク4実装完了 — 地合い詳細パネル+スパークライン(フロント)
+
+### 要望
+HANDOFF_TASKS_20260718.txt タスク4の実装((61)のmarket_signal.pyバックエンド拡張
+を受けてのフロント表示)。既存の3色シグナル表示・守り時の注意文は変更禁止、
+外部チャートライブラリ追加も禁止(SVG手書き)。
+
+### 実装内容
+- **docs/assets/app.js**: `renderMarketSignal(breadth)` を拡張。
+  - ヘッダー(`.market-signal-top`)に `market_score`(四捨五入した0-100の整数)+
+    `score_trend` 矢印(improving=↗改善/flat=→横ばい/deteriorating=↘悪化)の
+    バッジを追加。`latest.market_score` が null(旧history)ならバッジ自体を
+    出さない。色分け・理由リスト・守り時の注意文は完全に元のまま。
+  - 折りたたみ式 `<details class="market-detail">`「地合い詳細」パネルを新設
+    (初期状態は閉)。中身は `renderMarketDetailHtml(latest, history)`:
+    - サブスコア4本(ブレッドス40%/指数トレンド30%/モメンタム20%/リスク選好10%、
+      重みは market_signal.py の DEFAULTS["detail_weights"] とハードコードで
+      一致させた表示用ラベル)。既存の `.score-bar-row`/`.score-bar-fill` を
+      そのまま再利用、新規CSS無し。`score_breakdown` が欠けている場合は
+      0%バー+"-"表示にフォールバック。
+    - 指標テーブル: MA200上回り率(+20日差分)、MA50上回り率、騰落レシオ25、
+      NH-NL(当日/累積)、グロース-TOPIX 20日相対、TOPIX/日経225/グロース250の
+      各50日線/200日線/傾き↑を○×表示。指数トレンドがnull(データ不足)の行は
+      「データ不足」を1セルにcolspan表示。
+    - `up_down_ratio_25`/`breadth_trend_20d` が蓄積不足でnullの間は
+      `accumulationNote(historyLen, 必要件数)` で「蓄積中(あとN日)」を表示
+      (必要件数は market_signal.py の `_UP_DOWN_WINDOW=25`/`_N_DAY_RETURN=20`
+      +当日分に対応させた25/21をハードコード)。
+    - スパークライン2本(`pct_above_ma200`/`nh_nl_cumulative` の直近60エントリ)。
+      既存の `sparklineSvg(series, isUp)`(VCPファネルの折れ線で使用中の汎用
+      ヘルパー、外部ライブラリ不使用)をそのまま再利用。対象フィールドが無い
+      旧historyエントリは`filter`で除外し、2点未満(データ蓄積中)なら
+      `sparklineSvg` が空文字を返すので `.tier-note`「データ蓄積中」に
+      フォールバックする(クラッシュしない)。
+- **docs/assets/style.css**: `.market-signal-top`/`.market-score-badge`
+  (ヘッダー用)、`.market-detail`/`.market-detail-body`/`.market-detail-scores`/
+  `.market-detail-indicators`/`.market-detail-row`/`.market-detail-sub`/
+  `.market-detail-table`/`.market-detail-sparklines`/`.market-detail-spark-label`
+  を新規追加。モバイル(max-width:600px)で `.market-detail-sparklines` を
+  1カラムに縦積み。
+- **docs/index.html**: 変更なし(カード全体を `el.innerHTML` で描画する既存方式
+  のため、新規の静的コンテナ追加は不要)。
+- **確認**: `node --check docs/assets/app.js` OK。`tools/update_cache_busters.py`
+  実行(app.js/style.css のハッシュ更新)。`pytest tests/ -q` → 342 passed
+  (このタスクはフロントのみでPython側の変更なし、既存テストに影響なし)。
+  - 目視確認の代わりに、Node の `vm` モジュールで app.js をロードし(`bootApp()`
+    の自動実行のみ無効化)、`document.getElementById` をスタブした状態で
+    `renderMarketSignal()` を直接呼び出す使い捨てスクリプトを作成し5パターン
+    (空history/旧フィールドのみ/新旧混在で蓄積不足/25件以上でフル蓄積/
+    signal自体が無いエントリ)を実行して確認: いずれもクラッシュせず、
+    蓄積不足時は「蓄積中(あとN日)」、指数データ欠損時は「データ不足」、
+    スパークライン対象データ2点未満は「データ蓄積中」に正しくフォールバック。
+    signalが無いエントリでは従来通りカード非表示(`hidden: true`)。
+    このスクリプトはテスト用の使い捨てで、リポジトリには残していない。
+
+### 方針(再掲)
+market_score/score_trend/サブスコア/指数マルチトレンド等はすべて表示専用の
+補助指標。既存の green/yellow/red 判定ロジック・守り時の注意文には一切変更を
+加えていない。
+
 ## 2026-07-18 (62): タスク2実装完了 — 信用残フロント表示(表示専用)
 
 ### 要望

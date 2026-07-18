@@ -487,6 +487,119 @@ const MARKET_SIGNAL_META = {
   red: { label: "守り", className: "signal-red" },
 };
 
+// 地合い詳細パネル(2026-07-18 タスク4)。以下はすべて表示専用の補助指標
+// (src/report/market_signal.py タスク3で追加)であり、上の green/yellow/red
+// 判定・カード色分けには一切影響しない。旧history(これらのフィールドが無い
+// エントリ)でも壊れないよう、値は必ずnullガードしてから表示する。
+const MARKET_SCORE_TREND_ARROW = {
+  improving: "↗改善",
+  flat: "→横ばい",
+  deteriorating: "↘悪化",
+};
+
+// weight は src/report/market_signal.py DEFAULTS["detail_weights"] と一致させた
+// 表示用の固定値(バックエンドから配点自体は送られてこないため)。
+const MARKET_DETAIL_SCORE_ITEMS = [
+  { key: "breadth", label: "ブレッドス", weight: 40 },
+  { key: "index_trend", label: "指数トレンド", weight: 30 },
+  { key: "momentum", label: "モメンタム", weight: 20 },
+  { key: "risk_appetite", label: "リスク選好", weight: 10 },
+];
+
+// up_down_ratio_25 は history 24件+当日で計25件、breadth_trend_20d(20日差分)は
+// 20日前history+当日で計21件が必要(src/report/market_signal.py の
+// _UP_DOWN_WINDOW=25 / _N_DAY_RETURN=20 に対応)。蓄積不足の間は「蓄積中」を出す。
+function accumulationNote(historyLen, requiredLen) {
+  const remain = requiredLen - historyLen;
+  return remain > 0 ? `蓄積中(あと${remain}日)` : null;
+}
+
+function okx(v) {
+  if (v === true) return "○";
+  if (v === false) return "×";
+  return "-";
+}
+
+function formatPct1(v, digits = 1) {
+  return v != null ? `${(v * 100).toFixed(digits)}%` : "-";
+}
+
+function formatSignedPctPoints(v, digits = 1) {
+  if (v == null) return "-";
+  const pts = v * 100;
+  return `${pts > 0 ? "+" : ""}${pts.toFixed(digits)}pt`;
+}
+
+function formatSignedPct(v, digits = 1) {
+  if (v == null) return "-";
+  return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`;
+}
+
+function indexTrendRowHtml(label, t) {
+  if (!t) return `<tr><td>${label}</td><td colspan="3">データ不足</td></tr>`;
+  return `<tr><td>${label}</td><td>${okx(t.index_above_ma50)}</td><td>${okx(t.index_above_ma200)}</td><td>${okx(t.index_ma200_slope_up)}</td></tr>`;
+}
+
+function renderMarketDetailHtml(latest, history) {
+  const sb = latest.score_breakdown || {};
+  const scoreBarsHtml = MARKET_DETAIL_SCORE_ITEMS.map((item) => {
+    const v = sb[item.key];
+    const pct = v != null ? Math.max(0, Math.min(100, v)) : 0;
+    const valueText = v != null ? Math.round(v) : "-";
+    return `<div class="score-bar-row"><span>${item.label}(${item.weight}%)</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
+  }).join("");
+
+  const historyLen = history.length;
+  const udNote = accumulationNote(historyLen, 25);
+  const udText = latest.up_down_ratio_25 != null ? latest.up_down_ratio_25.toFixed(2) : (udNote || "-");
+
+  const btNote = accumulationNote(historyLen, 21);
+  const btText = latest.breadth_trend_20d != null ? formatSignedPctPoints(latest.breadth_trend_20d) : (btNote || "-");
+
+  const trends = latest.index_trends || {};
+
+  // nh_nl_cumulativeはpct_above_ma200より新しく追加されたフィールドのため、
+  // 旧history側では欠けている場合がある。両系列とも欠損エントリはfilterで除外し、
+  // 2点未満ならsparklineSvgが空文字を返す(=下で「データ蓄積中」表示にフォールバック)。
+  const pct200Series = history.filter((h) => h && h.pct_above_ma200 != null).slice(-60).map((h) => ({ v: h.pct_above_ma200 }));
+  const nhNlSeries = history.filter((h) => h && h.nh_nl_cumulative != null).slice(-60).map((h) => ({ v: h.nh_nl_cumulative }));
+  const pct200Up = pct200Series.length >= 2 && pct200Series[pct200Series.length - 1].v >= pct200Series[0].v;
+  const nhNlUp = nhNlSeries.length >= 2 && nhNlSeries[nhNlSeries.length - 1].v >= nhNlSeries[0].v;
+  const pct200Spark = sparklineSvg(pct200Series, pct200Up) || '<p class="tier-note">データ蓄積中</p>';
+  const nhNlSpark = sparklineSvg(nhNlSeries, nhNlUp) || '<p class="tier-note">データ蓄積中</p>';
+
+  return `
+    <div class="market-detail-body">
+      <div class="market-detail-scores">${scoreBarsHtml}</div>
+      <div class="market-detail-indicators">
+        <div class="market-detail-row"><span>MA200上回り率</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
+        <div class="market-detail-row"><span>MA50上回り率</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
+        <div class="market-detail-row"><span>騰落レシオ25</span><span>${udText}</span></div>
+        <div class="market-detail-row"><span>NH-NL(当日/累積)</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
+        <div class="market-detail-row"><span>グロース-TOPIX 20日相対</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
+      </div>
+      <table class="market-detail-table">
+        <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
+        <tbody>
+          ${indexTrendRowHtml("TOPIX", trends.topix)}
+          ${indexTrendRowHtml("日経225", trends.nikkei225)}
+          ${indexTrendRowHtml("グロース250", trends.growth250)}
+        </tbody>
+      </table>
+      <div class="market-detail-sparklines">
+        <div class="market-detail-spark">
+          <div class="market-detail-spark-label">MA200上回り率 推移</div>
+          ${pct200Spark}
+        </div>
+        <div class="market-detail-spark">
+          <div class="market-detail-spark-label">NH-NL累積 推移</div>
+          ${nhNlSpark}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderMarketSignal(breadth) {
   const el = document.getElementById("market-signal-card");
   if (!el) return;
@@ -509,11 +622,24 @@ function renderMarketSignal(breadth) {
     ? '<p class="market-signal-caution">⚠ 新規エントリーは控えるのが原則です。</p>'
     : "";
 
+  // market_score/score_trendはタスク3で追加された表示専用の補助指標。旧history
+  // (これらが無いエントリ)ではバッジ自体を出さない。
+  const scoreBadge = latest.market_score != null
+    ? `<span class="market-score-badge">スコア ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}</span>`
+    : "";
+
   el.innerHTML = `
-    <div class="market-signal-label">${meta.label}</div>
+    <div class="market-signal-top">
+      <div class="market-signal-label">${meta.label}</div>
+      ${scoreBadge}
+    </div>
     <ul class="market-signal-reasons">${reasons}</ul>
     <div class="market-signal-stats">MA200上回り率 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
     ${caution}
+    <details class="market-detail">
+      <summary>地合い詳細</summary>
+      ${renderMarketDetailHtml(latest, history)}
+    </details>
   `;
 }
 

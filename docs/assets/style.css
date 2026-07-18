@@ -603,6 +603,19 @@ a.nav-btn:hover { border-color: var(--link); }
   border-radius: var(--radius);
   border: 1px solid var(--border);
 }
+.market-signal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.market-score-badge {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .market-signal-label {
   display: inline-block;
   font-size: 22px;
@@ -653,6 +666,49 @@ a.nav-btn:hover { border-color: var(--link); }
 .market-signal-card.signal-red .market-signal-caution {
   color: var(--danger);
 }
+
+/* 地合い詳細パネル(2026-07-18 タスク4)。表示専用、常時折りたたみ初期状態。 */
+.market-detail { margin-top: 10px; }
+.market-detail > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+  user-select: none;
+}
+.market-detail-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.market-detail-scores { display: flex; flex-direction: column; }
+.market-detail-indicators { display: flex; flex-direction: column; gap: 6px; }
+.market-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.market-detail-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+.market-detail-sub { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
+.market-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.market-detail-table th, .market-detail-table td {
+  padding: 4px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.market-detail-table th:first-child, .market-detail-table td:first-child { text-align: left; }
+.market-detail-sparklines {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.market-detail-spark-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
 
 /* VCPファネル(P1銘柄の origin/status 内訳 + TOO_RECENT推移) */
 .vcp-funnel-card {
@@ -1397,6 +1453,9 @@ a.nav-btn:hover { border-color: var(--link); }
   .list-tab { padding: 5px 16px; font-size: 12.5px; }
   .batch-card { flex-direction: column; align-items: stretch; }
   .batch-card-actions { justify-content: flex-start; }
+
+  /* 地合い詳細パネル: スパークラインを2カラム→縦積みに */
+  .market-detail-sparklines { grid-template-columns: 1fr; }
 }
 
 /* 個別銘柄のルールベースサマリー (src/report/summary.py が生成、renderStockSummaryが描画) */
