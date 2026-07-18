@@ -343,3 +343,34 @@ def test_summary_next_earnings_far_is_point():
     rec = _record(next_earnings_date="2026-08-30")
     s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
     assert any("次回決算発表予定: 2026-08-30" in p for p in s["points"])
+
+
+# ---------------------------------------------------------------------------
+# 需給(信用取引週末残高) -- タスク2。表示専用、総合スコアには一切使わない。
+# ---------------------------------------------------------------------------
+
+def test_summary_no_margin_field_produces_no_line():
+    s = sm.build_stock_summary(_record(), config=_CFG, today=_TODAY)
+    assert not any("需給" in p for p in s["points"] + s["cautions"])
+
+
+def test_summary_margin_heavy_buy_is_caution():
+    rec = _record(margin={"ratio": 6.0, "buy": 600, "sell": 100, "date": "2026-07-17",
+                          "buy_wow_pct": 5.0, "days_to_cover": 6.0, "badge": "heavy_buy"})
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("需給" in c and "信用倍率6倍" in c and "買残が重く" in c for c in s["cautions"])
+    assert not any("需給" in p for p in s["points"])
+
+
+def test_summary_margin_short_is_point():
+    rec = _record(margin={"ratio": 0.5, "buy": 50, "sell": 100, "date": "2026-07-17",
+                          "buy_wow_pct": None, "days_to_cover": None, "badge": "short"})
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("需給" in p and "信用倍率0.5倍" in p and "踏み上げ余地" in p for p in s["points"])
+
+
+def test_summary_margin_no_sell_shows_no_ratio():
+    rec = _record(margin={"ratio": None, "buy": 300, "sell": 0, "date": "2026-07-17",
+                          "buy_wow_pct": None, "days_to_cover": None, "badge": None})
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("需給" in p and "売残なし" in p for p in s["points"])

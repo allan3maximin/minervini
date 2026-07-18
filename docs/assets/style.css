@@ -728,6 +728,26 @@ a.nav-btn:hover { border-color: var(--link); }
   color: #e0f2fe;
 }
 
+/* 需給(信用取引週末残高)カード。表示専用(総合スコアには一切使わない)。 */
+.margin-detail { display: flex; flex-direction: column; gap: 6px; }
+.margin-ratio-big {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.margin-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.margin-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+
 /* ---------------------------------------------- ポジションサイジング計算機 */
 
 .sizing-inputs {
@@ -1267,6 +1287,8 @@ a.nav-btn:hover { border-color: var(--link); }
   text-align: right;
 }
 .sc-dryup { flex: 0 0 auto; white-space: nowrap; }
+.sc-margin { flex: 0 0 auto; white-space: nowrap; }
+.sc-margin:empty { display: none; }
 
 /* ------------------------------------------------------- 投資法ページ */
 

@@ -2,6 +2,58 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (62): タスク2実装完了 — 信用残フロント表示(表示専用)
+
+### 要望
+HANDOFF_TASKS_20260718.txt タスク2の実装((60)のmargin.pyバックエンドを受けての
+フロント表示)。バッジ・サマリー文はスコアに一切組み込まない(「スコアは順位付け、
+フラグは事実」方針を継続)。
+
+### 実装内容
+- **src/report/build_site.py**: `_build_dryup_badge` と同じ「サーバ側でconfig閾値を
+  見て判定文字列を確定し、フロントは表示のみ」の流儀で `margin_badge(metrics, config)`
+  を新設(公開関数、positions.py からも共用)。`ratio >= high_ratio_warn かつ
+  days_to_cover >= dtc_warn` で `"heavy_buy"`(買残重い/warn)、`ratio <=
+  low_ratio_info` で `"short"`(売り長/accent)、それ以外は `None`。
+  `_build_margin_metrics` に `config` を渡し `metrics["badge"]` を設定。
+- **src/report/positions.py**: `_margin_for`/`build_positions_report` に `config` を
+  追加し、`build_site.margin_badge` を再利用(保有ビューの信用残バッジも本体と
+  同じ判定にするため)。
+- **src/pipeline.py**: `build_positions_report(...)` 呼び出しに `config=config` を追加。
+- **src/report/summary.py**: `build_stock_summary` に需給1文を追加。`margin` が
+  None なら何も出さない。badge=heavy_buy はcautions(「買残が重く上値の重さに
+  注意」)、badge=short はpoints(「売り長で踏み上げ余地あり」)、それ以外は
+  中立のpoints行。売残0は「売残なし」表記。
+- **フロント(docs/assets/app.js)**:
+  - `marginBadgeHtml(m, {detail})` 新設。一覧カード(`renderCardList` の
+    `sc-row-sub` 行、新規 `sc-margin` セル)では場所が窮屈なため「買残重い」の
+    みを表示、「売り長」は個別銘柄詳細ページの需給カードのみで表示(既存の
+    `sell-signal-badge`/`signal-badge-warn`/`signal-badge-accent` を再利用、
+    新規CSSクラス無し)。
+  - `renderStockMargin(stock)` 新設。個別銘柄ページ(`data-panel="fund"` 内、
+    ファンダカードの下)に「需給(信用取引)」カードを追加。信用倍率(大きく表示、
+    売残0なら「売残なし」)、買残(前週比%色付き)/売残、買残回転日数(「平均出来高
+    のN.N日分」)、日付を「M/D申込時点」+週次データにつき最大5営業日遅れる旨の
+    注記。`record.margin` が null なら「信用残データなし」のみ表示。
+  - `initStockPage` から `renderStockMargin(stock)` を呼び出し、パネル切替時に
+    `margin-detail-body` をクリアする処理も追加。
+- **docs/index.html**: `data-panel="fund"` 内に `<section class="detail-card">
+  <h2>需給(信用取引)</h2><div id="margin-detail-body"></div></section>` を追加。
+- **docs/assets/style.css**: `.sc-margin`(カード用、空なら非表示)、
+  `.margin-detail`/`.margin-ratio-big`/`.margin-row`(詳細カード用)を追加。
+  バッジ自体は既存の `.sell-signal-badge` 系を再掲なので重複定義なし。
+- **tests/test_build_site.py**: `margin_badge` の5ケース(heavy_buy/short/中立/
+  ratio高だがdtc未達/store無し)を追加。
+- **tests/test_summary.py**: 需給1文の4ケース(marginなし/heavy_buy/short/売残0)
+  を追加。
+- **確認**: `pytest tests/ -q` → 342 passed。`node --check docs/assets/app.js` OK。
+  `tools/update_cache_busters.py` 実行(app.js/style.css のハッシュ更新)。
+  `git diff` で scoring/priority/vcp 関連コードに差分が無いことを確認。
+
+### 方針(再掲)
+信用残バッジ・需給サマリー文はいずれも表示専用。総合スコア(total_score)には
+一切影響しない。
+
 ## 2026-07-18 (61): タスク3実装完了 — market_signal.py 地合い詳細化バックエンド
 
 ### 要望

@@ -115,18 +115,39 @@ def assemble_stock_record(
         "setup_stage": build_setup_stage(vcp_result, config),
         # 信用残(需給)。表示専用レイヤー、総合スコアには一切組み込まない
         # (「スコアは順位付け、フラグは事実」。dryupと同じ方針)。データ無しはNone。
-        "margin": _build_margin_metrics(code, latest_row, margin_store),
+        "margin": _build_margin_metrics(code, latest_row, margin_store, config),
     }
 
 
-def _build_margin_metrics(code: str, latest_row: dict, margin_store: dict | None) -> dict | None:
+def _build_margin_metrics(code: str, latest_row: dict, margin_store: dict | None, config: dict) -> dict | None:
     try:
         from src.data.margin import build_margin_metrics
 
-        return build_margin_metrics(code, latest_row, store=margin_store)
+        metrics = build_margin_metrics(code, latest_row, store=margin_store)
     except Exception as e:
         print(f"WARNING: margin metrics build failed for {code} (ignored): {e}")
         return None
+    if metrics is None:
+        return None
+    metrics["badge"] = margin_badge(metrics, config)
+    return metrics
+
+
+# 信用残バッジ(表示専用): dryupバッジ(_build_dryup_badge)と同じ「サーバ側で
+# config閾値を見て判定文字列を確定し、フロントはそのまま表示するだけ」の流儀。
+# positions.py の _margin_for でも使うのでモジュール関数として公開する。
+def margin_badge(metrics: dict, config: dict) -> str | None:
+    mcfg = config.get("margin", {})
+    ratio = metrics.get("ratio")
+    dtc = metrics.get("days_to_cover")
+    high_ratio_warn = mcfg.get("high_ratio_warn", 5.0)
+    dtc_warn = mcfg.get("dtc_warn", 3.0)
+    low_ratio_info = mcfg.get("low_ratio_info", 1.0)
+    if ratio is not None and ratio >= high_ratio_warn and dtc is not None and dtc >= dtc_warn:
+        return "heavy_buy"  # 買残重い(warn)
+    if ratio is not None and ratio <= low_ratio_info:
+        return "short"  # 売り長・踏み上げ余地(accent)
+    return None
 
 
 def _build_dryup_badge(vcp_result: dict, config: dict) -> dict:

@@ -193,7 +193,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     try:
         positions, positions_csv_warnings = positions_mod.load_positions_csv()
         positions_report = positions_mod.build_positions_report(
-            positions, indicator_by_code, name_by_code, margin_store=margin_store
+            positions, indicator_by_code, name_by_code, margin_store=margin_store, config=config
         )
         positions_report["warnings"] = positions_csv_warnings + positions_report["warnings"]
         positions_mod.write_positions_json(positions_report)

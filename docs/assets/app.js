@@ -50,6 +50,21 @@ function dryupBadgeHtml(s) {
   return v; // 閾値超(枯れていない)は数値のみ
 }
 
+// 需給(信用取引週末残高)バッジ。表示専用(総合スコアには一切使わない)。
+// バッジ種別(margin.badge)はサーバ側(build_site.margin_badge)がconfig閾値で確定済み。
+// カード(一覧)では「買残重い」のみ表示し、「売り長」は個別銘柄詳細ページの
+// 需給カードでのみ表示する(3段目のバッジ行が混み合うのを避けるため)。
+const MARGIN_BADGE_LABELS = {
+  heavy_buy: { label: "買残重い", className: "signal-badge-warn" },
+  short: { label: "売り長", className: "signal-badge-accent" },
+};
+function marginBadgeHtml(m, { detail = false } = {}) {
+  if (!m || !m.badge) return "";
+  if (!detail && m.badge !== "heavy_buy") return "";
+  const meta = MARGIN_BADGE_LABELS[m.badge];
+  return meta ? `<span class="sell-signal-badge ${meta.className}">${meta.label}</span>` : "";
+}
+
 // リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
 // カード側(renderCardList)に直書きし、ここには並び順の定義だけ残す。
 const CARD_SORTS = {
@@ -721,6 +736,7 @@ function renderCardList(stocks, tier, options = {}) {
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
         <span class="sc-sector">${sectorStrengthHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
+        <span class="sc-margin">${marginBadgeHtml(s.margin)}</span>
       </div>${stageLine}`;
     list.appendChild(card);
   }
@@ -845,12 +861,14 @@ async function initStockPage(codeOverride) {
   const mustEl = document.getElementById("must-checklist");
   const scoreEl = document.getElementById("score-breakdown");
   const fundEl = document.getElementById("fund-detail-body");
+  const marginEl = document.getElementById("margin-detail-body");
   const copyBtn = document.getElementById("copy-stock-data-btn");
   const sizingResultEl = document.getElementById("sizing-result");
   if (metaEl) metaEl.innerHTML = "";
   if (mustEl) mustEl.innerHTML = "";
   if (scoreEl) scoreEl.innerHTML = "";
   if (fundEl) fundEl.innerHTML = "";
+  if (marginEl) marginEl.innerHTML = "";
   if (sizingResultEl) sizingResultEl.innerHTML = "";
   if (copyBtn) copyBtn.hidden = true;
 
@@ -880,6 +898,7 @@ async function initStockPage(codeOverride) {
   setupStockPanels();
   renderStockSummary(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
+  if (stock) renderStockMargin(stock);
   setupSizingCalculator(stock);
   setupStockCopyButton(stock, chart, report);
 
@@ -1275,6 +1294,48 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
   if (window.MinerviniFundamentalsUI) {
     window.MinerviniFundamentalsUI.onSaved = () => renderStockFundamentals(code, name, reportGeneratedAt);
   }
+}
+
+// 需給(信用取引週末残高)カード。表示専用(総合スコアには一切使わない)。
+// data/margin_weekly.json はJPXが週1回更新のため最大5営業日遅れる旨を注記する。
+function marginNum(v, digits = 1) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return n.toLocaleString("ja-JP", { maximumFractionDigits: digits });
+}
+
+function formatMarginDate(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function renderStockMargin(stock) {
+  const container = document.getElementById("margin-detail-body");
+  if (!container) return;
+  const m = stock && stock.margin;
+  if (!m) {
+    container.innerHTML = '<p class="tier-note">信用残データなし</p>';
+    return;
+  }
+
+  const ratioText = m.ratio != null ? `${marginNum(m.ratio, 2)}倍` : "売残なし";
+  const wowHtml =
+    m.buy_wow_pct != null
+      ? `<span class="sc-chg ${m.buy_wow_pct > 0 ? "chg-pos" : m.buy_wow_pct < 0 ? "chg-neg" : "chg-flat"}">（${m.buy_wow_pct > 0 ? "+" : ""}${marginNum(m.buy_wow_pct, 1)}%）</span>`
+      : "";
+  const dtcText = m.days_to_cover != null ? `平均出来高の${marginNum(m.days_to_cover, 1)}日分` : "-";
+  const dateText = m.date ? formatMarginDate(m.date) : "-";
+
+  container.innerHTML = `
+    <div class="margin-detail">
+      <div class="margin-ratio-big">${ratioText} ${marginBadgeHtml(m, { detail: true })}</div>
+      <div class="margin-row"><span>買残</span><span>${marginNum(m.buy, 0)}株${wowHtml}</span></div>
+      <div class="margin-row"><span>売残</span><span>${marginNum(m.sell, 0)}株</span></div>
+      <div class="margin-row"><span>買残回転日数</span><span>${dtcText}</span></div>
+      <p class="tier-note">${dateText}申込時点(週次データのため最大5営業日遅れることがあります)</p>
+    </div>
+  `;
 }
 
 // ---------------------------------------------------------------------------

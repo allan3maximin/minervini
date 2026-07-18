@@ -344,6 +344,24 @@ def build_stock_summary(
         direction = record.get("sector_direction") or ""
         points.append(f"セクター「{record['sector33']}」は強度{strength}{direction}。")
 
+    # --- 需給(信用取引週末残高。表示専用・総合スコアには一切使わない) ---
+    margin = record.get("margin")
+    if margin:
+        if margin.get("ratio") is not None:
+            line = f"需給: 信用倍率{_num(margin['ratio'], 2)}倍(買残{_num(margin.get('buy'), 0)}株/売残{_num(margin.get('sell'), 0)}株)"
+        else:
+            line = f"需給: 売残なし(買残{_num(margin.get('buy'), 0)}株)"
+        dtc = margin.get("days_to_cover")
+        if dtc is not None:
+            line += f"、買残回転日数{_num(dtc, 1)}日分"
+        badge = margin.get("badge")
+        if badge == "heavy_buy":
+            cautions.append(line + "。買残が重く上値の重さに注意。")
+        elif badge == "short":
+            points.append(line + "。売り長で踏み上げ余地あり。")
+        else:
+            points.append(line + "。")
+
     mcap = record.get("market_cap_oku")
     if mcap is not None:
         cls = "小型" if mcap < 500 else "中型" if mcap < 3000 else "大型"

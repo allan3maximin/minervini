@@ -85,12 +85,20 @@ def _compute_sell_signals(close: float, ma50, ma200, current_stop: float, entry_
     return signals
 
 
-def _margin_for(code: str, latest_row: dict | None, margin_store: dict | None) -> dict | None:
-    """表示専用の信用残メトリクス。総合スコアには一切使わない。失敗してもNoneに落とす。"""
+def _margin_for(code: str, latest_row: dict | None, margin_store: dict | None, config: dict | None) -> dict | None:
+    """表示専用の信用残メトリクス。総合スコアには一切使わない。失敗してもNoneに落とす。
+
+    badge判定は build_site.margin_badge と共通(config marginセクションの閾値)。
+    """
     try:
         from src.data.margin import build_margin_metrics
+        from src.report.build_site import margin_badge
 
-        return build_margin_metrics(code, latest_row, store=margin_store)
+        metrics = build_margin_metrics(code, latest_row, store=margin_store)
+        if metrics is None:
+            return None
+        metrics["badge"] = margin_badge(metrics, config or {})
+        return metrics
     except Exception:
         return None
 
@@ -101,6 +109,7 @@ def build_positions_report(
     name_by_code: dict,
     today: date | None = None,
     margin_store: dict | None = None,
+    config: dict | None = None,
 ) -> dict:
     """各ポジションの現在値・R倍数・売りシグナルを計算する。
 
@@ -145,7 +154,7 @@ def build_positions_report(
                     "r_multiple": None,
                     "dist_to_stop_pct": None,
                     "sell_signals": [],
-                    "margin": _margin_for(code, None, margin_store),
+                    "margin": _margin_for(code, None, margin_store, config),
                 }
             )
             out.append(record)
@@ -173,7 +182,7 @@ def build_positions_report(
                 "r_multiple": r_multiple,
                 "dist_to_stop_pct": round((close - current_stop) / close * 100, 2),
                 "sell_signals": _compute_sell_signals(close, ma50, ma200, current_stop, entry_price, r_multiple),
-                "margin": _margin_for(code, latest.to_dict(), margin_store),
+                "margin": _margin_for(code, latest.to_dict(), margin_store, config),
             }
         )
         out.append(record)

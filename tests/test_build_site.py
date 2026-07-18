@@ -261,3 +261,64 @@ def test_setup_stage_volatile_and_no_base():
 def test_setup_stage_actionable_returns_none():
     assert build_setup_stage({"status": "WATCH_A"}, STAGE_CONFIG) is None
     assert build_setup_stage({"status": "BREAKOUT"}, STAGE_CONFIG) is None
+
+
+# ---------------------------------------------------------------------------
+# 信用残(需給)バッジ (タスク2: 表示専用。総合スコアには一切使わない)
+# ---------------------------------------------------------------------------
+
+MARGIN_CONFIG = {
+    "margin": {"high_ratio_warn": 5.0, "dtc_warn": 3.0, "low_ratio_info": 1.0},
+    "scoring": {"phase1_weight": 0.5, "vcp_weight": 0.5},
+    "vcp": {"last_depth_max": 0.12},
+}
+
+
+def _margin_store(buy, sell, date="2026-07-17", code="7134"):
+    return {"history": [{"date": date, "by_code": {code: {"buy": buy, "sell": sell}}}]}
+
+
+def _assemble_with_margin(margin_store, latest_row=None):
+    entry_result = {"status": "WATCH_A", "pivot": 1280}
+    vcp_result = {"vcp_score": 70.0, "footprint": None, "must_flags": {"V1": True}, "contractions": []}
+    row = dict(CONFIG_LATEST)
+    if latest_row:
+        row.update(latest_row)
+    return assemble_stock_record(
+        "7134", "T", row, {}, vcp_result, entry_result, _fund_info(), MARGIN_CONFIG, margin_store=margin_store
+    )
+
+
+def test_margin_badge_heavy_buy_when_ratio_and_dtc_both_over_threshold():
+    # ratio = 600/100 = 6.0 (>=5.0) / vol_ma50=100 -> dtc = 600/100 = 6.0 (>=3.0)
+    record = _assemble_with_margin(_margin_store(buy=600, sell=100), latest_row={"vol_ma50": 100})
+    assert record["margin"]["ratio"] == 6.0
+    assert record["margin"]["days_to_cover"] == 6.0
+    assert record["margin"]["badge"] == "heavy_buy"
+
+
+def test_margin_badge_short_when_ratio_at_or_below_low_info():
+    # ratio = 50/100 = 0.5 (<= 1.0)
+    record = _assemble_with_margin(_margin_store(buy=50, sell=100))
+    assert record["margin"]["ratio"] == 0.5
+    assert record["margin"]["badge"] == "short"
+
+
+def test_margin_badge_none_in_neutral_range():
+    # ratio = 200/100 = 2.0: not >= high_ratio_warn(5.0), not <= low_ratio_info(1.0)
+    record = _assemble_with_margin(_margin_store(buy=200, sell=100))
+    assert record["margin"]["ratio"] == 2.0
+    assert record["margin"]["badge"] is None
+
+
+def test_margin_badge_none_when_ratio_high_but_dtc_below_warn():
+    # ratio=6.0(>=5.0) だが vol_ma50=1000 -> dtc=600/1000=0.6 (<3.0) なので badge無し
+    record = _assemble_with_margin(_margin_store(buy=600, sell=100), latest_row={"vol_ma50": 1000})
+    assert record["margin"]["ratio"] == 6.0
+    assert record["margin"]["days_to_cover"] == 0.6
+    assert record["margin"]["badge"] is None
+
+
+def test_margin_none_when_no_store_data():
+    record = _assemble_with_margin(margin_store=None)
+    assert record["margin"] is None
