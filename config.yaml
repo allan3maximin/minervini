@@ -174,10 +174,25 @@ scoring:
   phase1_weight: 0.5
   vcp_weight: 0.5
 
-# 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)
+# 地合いシグナル(市場ブレッドス指標 + 攻め/中立/守りの3段階表示)。
+# green/yellow/red判定は下2キーのみで決まる(不変ロジック)。detail_weights/
+# detail_scale は2026-07-18タスク3で追加した表示専用の market_score(0-100)
+# 合成に使う補助設定で、green/yellow/red判定には一切影響しない。
 market_signal:
   green_pct_above_ma200: 0.50
   red_pct_above_ma200: 0.30
+  # market_score(0-100)のサブスコア配点。
+  detail_weights: {breadth: 40, index_trend: 30, momentum: 20, risk_appetite: 10}
+  # 各サブスコアの線形クリップ境界(lo→0点 / hi→満点)。
+  detail_scale:
+    breadth_lo: 0.2
+    breadth_hi: 0.6
+    up_down_ratio_lo: 0.7
+    up_down_ratio_hi: 1.3
+    breadth_trend_lo: -0.10
+    breadth_trend_hi: 0.10
+    growth_rel_lo: -5.0
+    growth_rel_hi: 5.0
 
 # 信用残(信用取引週末残高)表示専用レイヤー。dryupと同じ「スコアは順位付け、
 # フラグは事実」原則で、総合スコアには一切組み込まない(HANDOFF_TASKS_20260718.txt)。

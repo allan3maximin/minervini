@@ -13,6 +13,7 @@ from collections import Counter
 from datetime import datetime
 
 import jpholiday
+import pandas as pd
 
 from src.config import REPO_ROOT, load_config
 from src.data import indices as indices_mod
@@ -109,14 +110,28 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     rs_raw_by_code = {code: df.iloc[-1]["rs_raw"] for code, df in indicator_by_code.items()}
     rs_by_code = rs_percentile_rank(rs_raw_by_code)
 
+    # 地合い詳細化(タスク3): 全ユニバース銘柄の騰落(前日比終値)をここでまとめて
+    # カウントする。df がまだ手元にあるこのループが最も安く済む場所(RS計算前で
+    # rs_by_code に無い銘柄も含め、全上場銘柄ベースでカウントする)。
+    advancers = decliners = 0
     latest_by_code = {}
     for code, df in indicator_by_code.items():
+        if len(df) >= 2:
+            prev_close = df["close"].iloc[-2]
+            curr_close = df["close"].iloc[-1]
+            if not pd.isna(prev_close) and not pd.isna(curr_close):
+                if curr_close > prev_close:
+                    advancers += 1
+                elif curr_close < prev_close:
+                    decliners += 1
+
         rs = rs_by_code.get(code)
         if rs is None:
             continue  # insufficient history for RS -- excluded from screening
         latest = df.iloc[-1].to_dict()
         latest["rs"] = rs
         latest_by_code[code] = latest
+    breadth_today = {"advancers": advancers, "decliners": decliners}
 
     tt_results = trend_template.screen_universe(latest_by_code, config)
     tt_by_code = {r["code"]: r for r in tt_results}
@@ -334,9 +349,14 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     except Exception as e:
         print(f"Heatmap build failed (ignored): {e}")
 
-    # 地合いシグナル(市場ブレッドス + TOPIXトレンド合成)。失敗してもスクリーナー本体は止めない。
+    # 地合いシグナル(市場ブレッドス + 多観点指数トレンド合成)。失敗してもスクリーナー本体は
+    # 止めない。breadth_history は当日エントリ追記前の既存履歴(update_breadthより先に
+    # 読む。I/Oはpipeline側で行い、market_signal.py側はテスト容易性のため純関数に保つ)。
     try:
-        signal_result = market_signal_mod.compute_market_signal(latest_by_code, config)
+        breadth_history = build_site.load_breadth().get("history", [])
+        signal_result = market_signal_mod.compute_market_signal(
+            latest_by_code, config, breadth_today=breadth_today, breadth_history=breadth_history,
+        )
     except Exception as e:
         print(f"Market signal computation failed (ignored): {e}")
         signal_result = None

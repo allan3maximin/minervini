@@ -144,9 +144,12 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.positions_mod, "load_positions_csv", lambda path=None: ([], []))
     monkeypatch.setattr(pipeline.positions_mod, "write_positions_json", lambda report, path=None: None)
     # 地合いシグナルはTOPIXキャッシュの実ファイル読み込みに触れない固定値を返す。
+    # 2026-07-18タスク3でシグネチャに breadth_today/breadth_history が追加されたが、
+    # このモックは既存のオーケストレーション検証用なので **kwargs で吸収し詳細指標
+    # 自体のロジックは tests/test_market_signal.py 側で単体検証する。
     monkeypatch.setattr(
         pipeline.market_signal_mod, "compute_market_signal",
-        lambda latest_by_code, config: {
+        lambda latest_by_code, config, **kwargs: {
             "signal": "yellow", "reasons": ["テスト用固定値"],
             "pct_above_ma200": 0.4, "pct_above_ma50": 0.5,
             "new_high_count": 1, "new_low_count": 1,

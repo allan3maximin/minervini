@@ -2,6 +2,49 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-18 (61): タスク3実装完了 — market_signal.py 地合い詳細化バックエンド
+
+### 要望
+HANDOFF_TASKS_20260718.txt タスク3の実装(タスク1/2系とは独立、先行実施)。
+
+### 実装内容
+- **src/report/market_signal.py**: `compute_market_signal` に以下を追加(既存の
+  green/yellow/red 判定ロジック本体は1文字も変更せず、出力dictへの追加のみ)。
+  - `breadth_today`(advancers/decliners、当日値。pipeline.pyがindicator_by_code
+    のdf末尾2行終値比較でカウントして渡す)、`breadth_history`(build_site.
+    load_breadth()の既存history。I/Oはpipeline側で行い、この関数は純関数のまま
+    テスト容易性を維持)、`nikkei_df`/`growth_df`(省略時はindices_mod.load_cache
+    経由、既存のtopix分と同じ流儀)の3引数を新規追加。
+  - up_down_ratio_25(history 24件+当日=25件揃うまでNone)、breadth_trend_20d
+    (pct_above_ma200の20エントリ前比較)、net_new_highs/nh_nl_cumulative(旧
+    エントリにフィールド無しなら当日netから再スタート=null安全)、
+    index_trends{topix,nikkei225,growth250}の3指数マルチトレンド、
+    growth_rel_20d(グロース250とTOPIXの20日リターン差)を追加。
+  - market_score(0-100、config `market_signal.detail_weights`で配点
+    breadth/index_trend/momentum/risk_appetite)。各線形クリップ境界は
+    `market_signal.detail_scale`で設定化。データ欠損時は各サブスコアを
+    中立50%にフォールバック(全計算がnull安全)。score_breakdownとして
+    内訳も返す。score_trend(5エントリ前比較、±3以内はflat)も追加。
+- **src/pipeline.py**: latest_by_code構築ループ(RS計算前)でadvancers/decliners
+  を全ユニバース銘柄ベースでカウント。compute_market_signal呼び出し直前に
+  `build_site.load_breadth().get("history", [])`で既存履歴を読み、
+  breadth_today/breadth_historyとして渡すよう変更。pandasインポート追加。
+- **config.yaml**: `market_signal:`セクションに`detail_weights`/`detail_scale`
+  追加(既存2キーはそのまま、green/yellow/red判定への影響なし)。
+- **tests/test_market_signal.py**: 新規10ケース(up_down_ratio_25の窓境界、
+  breadth_trend_20dの履歴不足、nh_nl_cumulativeの累積/再スタート、マルチ指数
+  トレンド+growth_rel_20d、market_scoreの中立フォールバック/クリップ、
+  score_trendのラベル判定/履歴不足)。autouse fixtureでindices_mod.load_cache
+  を既定Noneに固定し実キャッシュ(data/indices/*.parquet)への読み取りを排除。
+- **tests/test_pipeline.py**: `wired`フィクスチャの`compute_market_signal`モックを
+  `**kwargs`吸収に変更(新シグネチャ対応。詳細ロジック自体はtest_market_signal.py
+  側で単体検証、wired側はオーケストレーション検証のみ継続)。
+- **確認**: `pytest tests/ -q` → 333 passed。
+
+### 方針(再掲、変更なし)
+market_score/score_trendはあくまで表示用の補助スコア。既存のgreen/yellow/red
+判定(トレードの実際の攻め/守り判断に使う本体シグナル)には一切影響しない。
+
 ## 2026-07-18 (60): タスク1実装完了 — src/data/margin.py(信用残週次取得)
 
 ### 要望
