@@ -68,8 +68,6 @@ a { color: var(--link); }
   flex-wrap: wrap;
   margin-bottom: 4px;
 }
-.page-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
 .breadth-meter {
   display: flex;
   gap: 8px 20px;
@@ -667,14 +665,37 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--danger);
 }
 
-/* 地合い詳細パネル(2026-07-18 タスク4)。表示専用、常時折りたたみ初期状態。 */
+/* 地合い詳細パネル(2026-07-18 タスク4)。表示専用、常時折りたたみ初期状態。
+   summaryはデフォルトの三角マーカーを消し、代わりに右端の矢印アイコンで
+   開閉可能であることを明示する(2026-07-19 タスク3: 発見しやすさ改善)。 */
 .market-detail { margin-top: 10px; }
 .market-detail > summary {
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
   font-size: 13px;
+  font-weight: 600;
   color: var(--text-dim);
   user-select: none;
+  list-style: none;
+  transition: border-color 0.15s, color 0.15s;
 }
+.market-detail > summary::-webkit-details-marker { display: none; }
+.market-detail > summary::after {
+  content: "\f282"; /* bootstrap-icons: chevron-down */
+  font-family: "bootstrap-icons";
+  font-size: 11px;
+  transition: transform 0.15s;
+}
+.market-detail > summary:hover { color: var(--text); border-color: var(--border-strong); }
+.market-detail[open] > summary { color: var(--text); border-color: var(--border-strong); }
+.market-detail[open] > summary::after { transform: rotate(180deg); }
 .market-detail-body {
   margin-top: 10px;
   display: flex;
@@ -1150,7 +1171,7 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .view-section[hidden] { display: none; }
 /* 横スワイプパネルを持つビューは自前でレイアウトするため外側はスクロールさせない */
-.hm-view, .stock-view, .list-view { overflow: hidden; }
+.hm-view, .stock-view, .list-view, .market-view { overflow: hidden; }
 
 /* ---------------------------------------------- 個別画面 横スワイプパネル */
 /* 画面全体は縦スクロールせず、5パネル(サマリー/グラフ/ファンダ/MUST/
@@ -1161,7 +1182,7 @@ a.nav-btn:hover { border-color: var(--link); }
 .stock-header h1 { margin: 0 0 6px; }
 
 /* パネル切替タブは画面下部(パネルの下)。メインDockと同じ「浮いたピル型バー」で統一。 */
-.stock-tabs, .list-tabs {
+.stock-tabs, .list-tabs, .market-tabs {
   display: flex;
   gap: 2px;
   flex: 0 0 auto;
@@ -1178,8 +1199,8 @@ a.nav-btn:hover { border-color: var(--link); }
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
-.stock-tabs::-webkit-scrollbar, .list-tabs::-webkit-scrollbar { display: none; }
-.stock-tab, .list-tab {
+.stock-tabs::-webkit-scrollbar, .list-tabs::-webkit-scrollbar, .market-tabs::-webkit-scrollbar { display: none; }
+.stock-tab, .list-tab, .market-tab {
   flex: 1 0 auto;
   min-height: 30px;
   padding: 5px 14px;
@@ -1192,7 +1213,7 @@ a.nav-btn:hover { border-color: var(--link); }
   cursor: pointer;
   transition: background 0.18s, color 0.18s;
 }
-.stock-tab.active, .list-tab.active {
+.stock-tab.active, .list-tab.active, .market-tab.active {
   background: var(--accent);
   color: #05130b;
   font-weight: 600;
@@ -1321,9 +1342,34 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
 }
 
+/* -------------------------------------------- 市況画面(市況データ/市況分析) */
+/* リスト画面と同じ「タブ切替、パネルは各自縦スクロール」パターン。
+   警告バナー(p1/保有/鮮度)はタブの外(この要素より前)に置き、どちらのタブでも見える。 */
+.market-view { display: flex; flex-direction: column; }
+.market-view[hidden] { display: none; }
+.market-tab { padding: 6px 22px; font-size: 13px; }
+.market-panels {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 10px;
+}
+.market-panel {
+  display: none;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+.market-panel.active { display: block; }
+
 /* ------------------------------------------ リスト画面 銘柄カード(薄型2段) */
 /* 1銘柄=カード1枚。スマホ幅に収まるよう項目を7つに絞り、上段=銘柄名/コード/
-   スコア/RS、下段=終値(前日比%)/セクター(強度)/枯れ度 の2行で構成する。 */
+   スコア/RS、下段=終値(前日比%)/セクター(強度)/枯れ度 の2行で構成する
+   (2026-07-19見直し: SC/RSをチップ化して視覚的な優先度を上げ、前日比を太字化、
+   下段はflex-wrapでバッジが潰れず折り返せるようにし、fund-staleを左ボーダー
+   でも示すようにした。表示項目・クリック/キーボード操作は変更なし)。 */
 .card-list {
   display: flex;
   flex-direction: column;
@@ -1332,6 +1378,7 @@ a.nav-btn:hover { border-color: var(--link); }
 .stock-card {
   background: var(--panel);
   border: 1px solid var(--border);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-sm);
   padding: 5px 10px;
   cursor: pointer;
@@ -1344,7 +1391,8 @@ a.nav-btn:hover { border-color: var(--link); }
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.stock-card.fund-stale { background: rgba(251, 191, 36, 0.08); }
+/* ファンダ古いカード: 背景の薄い黄色に加え、左ボーダーでも一目で分かるようにする */
+.stock-card.fund-stale { background: rgba(251, 191, 36, 0.08); border-left-color: var(--warn); }
 .stock-card.row-static { cursor: default; }
 .stock-card.row-static:hover { background: var(--panel); }
 
@@ -1356,7 +1404,7 @@ a.nav-btn:hover { border-color: var(--link); }
   font-size: 13px;
   line-height: 1.5;
 }
-.sc-row-sub { font-size: 12px; color: var(--text-dim); }
+.sc-row-sub { font-size: 12px; color: var(--text-dim); flex-wrap: wrap; row-gap: 4px; }
 
 /* 銘柄名だけ伸縮させ、あふれたら省略。他は成り行き幅 */
 .sc-name {
@@ -1367,18 +1415,35 @@ a.nav-btn:hover { border-color: var(--link); }
   white-space: nowrap;
   font-weight: 600;
 }
-.sc-code { flex: 0 0 auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.sc-metrics { flex: 0 0 auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.sc-metrics b { color: var(--text); font-weight: 600; }
+.sc-code { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+.sc-metrics { flex: 0 0 auto; display: flex; align-items: baseline; gap: 5px; }
+
+/* SC/RSチップ: 総合スコアは順位付け用の数値であって合否判定ではないため
+   (help_key: total_score参照)、緑/赤などの色は付けず、太さ・濃さの差だけで
+   「SCがまず目に入り、RSは補助情報」という視覚階層を作る。 */
+.sc-score-chip,
+.sc-rs-chip {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sc-score-chip { font-weight: 700; color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.sc-rs-chip { font-weight: 600; color: var(--text-dim); background: transparent; }
 
 .sc-close { flex: 0 0 auto; color: var(--text); font-variant-numeric: tabular-nums; }
-.sc-chg { font-variant-numeric: tabular-nums; }
+/* 前日比は毎日のスキャンで最初に見る強弱シグナルなので太字で強調する */
+.sc-chg { font-variant-numeric: tabular-nums; font-weight: 700; }
 .chg-pos { color: var(--accent); }
 .chg-neg { color: var(--danger); }
 .chg-flat { color: var(--text-dim); }
 .sc-sector {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 100px;
+  min-width: 60px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1411,6 +1476,33 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--warn);
   font-size: 12px;
 }
+
+/* --------------------------------------------------------- 設定画面 */
+
+.settings-section { margin-bottom: 24px; }
+.settings-section h3 {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.settings-link-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+.settings-link-card:hover, .settings-link-card:focus-visible { border-color: var(--border-strong); }
+.settings-link-card > .bi-journal-text { font-size: 18px; color: var(--text-dim); }
+.settings-link-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.settings-link-text .tier-note { margin: 0; }
+.settings-link-chevron { color: var(--text-dim); font-size: 14px; }
 
 /* --------------------------------------------------------- バッチ実行 */
 
@@ -1456,7 +1548,6 @@ a.nav-btn:hover { border-color: var(--link); }
   .page-header { margin-bottom: 6px; }
   .tier-section { padding: 12px 10px; }
   .breadth-meter { gap: 6px 14px; padding: 8px 10px; }
-  .page-header-actions button { flex: 1 1 auto; }
   /* 16px inputs prevent iOS Safari's focus auto-zoom */
   .modal-input, .fund-table input { font-size: 16px; }
   /* モーダルは縦中央寄せ。下に大きめの余白(=閉じる用のタップ領域)を作り、
@@ -1581,10 +1672,15 @@ a.nav-btn:hover { border-color: var(--link); }
 .help-btn {
   position: relative;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   width: 15px;
   height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  aspect-ratio: 1 / 1;
   margin-left: 4px;
   padding: 0;
   border: 1px solid var(--border-strong);

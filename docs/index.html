@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=9e8efee3">
+<link rel="stylesheet" href="assets/style.css?v=a11dc150">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -29,32 +29,38 @@
 <header class="page-header">
   <div class="page-header-top">
     <h1>MinerviniScreener</h1>
-    <div class="page-header-actions">
-      <!-- パスキー解錠(書き込み用PAT)。ロック画面を素通しした(平文データ等)後に
-           PATを解錠する唯一の手段。app.js initVaultUi がラベル/クリックを制御する。 -->
-      <button type="button" id="vault-unlock-btn" class="secondary passkey-gated">🔓 解錠</button>
-    </div>
   </div>
   <div id="generated-at" class="meta-line"></div>
 </header>
 
 <main>
 
-<section id="view-dashboard" class="view-section">
-  <div id="breadth-meter" class="breadth-meter"></div>
+<section id="view-dashboard" class="view-section market-view">
   <div id="p1-warning" class="p1-warning" hidden></div>
-
-  <div id="market-signal-card" class="market-signal-card" hidden></div>
-  <div id="vcp-funnel-card" class="vcp-funnel-card" hidden></div>
   <div id="positions-warning" class="warning-banner" hidden></div>
   <div id="staleness-warning" class="warning-banner" hidden></div>
 
-  <section class="market-overview" id="market-overview" hidden>
-    <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
-    <p class="tier-note">カードをタップすると各指数の詳細(推移・期間別騰落)を表示します。</p>
-    <div id="market-cards" class="market-cards"></div>
-    <div id="market-live-meta" class="market-live-meta"></div>
-  </section>
+  <div class="market-panels" id="market-panels">
+    <div class="market-panel active" data-panel="data">
+      <section class="market-overview" id="market-overview" hidden>
+        <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
+        <p class="tier-note">カードをタップすると各指数の詳細(推移・期間別騰落)を表示します。</p>
+        <div id="market-cards" class="market-cards"></div>
+        <div id="market-live-meta" class="market-live-meta"></div>
+      </section>
+    </div>
+
+    <div class="market-panel" data-panel="analysis">
+      <div id="breadth-meter" class="breadth-meter"></div>
+      <div id="market-signal-card" class="market-signal-card" hidden></div>
+      <div id="vcp-funnel-card" class="vcp-funnel-card" hidden></div>
+    </div>
+  </div>
+
+  <div class="market-tabs" id="market-tabs" role="tablist">
+    <button type="button" class="market-tab active" data-panel="data" role="tab">市況データ</button>
+    <button type="button" class="market-tab" data-panel="analysis" role="tab">市況分析</button>
+  </div>
 </section>
 
 <section id="view-heatmap" class="view-section hm-view" hidden>
@@ -200,10 +206,34 @@
 </section>
 
 <section id="view-batch" class="view-section" hidden>
-  <h2>バッチ実行</h2>
-  <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
-  <div id="batch-cards" class="batch-cards passkey-gated"></div>
-  <div id="batch-history"></div>
+  <h2>設定</h2>
+
+  <section class="settings-section">
+    <h3>アクセス</h3>
+    <p class="tier-note">書き込み操作(バッチ手動実行・ファンダ手動入力)を行うには解錠が必要です。</p>
+    <!-- パスキー解錠(書き込み用PAT)。ロック画面を素通しした(平文データ等)後に
+         PATを解錠する唯一の手段。app.js initVaultUi がラベル/クリックを制御する。 -->
+    <button type="button" id="vault-unlock-btn" class="secondary passkey-gated">🔓 解錠</button>
+  </section>
+
+  <section class="settings-section">
+    <h3>バッチ実行</h3>
+    <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
+    <div id="batch-cards" class="batch-cards passkey-gated"></div>
+    <div id="batch-history"></div>
+  </section>
+
+  <section class="settings-section">
+    <h3>投資法</h3>
+    <a href="#invest" class="settings-link-card">
+      <i class="bi bi-journal-text"></i>
+      <span class="settings-link-text">
+        <strong>投資法(SEPA)の解説</strong>
+        <span class="tier-note">トレンドテンプレート・VCP・エントリー/損切りの基準を見る</span>
+      </span>
+      <i class="bi bi-chevron-right settings-link-chevron"></i>
+    </a>
+  </section>
 </section>
 
 <section id="view-stock" class="view-section stock-view" hidden>
@@ -316,9 +346,8 @@
   <button type="button" class="dock-btn" data-view="dashboard" title="市況" aria-label="市況"><i class="bi bi-graph-up-arrow dock-icon"></i><span class="dock-label">市況</span></button>
   <button type="button" class="dock-btn" data-view="heatmap" title="セクターヒートマップ" aria-label="セクターヒートマップ"><i class="bi bi-grid-3x3-gap-fill dock-icon"></i><span class="dock-label">セクター</span></button>
   <button type="button" class="dock-btn" data-view="stocklist" title="銘柄リスト" aria-label="銘柄リスト"><i class="bi bi-list-ul dock-icon"></i><span class="dock-label">リスト</span></button>
-  <button type="button" class="dock-btn" data-view="invest" title="投資法" aria-label="投資法"><i class="bi bi-journal-text dock-icon"></i><span class="dock-label">投資法</span></button>
   <button type="button" class="dock-btn" data-view="positions" title="保有" aria-label="保有"><i class="bi bi-briefcase-fill dock-icon"></i><span class="dock-label">保有</span></button>
-  <button type="button" class="dock-btn" data-view="batch" title="バッチ実行" aria-label="バッチ実行"><i class="bi bi-gear-fill dock-icon"></i><span class="dock-label">バッチ</span></button>
+  <button type="button" class="dock-btn" data-view="batch" title="設定" aria-label="設定"><i class="bi bi-gear-fill dock-icon"></i><span class="dock-label">設定</span></button>
 </nav>
 
 <script src="assets/config.js?v=23623876"></script>
@@ -328,6 +357,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=e51d3dc0"></script>
+<script src="assets/app.js?v=f4ca4d12"></script>
 </body>
 </html>

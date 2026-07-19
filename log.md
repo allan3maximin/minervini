@@ -2,6 +2,180 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-19 (74): 株リスト(本命/候補/監視)カードのデザイン見直し
+
+### 要望(ユーザー原文)
+> ７。株リストのカードのデザインを見直して。
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク7。具体デザインは実装側判断に一任)
+
+### 変更内容
+- `docs/assets/app.js` `renderCardList()`
+  - SC/RSを`SC <b>`のプレーンテキストから独立したチップ(`.sc-score-chip`/
+    `.sc-rs-chip`)に変更。総合スコアは合否判定ではなく順位付け用の数値
+    (help_key: total_score)なので色は付けず、太さ・濃さの差だけでSCを主・
+    RSを従とする視覚階層にした。
+  - 銘柄コードを`.sc-name`に埋め込んだプレーンテキストから`.sc-code`spanに
+    分離(CSS側に既存だが未使用だったクラスを実際に配線)。
+  - 表示項目・DOM構造の大枠(2段+監視タブのみ3段目)・全クリック/キーボード
+    導線・`has_chart===false`時の`.row-static`分岐は変更なし。
+- `docs/assets/style.css`
+  - `.sc-chg`(前日比)を太字化(毎日のスキャンで最初に見る強弱シグナルのため)。
+  - `.sc-row-sub`に`flex-wrap: wrap`を追加し、`.sc-sector`を`flex:1 1 auto`から
+    `flex:1 1 100px; min-width:60px`に変更。セクター名が0幅まで潰れてから
+    バッジが詰まっていた挙動をやめ、必要な時だけ自然に折り返すようにした。
+  - `fund-stale`カードに左ボーダー(`--warn`色)を追加し、背景の薄い黄色だけに
+    頼らず一目で分かるようにした。
+  - 上記いずれもグローバル共有バッジ(`.dryup-badge`/`.sell-signal-badge`/
+    `.sector-strength-*`)自体は変更せず、`.stock-card`スコープ内のレイアウト・
+    余白のみ調整(保有一覧など他画面への影響を避けるため)。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- 目視確認はブラウザ実機不可のためコードレベルレビューのみ。ユーザーの
+  GitHub Pages反映後の実機確認待ち。
+
+## 2026-07-19 (73): 個別株チャートの日付表示統一(凡例/最新日ラベル)
+
+### 要望(ユーザー原文)
+> 個別株表の日付表示が表自体の日付と当日の日付とホバー時の日付でずれがあるのが
+> 気になる。同じデザイン、ポジションにして欲しい。
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク5)
+
+### 変更内容
+- 原因: チャート右下の「最新日付」常時表示ラベル(`addLatestDateLabel`)が
+  `M/D`(ゼロ埋め無し、例`7/9`)、OHLC凡例(`updateLegend`の`.lg-date`)が生の
+  `bar.time`(`YYYY-MM-DD`、例`2026-07-19`)と、区切り文字・桁数の異なる2つの
+  日付表示が同じチャート上に混在していた。ホバー時/非ホバー時は元々同じ
+  `updateLegend()`を通るため実質差は無かったが、「最新日ラベル」と「凡例」の
+  フォーマット不一致がユーザーの言う「ずれ」の実体だった。
+- `docs/assets/app.js`
+  - `updateLegend()`に`formatLegendDate(dateStr)`を追加し、`bar.time`
+    (常にゼロ埋め済み`YYYY-MM-DD`。月足集計後も同形式)の区切りを`/`に
+    変換して`.lg-date`へ表示するように変更(`2026-07-19` → `2026/07/19`)。
+  - 最新日ラベルの生成箇所で`parseInt(m,10)/parseInt(d,10)`によりゼロ埋めが
+    剥がれていた(`07`→`7`)のをやめ、ゼロ埋めのまま`m/d`(`07/19`)を使うよう
+    変更。凡例と区切り文字・ゼロ埋めルールを揃えた。
+  - どちらも文字列を再フォーマットするだけで、桁数が常に固定(凡例10文字/
+    ラベル5文字)になるため、日付が変わっても凡例やラベルの横幅が揺れない
+    (`.ohlc-legend`/`.latest-date-label`は既存の`font-variant-numeric:
+    tabular-nums`によりフォント幅も固定済み)。
+  - コピー用Markdown(`copyStockData`内の表)は別用途(データエクスポート形式)
+    のため対象外。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- 日足・月足いずれも`bar.time`が`YYYY-MM-DD`文字列であることをコードで確認
+  (`aggregateMonthly`も`time: c.time`をそのまま引き継ぐ)。
+- 実機確認はユーザーのGitHub Pages反映後に依頼。
+
+## 2026-07-19 (72): 市況画面を「市況データ/市況分析」2タブ化+UI見直し
+
+### 要望(ユーザー原文)
+> ２。市況画面を市況データ、市況分析の2タブにしたい
+> ３。市況画面の表示内容をUIを見直して欲しい
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク2+3。同一画面のため一括対応)
+
+### 変更内容
+- `docs/index.html` `#view-dashboard`
+  - `#view-stocklist`の`.list-panels`/`.list-tabs`、`#view-stock`の
+    `.stock-panels`/`.stock-tabs`と同じタブ実装パターンを再利用。
+  - 「市況データ」タブ: 市場概況(`#market-overview`、指数カード+ライブ更新
+    バッジ)。「市況分析」タブ: `breadth-meter`・`market-signal-card`(地合い
+    シグナル+地合い詳細)・`vcp-funnel-card`。
+  - `p1-warning`/`positions-warning`/`staleness-warning`はタブの外(上部)に
+    残し、どちらのタブでも見落とさないようにした。
+  - 全要素IDは維持したため、`renderMarketOverview`等の既存レンダー関数は
+    無改修。
+- `docs/assets/app.js`
+  - `initListView()`と同じ設計で`initMarketTabs()`を新設し、`initDashboard()`
+    冒頭(`renderHeader`直後)から呼び出し。`dataset.wired`で重複登録を防止。
+- `docs/assets/style.css`
+  - `.market-view`/`.market-tabs`/`.market-tab`/`.market-panels`/
+    `.market-panel`を追加(`.list-view`系のセレクタに相乗り)。
+  - UI見直し(タスク3)として、地合い詳細`<details>`の`<summary>`に開閉が
+    分かるシェブロンアイコン(bootstrap-icons、`[open]`で180°回転)・枠線・
+    ホバー色を追加。開閉の発見しやすさの改善に絞り、データ/スコア計算には
+    一切触れていない。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- 既存の`market-overview`/`breadth-meter`等の要素ID・レンダー関数は無変更
+  であることをコードレビューで確認。
+
+## 2026-07-19 (71): Dock「バッチ」→「設定」化+投資法への導線追加
+
+### 要望(ユーザー原文)
+> ４。投資法はバッチ画面に導線を作って。バッチではなく「設定」にして。
+> アイコンはそのままでOK
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク4。タスク6と同一画面のため
+関連作業として合わせて対応)
+
+### 変更内容
+- `docs/index.html`
+  - Dockナビから`data-view="invest"`ボタンを削除。バッチボタンの
+    `title`/`aria-label`を「バッチ実行」→「設定」、`.dock-label`を
+    「バッチ」→「設定」に変更(アイコン`bi-gear-fill`は指示通り維持)。
+  - `#view-batch`を「設定」画面として再構成。`<h2>バッチ実行</h2>`を
+    `<h2>設定</h2>`にし、内容を`.settings-section`3ブロック(アクセス/
+    バッチ実行/投資法)に整理。「投資法」ブロックに`#invest`へ遷移する
+    `.settings-link-card`(アイコン+テキスト+シェブロン)を新設。
+  - `showView()`/`initRouter()`はview名とdockボタンの対応が無い画面への
+    遷移(既存の`view-stock`と同じドリルダウン扱い)を既にサポートして
+    いたため、JS側の変更なしで`#invest`直リンクもDockなし遷移も両方動作。
+- `docs/assets/style.css`
+  - `.settings-section`/`.settings-link-card`(+hover/focus-visible)を追加。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- `showView`/`initRouter`のロジックをコードレビューし、JS変更が不要である
+  ことを確認済み。
+
+## 2026-07-19 (70): ヘッダーの解錠ボタンを撤去→設定画面「アクセス」へ移設
+
+### 要望(ユーザー原文)
+> ６。開錠ボタンは消してOK
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク6。解錠機能自体は残し、
+設置場所のみ変更という指示)
+
+### 変更内容
+- `docs/index.html`
+  - `<header class="page-header">`から`#vault-unlock-btn`とその親
+    `.page-header-actions`を削除し、新設の`#view-batch`(設定画面)の
+    「アクセス」セクション内に同じ`id="vault-unlock-btn"`のまま再配置。
+  - `id`を維持したまま位置だけ動かしたため、`initVaultUi()`/
+    `applyLockState()`/起動時ロック画面の解錠成功ハンドラ(いずれも
+    `getElementById("vault-unlock-btn")`で参照)はJS側の変更が一切不要。
+- `docs/assets/style.css`
+  - 使われなくなった`.page-header-actions`ルール(ベース+モバイル
+    ブレークポイント側の2箇所)を削除。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- `initVaultUi`/`applyLockState`/起動時ロック画面のコードをレビューし、
+  `id`参照のみで動作すること(HTML内の位置に依存しないこと)を確認。
+
+## 2026-07-19 (69): ヘルプボタンを正円に修正
+
+### 要望(ユーザー原文)
+> １。ヘルプボタンが縦長なので正円、正方形にしたい
+(申し送り `HANDOFF_TASKS_20260719_2.txt` タスク1。前タスク(68)で追加した
+`.help-btn`が実機で楕円に見えるとの指摘)
+
+### 変更内容
+- `docs/assets/style.css` `.help-btn`
+  - `flex: 0 0 auto; box-sizing: border-box; min-width: 15px; min-height: 15px;
+    aspect-ratio: 1 / 1;`を追加。inline-flexコンテナ(地合い詳細のスコア行等)
+    内でボタンが横方向に圧縮され楕円化していたのが原因で、`flex-shrink`を
+    0にして正円を保証した。サイズ(15px)・`::before`の当たり判定拡張は
+    従来通り維持。
+
+### 検証
+- `node --check docs/assets/app.js` OK(タスク8でまとめて実施)
+- 埋め込み箇所(地合い詳細/市場シグナル/VCPファネル/スコア内訳/信用残/
+  チャートトグル/ポジションサイジング等、log.md(68)参照)はすべて共通の
+  `.help-btn`クラスを使っているため、このCSS修正1箇所で全箇所に反映される
+  ことをコードで確認。
+
 ## 2026-07-19 (68): 用語ヘルプ(？ボタン)機能の実装
 
 ### 要望(ユーザー原文)

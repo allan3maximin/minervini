@@ -412,6 +412,7 @@ async function initDashboard() {
     : {};
 
   renderHeader(report);
+  initMarketTabs();
   renderMarketSignal(breadth);
   renderVcpFunnel(breadth);
   renderPositionsWarningBanner(positionsData);
@@ -1116,8 +1117,9 @@ function renderCardList(stocks, tier, options = {}) {
     } else {
       card.classList.add("row-static");
     }
-    // 上段: 「銘柄名（コード）」+ SC/RS
-    // 下段: 終値（±前日比%）+ セクター(強度) + 枯れ度
+    // 上段: 「銘柄名（コード）」+ SC/RS(チップ化して視覚的に強弱を出す)
+    // 下段: 終値（±前日比%。前日比は太字で強調） + セクター(強度) + 枯れ度 + 信用
+    //   (下段はflex-wrapで、狭い画面でもバッジが潰れず自然に折り返す)
     // 監視タブ(stageBadgeオプション時)のみ3段目: セットアップ進行度・不足理由
     const stageLine =
       options.stageBadge && s.setup_stage
@@ -1125,8 +1127,11 @@ function renderCardList(stocks, tier, options = {}) {
         : "";
     card.innerHTML = `
       <div class="sc-row">
-        <span class="sc-name">${escapeHtml(s.name ?? "-")}（${escapeHtml(s.code)}）</span>
-        <span class="sc-metrics">SC <b>${s.total_score ?? "-"}</b>・RS <b>${s.rs ?? "-"}</b></span>
+        <span class="sc-name">${escapeHtml(s.name ?? "-")}<span class="sc-code">（${escapeHtml(s.code)}）</span></span>
+        <span class="sc-metrics">
+          <span class="sc-score-chip">SC ${s.total_score ?? "-"}</span>
+          <span class="sc-rs-chip">RS ${s.rs ?? "-"}</span>
+        </span>
       </div>
       <div class="sc-row sc-row-sub">
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
@@ -1402,6 +1407,39 @@ function initListView() {
 
   tabs.addEventListener("click", (e) => {
     const btn = e.target.closest(".list-tab");
+    if (!btn) return;
+    setActive(btn.dataset.panel);
+  });
+}
+
+// 市況画面(市況データ/市況分析)のタブ切替。initListView と同じパターン
+// (パネルは横スワイプせず、タブクリックのみで切替。初期表示は既にactiveな
+// タブを尊重)。initDashboard はファンダ保存後などに再実行されうるため、
+// dataset.wired でイベント登録の重複を防ぐ。
+function initMarketTabs() {
+  const panels = document.getElementById("market-panels");
+  const tabs = document.getElementById("market-tabs");
+  if (!panels || !tabs) return;
+
+  const setActive = (name) => {
+    tabs.querySelectorAll(".market-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.panel === name);
+    });
+    panels.querySelectorAll(".market-panel").forEach((p) => {
+      const on = p.dataset.panel === name;
+      p.classList.toggle("active", on);
+      if (on) p.scrollTop = 0;
+    });
+  };
+
+  const initial = (tabs.querySelector(".market-tab.active") || tabs.querySelector(".market-tab"));
+  setActive(initial ? initial.dataset.panel : "data");
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".market-tab");
     if (!btn) return;
     setActive(btn.dataset.panel);
   });
@@ -2389,6 +2427,14 @@ function renderCharts(chart) {
     return String(Math.round(v));
   }
 
+  // bar.time は常にゼロ埋め済みの "YYYY-MM-DD" 文字列(日足・月足集計後とも
+  // 同形式)なので、区切りを「/」に変えるだけで桁揺れなしの表示になる。
+  // 常時表示の最新日付ラベル(addLatestDateLabel)と区切り文字を揃えることで
+  // ホバー時/非ホバー時/チャート右下の最新日表示すべてを同じデザインにする。
+  function formatLegendDate(dateStr) {
+    return dateStr ? dateStr.replaceAll("-", "/") : "-";
+  }
+
   function updateLegend(bar) {
     if (!legendEl) return;
     if (!bar) {
@@ -2397,7 +2443,7 @@ function renderCharts(chart) {
     }
     const dirClass = bar.close >= bar.open ? "chg-up" : "chg-down";
     legendEl.innerHTML = `
-      <span class="lg-date">${bar.time}</span>
+      <span class="lg-date">${formatLegendDate(bar.time)}</span>
       <span>始 <b class="${dirClass}">${fmtPrice(bar.open)}</b></span>
       <span>高 <b class="${dirClass}">${fmtPrice(bar.high)}</b></span>
       <span>安 <b class="${dirClass}">${fmtPrice(bar.low)}</b></span>
@@ -2476,8 +2522,10 @@ function renderCharts(chart) {
   const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
   let dateLabels = [];
   if (lastDate) {
+    // ゼロ埋め済みの月日をそのまま使う(凡例側の formatLegendDate と同じ
+    // 「/」区切り・ゼロ埋めにして桁揺れとデザインの不一致を防ぐ)。
     const [, m, d] = lastDate.split("-");
-    const shortDate = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+    const shortDate = `${m}/${d}`;
     const bottomEl = rsChart ? rsEl : volEl;
     dateLabels = [{ el: bottomEl, label: addLatestDateLabel(bottomEl, shortDate) }];
   }
