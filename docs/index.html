@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=e16c60ad">
+<link rel="stylesheet" href="assets/style.css?v=9e8efee3">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -233,8 +233,8 @@
         <div class="chart-card-head">
           <h2>株価・移動平均線</h2>
           <div class="line-toggles">
-            <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label>
-            <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label>
+            <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label><button type="button" class="help-btn" data-help="pivot" aria-label="用語説明: ピボット">?</button>
+            <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label><button type="button" class="help-btn" data-help="stop" aria-label="用語説明: 損切り(ストップ)">?</button>
           </div>
           <div id="ohlc-legend" class="ohlc-legend"></div>
         </div>
@@ -244,7 +244,7 @@
           <div id="volume-container" class="chart-box chart-box-small"></div>
         </div>
         <div class="chart-sub" id="rs-card">
-          <span class="chart-sub-label">RS（対TOPIX）</span>
+          <span class="chart-sub-label">RS（対TOPIX）</span><button type="button" class="help-btn" data-help="rs_line" aria-label="用語説明: RS(対TOPIX)">?</button>
           <div id="rs-container" class="chart-box chart-box-small"></div>
         </div>
       </section>
@@ -287,7 +287,7 @@
             <input type="number" id="sizing-capital" min="0" step="10000" inputmode="numeric" placeholder="例: 10000000">
           </label>
           <div class="sizing-field">
-            1トレードあたりリスク(%)
+            1トレードあたりリスク(%)<button type="button" class="help-btn" data-help="risk_pct" aria-label="用語説明: 1トレードあたりリスク(%)">?</button>
             <div class="segmented" id="sizing-risk-toggle">
               <button type="button" data-risk="0.5">0.5%</button>
               <button type="button" data-risk="0.75">0.75%</button>
@@ -328,6 +328,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=743ab24e"></script>
+<script src="assets/app.js?v=e51d3dc0"></script>
 </body>
 </html>

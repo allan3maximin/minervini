@@ -2,6 +2,99 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-19 (68): 用語ヘルプ(？ボタン)機能の実装
+
+### 要望(ユーザー原文)
+> 地合い詳細の項目とか(試合以外にも同様のものがあれば君の判断で) 用語っぽいのは
+> ヘルプマーク(？ボタン通したらポップアップで説明)を追加して欲しい。
+> 実装はSonnetにやらせるから申し送りをよろしく
+(前タスク(67)の申し送り `HANDOFF_TASKS_20260719.txt` を元に実装)
+
+### 変更内容
+- `docs/assets/app.js`
+  - `TERM_HELP` 辞書(約27語)+ `helpBtnHtml(key)` ヘルパーを追加。未定義キーは
+    何も出さず既存表示を壊さない設計。
+  - `openHelpPopover`/`closeHelpPopover` を自前実装(既存の`openMarketModal`や
+    `fundamentals-modal.js`内のprivate `openModal`は再利用せず独立させた)。
+    本文は`textContent`で挿入(XSS/エスケープ考慮不要)、CSSで`white-space:
+    pre-line`にして`\n`を改行表示。`lockBodyScroll`と同じ
+    `body.style.top = -scrollY` + `modal-open`クラス方式でiOSのラバーバンド
+    スクロール対策も踏襲。
+  - `document`への click委任1本(`.help-btn`クリック時に`preventDefault`+
+    `stopPropagation`必須。`<details>`のトグルや既存カードクリックの
+    ナビゲーションより先に止める)。Escapeキーでも閉じる。
+  - 必須A箇所に埋め込み: 地合い詳細パネル(ブレッドス/指数トレンド/モメンタム/
+    リスク選好の各スコア項目、MA200・MA50上回り率、騰落レシオ25、NH-NL、
+    グロース-TOPIX相対、指数トレンド表見出し)、市場シグナルカード(シグナル
+    ラベル・市場スコア)、VCPファネル、スコア内訳(テクニカル/フル/VCP/総合
+    スコア)、信用残カード(信用倍率・買残・売残・買残回転日数)。
+  - 任意B箇所に追加(判断で実施): ポジション一覧テーブルのヘッダー「R」「シグナル」
+    列に`r_multiple`/`breakeven_sl`の説明を付与。
+  - ついでに`renderVcpFunnel()`内の内部ジャーゴン「VCPファネル(P1銘柄の内訳)」を
+    「VCPファネル(スクリーニング通過銘柄の内訳)」に変更(申し送り必須指示)。
+    grepで他に"P1"/"P2"のユーザー可視文言が無いことを確認済み(関数名
+    `renderP1Warning`等は非表示のコード内部名のため対象外)。
+  - `tech_score`/`full_score`の説明文は`src/screener/trend_template.py`の
+    `technical_score()`/`compute_full_score()`実装を確認の上、RS・52週高値
+    近さ・MA200上向き日数(tech_score)、EPS/売上成長加味・欠損時100点満点
+    再計算(full_score)という実態に合わせて文言を微調整。
+  - `margin_ratio`の閾値説明(5倍/1倍)は`config.yaml`
+    (`high_ratio_warn: 5.0`/`dtc_warn: 3.0`/`low_ratio_info: 1.0`)と
+    `src/report/build_site.py`の`margin_badge()`と突き合わせ、申し送り原稿の
+    ままで齟齬なしと確認。
+- `docs/index.html`
+  - チャートのピボット/損切りトグル、RSチャートのサブラベル、ポジションサイジング
+    「1トレードあたりリスク(%)」ラベルの直後に`.help-btn`を追加(`<label>`とは
+    兄弟要素にして`<button>`のネストを回避)。
+  - 銘柄一覧の並び替えチップ「RS」ボタン(確定/候補/監視の3箇所)へのヘルプ
+    追加は見送り。理由: 既存の`<button data-sort="rs">`の中に`<button
+    class="help-btn">`をネストするとHTML5的に無効になり、クリック判定が
+    親子で競合するリスクがあるため(申し送りの「○判断に任せる」項目として
+    見送りを選択)。
+  - 投資法説明タブは申し送り通り対象外(スタンドアロンの説明ページのため)。
+  - キャッシュバスター更新: `assets/style.css?v=e16c60ad`→`?v=9e8efee3`、
+    `assets/app.js?v=743ab24e`→`?v=e51d3dc0`(ファイルのmd5先頭8桁)。
+- `docs/assets/style.css`
+  - `.market-detail-table-caption`(指数トレンド表見出し用)を追加。
+  - ファイル末尾に`.help-btn`/`.help-popover-overlay`/`.help-popover`他一式を
+    追加。`.help-btn`は15x15pxの丸ボタンに`::before`で当たり判定を上下左右
+    8px拡張(タップしやすさ確保)。`.help-popover-overlay`は既存モーダルの
+    `.modal-overlay`(z-index 2000)より上の`z-index: 2100`にしてクラス名は
+    独立させた。`max-width: 600px`のモバイル調整も追加。
+
+### 検証
+- `node --check docs/assets/app.js` → OK。
+- `python -m pytest tests/ -q` → 356 passed(Pythonコードは一切変更していない
+  ため無関係。サンドボックスに未インストールだった依存
+  (pytest/jpholiday/pandas-datareader等)を追加インストールして実行)。
+- 目視ロジック確認: (1) `.help-btn`は既存の`market-detail-scores
+  .score-bar-row > span:first-child`のmin-width:0/overflow-wrap行(65)内に
+  収まる想定でCSS上の矛盾なし、(2) 地合い詳細パネルは`<details
+  class="market-detail">`でトグルされており、click委任側で
+  `preventDefault`+`stopPropagation`しているためヘルプボタンタップで
+  `<details>`が開閉しないことをコード上確認、(3) helpBtnHtmlの呼び出し箇所は
+  すべて`<button>`や`<a>`要素の外側(span/div内)に配置されておりHTML的な
+  ネスト違反なし。
+- 実機/ブラウザでの手動タップ確認は未実施(ローカルにdevサーバー無し・
+  パスキーゲートあり)。ユーザー側でのGitHub Pages反映後の目視確認を推奨。
+
+## 2026-07-19 (67): 用語ヘルプ(？ボタン)機能の申し送り作成(実装はこれから)
+
+### 要望(ユーザー原文)
+> 地合い詳細の項目とか(試合以外にも同様のものがあれば君の判断で) 用語っぽいのは
+> ヘルプマーク(？ボタン通したらポップアップで説明)を追加して欲しい。
+> 実装はSonnetにやらせるから申し送りをよろしく
+
+### 変更内容
+- `HANDOFF_TASKS_20260719.txt` 新規作成。設計(TERM_HELP辞書/helpBtnHtml/
+  イベント委任/自前軽量ポップアップ)、対象箇所(必須A: 地合い詳細・市場
+  シグナルカード・VCPファネル・スコア内訳・需給カード / 任意B: チャート
+  トグル・サイジング・RSチップ等)、約25語の用語説明の原稿まで込み。
+  実装は未着手(Sonnet担当)。着手時はこのファイルを読むこと。
+
+### 検証
+- ドキュメントのみ。コード・テスト変更なし。
+
 ## 2026-07-18 (66): 信用残・地合いの過去データbackfillスクリプト作成(実行はユーザー側)
 
 ### 要望

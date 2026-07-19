@@ -28,6 +28,273 @@ function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ---------------------------------------------------------------------------
+// 用語ヘルプ(？ボタン→ポップアップ説明)。2026-07-19タスク。表示専用機能で、
+// スコア計算・判定ロジック・データ構造には一切影響しない
+// (HANDOFF_TASKS_20260719.txt)。
+// ---------------------------------------------------------------------------
+const TERM_HELP = {
+  market_signal: {
+    title: "地合いシグナル(攻め/中立/守り)",
+    body:
+      "市場全体の環境を3段階で判定したもの。攻め=新規エントリー積極可、\n" +
+      "中立=サイズ・銘柄数を控えめに、守り=新規エントリーは原則見送り。\n" +
+      "MA200上回り率や新高値・新安値銘柄数などの内部指標から機械的に判定される。\n" +
+      "個別銘柄がどれだけ良くても、地合いが悪い時に買うと勝率が大きく落ちる、\n" +
+      "というのがミネルヴィニの基本姿勢。",
+  },
+  market_score: {
+    title: "市場スコア",
+    body:
+      "地合いを0〜100点で数値化した参考値。ブレッドス40%・指数トレンド30%・\n" +
+      "モメンタム20%・リスク選好10%の加重平均。矢印はスコアの方向\n" +
+      "(↗改善 / →横ばい / ↘悪化)。攻め/中立/守りの色判定とは独立した\n" +
+      "表示専用の補助指標で、色と食い違うこともある(その時は色が優先)。",
+  },
+  breadth: {
+    title: "ブレッドス(市場の広がり)",
+    body:
+      "上昇に参加している銘柄がどれだけ多いかを見る指標群。指数だけが一部の\n" +
+      "大型株で吊り上げられ、中身(個別銘柄)が付いてきていない相場を見分ける。\n" +
+      "ブレッドスが弱い上昇はブレイクアウトの成功率が落ちる。",
+  },
+  index_trend_score: {
+    title: "指数トレンド",
+    body:
+      "TOPIX・日経225・グロース250の3指数が50日線・200日線の上にあるか、\n" +
+      "200日線が上向きかをスコア化したもの。主要指数が揃って上向きなら\n" +
+      "追い風、割れていれば逆風。",
+  },
+  momentum_score: {
+    title: "モメンタム",
+    body: "騰落レシオや上昇/下落銘柄数など、市場の直近の勢いをスコア化したもの。",
+  },
+  risk_appetite: {
+    title: "リスク選好",
+    body:
+      "グロース250のTOPIXに対する相対的な強さから、市場がリスクを取りに\n" +
+      "行っているかを見る。小型グロースに資金が入る局面は、この手法が狙う\n" +
+      "成長株ブレイクアウトの成功率が上がりやすい。",
+  },
+  pct_above_ma200: {
+    title: "MA200上回り率",
+    body:
+      "スクリーニング対象銘柄のうち、終値が200日移動平均線より上にある割合。\n" +
+      "過半数が上なら市場の長期トレンドは健全。カッコ内の20日差分は\n" +
+      "20営業日前からの変化幅で、プラスなら地合いが改善方向。",
+  },
+  pct_above_ma50: {
+    title: "MA50上回り率",
+    body: "終値が50日移動平均線より上にある銘柄の割合。中期トレンドへの参加率で、\nMA200版より敏感に動く。",
+  },
+  up_down_ratio_25: {
+    title: "騰落レシオ25",
+    body:
+      "過去25営業日の値上がり銘柄数合計÷値下がり銘柄数合計。\n" +
+      "一般に120%(1.2)超は過熱気味、70%(0.7)近辺は売られすぎの目安。\n" +
+      "データが25日分貯まるまでは「蓄積中」と表示される。",
+  },
+  nh_nl: {
+    title: "NH-NL(新高値-新安値)",
+    body:
+      "新高値を付けた銘柄数から新安値を付けた銘柄数を引いた値。当日値と、\n" +
+      "それを毎日積み上げた累積値を表示。累積線が右肩上がりなら市場の中身は\n" +
+      "健全、指数が高値でもこの線が下がり始めたら内部悪化のサイン。",
+  },
+  growth_rel_20d: {
+    title: "グロース-TOPIX 20日相対",
+    body:
+      "グロース250指数のTOPIXに対する直近20営業日の相対リターン。\n" +
+      "プラスなら小型グロース優位(リスク選好が強い)、マイナスなら大型・\n" +
+      "ディフェンシブ優位。",
+  },
+  index_trend_table: {
+    title: "指数トレンド表の見方",
+    body:
+      "○=その指数が当該移動平均線(50日/200日)の上にある。×=下にある。\n" +
+      "「傾き↑」は200日線自体が上向きかどうか。3指数が揃って○なら強い地合い。",
+  },
+  vcp_funnel: {
+    title: "VCPファネル",
+    body:
+      "トレンドテンプレート合格銘柄が、VCP(ベース)判定のどの段階にいるかの内訳。\n" +
+      "・ベース到達: ベース(値固め)が検出され、VCP条件の判定まで進んだ銘柄\n" +
+      "・高値更新中: 高値圏を走っていてまだベース(調整)を作っていない銘柄\n" +
+      "・形成中: ベースを作り始めたが日数不足でまだ判定できない銘柄\n" +
+      "・ボラ過大: 値動きが荒すぎてVCPの対象外になった銘柄\n" +
+      "「高値更新中」の減少は、リーダー銘柄が調整入り=数週間後にセットアップが\n" +
+      "増える先行サインとして折れ線で監視している。",
+  },
+  tech_score: {
+    title: "テクニカルスコア",
+    body:
+      "RS(相対力)・52週高値からの近さ・200日線の上向き継続日数など、\n" +
+      "テクニカル要素のみで付けた点数(0-100)。",
+  },
+  full_score: {
+    title: "フルスコア",
+    body:
+      "テクニカルスコアの要素に加え、EPS成長率・売上成長率など業績の伸びも\n" +
+      "加味した点数(0-100)。ファンダデータが一部欠けている場合は、\n" +
+      "取得できた要素だけで100点満点に再計算される。",
+  },
+  vcp_score: {
+    title: "VCPスコア",
+    body:
+      "VCP(収縮パターン)の質の点数(0-100)。収縮のタイトさ・出来高の枯れ具合・\n" +
+      "ベースの形などを評価。高いほど「教科書的な」セットアップ。",
+  },
+  total_score: {
+    title: "総合スコア",
+    body:
+      "各スコアを合成した順位付け用の点数。エントリー可否の判定そのものではなく、\n" +
+      "リスト内の並び順を決めるためのもの(判定はMUST条件が担う)。",
+  },
+  margin_ratio: {
+    title: "信用倍率",
+    body:
+      "信用買い残高÷信用売り残高。高いほど将来の売り圧力(利確・投げ売り)が\n" +
+      "溜まっている状態で、一般に5倍超は重い。1倍未満は売り方優勢で、\n" +
+      "買い戻しによる踏み上げが期待できる形。週次データのため最大5営業日遅れる。",
+  },
+  margin_buy: {
+    title: "買残(信用買い残高)",
+    body:
+      "信用取引で買われてまだ決済されていない株数。将来必ず売り決済される\n" +
+      "「予約された売り」でもあるため、多すぎると上値が重くなる。\n" +
+      "カッコ内は前週比の増減率。",
+  },
+  margin_sell: {
+    title: "売残(信用売り残高)",
+    body: "空売りされてまだ買い戻されていない株数。将来必ず買い戻されるため、\n多いと踏み上げ(買い戻しによる急騰)の燃料になる。",
+  },
+  days_to_cover: {
+    title: "買残回転日数",
+    body:
+      "信用買残÷平均出来高。溜まった買残を消化するのに何日分の出来高が\n" +
+      "必要かの目安。大きいほど需給が重く、ブレイクアウトの上値が抑えられやすい。",
+  },
+  pivot: {
+    title: "ピボット",
+    body:
+      "ベース(値固め)の上端にあたる抵抗ライン。ここを平時より多い出来高を\n" +
+      "伴って上抜けた瞬間が本来のエントリーポイント。ピボットから+5%超\n" +
+      "離れて追いかけるのは禁止(伸びすぎ)。",
+  },
+  stop: {
+    title: "損切り(ストップ)",
+    body: "エントリー時に決めておく撤退価格。買値から-7〜8%が機械的な上限。\nポジションサイズはこの損切り幅から逆算する。",
+  },
+  rs_line: {
+    title: "RS(対TOPIX)",
+    body:
+      "株価をTOPIXで割った相対強さの推移。右肩上がりなら市場平均より強い。\n" +
+      "株価が横ばいでもRS線が上がっていれば相対的に強い(市場が下げる中で\n" +
+      "耐えている)ことを意味し、先行指標になる。",
+  },
+  rs_rating: {
+    title: "RSレーティング",
+    body: "全銘柄の株価パフォーマンスを相対順位化して1〜99で表した値。\n70以上がトレンドテンプレートの必須条件、80〜90以上が理想。",
+  },
+  risk_pct: {
+    title: "1トレードあたりリスク(%)",
+    body:
+      "そのトレードで失ってよい金額の、総資金に対する割合。\n" +
+      "ポジションサイズ=許容損失額÷(エントリー価格-損切り価格)で逆算する。\n" +
+      "ミネルヴィニの推奨は0.5〜1.25%程度。",
+  },
+  r_multiple: {
+    title: "R(アール)と2R",
+    body:
+      "R=エントリー価格-損切り価格(1トレードの想定リスク幅)。\n" +
+      "2R到達=リスクの2倍の含み益。一部利確や損切りラインの引き上げを\n" +
+      "検討する目安。",
+  },
+  breakeven_sl: {
+    title: "建値SL",
+    body: "損切りラインを買値(建値)まで引き上げること。以後そのポジションは\n最悪でも損失ゼロになり、無リスクで利を伸ばせる。",
+  },
+};
+
+function helpBtnHtml(key) {
+  const t = TERM_HELP[key];
+  if (!t) return ""; // 未定義キーは静かに何も出さない(壊さない)
+  return `<button type="button" class="help-btn" data-help="${key}" aria-label="用語説明: ${escapeHtml(t.title)}">?</button>`;
+}
+
+let savedHelpScrollY = 0;
+
+function closeHelpPopover() {
+  const el = document.getElementById("help-popover-overlay");
+  if (!el) return;
+  el.remove();
+  // 他のモーダル(fundamentals-modal.js等)が同時に開いていなければロック解除。
+  if (!document.getElementById("minervini-modal-overlay") && !document.getElementById("market-modal")) {
+    document.body.classList.remove("modal-open");
+    document.body.style.top = "";
+    window.scrollTo(0, savedHelpScrollY);
+  }
+}
+
+function openHelpPopover(key) {
+  const t = TERM_HELP[key];
+  if (!t) return;
+  closeHelpPopover();
+
+  const overlay = document.createElement("div");
+  overlay.className = "help-popover-overlay";
+  overlay.id = "help-popover-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeHelpPopover();
+  });
+
+  const box = document.createElement("div");
+  box.className = "help-popover";
+
+  const titleEl = document.createElement("h3");
+  titleEl.className = "help-popover-title";
+  titleEl.textContent = t.title;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "help-popover-close";
+  closeBtn.setAttribute("aria-label", "閉じる");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeHelpPopover);
+
+  const head = document.createElement("div");
+  head.className = "help-popover-head";
+  head.appendChild(titleEl);
+  head.appendChild(closeBtn);
+
+  const bodyEl = document.createElement("p");
+  bodyEl.className = "help-popover-body";
+  bodyEl.textContent = t.body; // innerHTML不可(エスケープ問題を構造的に消す)。改行はCSSのwhite-space:pre-lineで表現。
+
+  box.appendChild(head);
+  box.appendChild(bodyEl);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  savedHelpScrollY = window.scrollY || 0;
+  document.body.style.top = `-${savedHelpScrollY}px`;
+  document.body.classList.add("modal-open");
+}
+
+// イベント委任(document に1つだけ)。カード類のクリックナビゲーションや
+// <details>のトグルより先に止める(stopPropagation必須)。
+document.addEventListener("click", (e) => {
+  const helpBtn = e.target.closest(".help-btn");
+  if (!helpBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openHelpPopover(helpBtn.dataset.help);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("help-popover-overlay")) closeHelpPopover();
+});
+
 const SECTOR_STRENGTH_CLASS = { 強: "sector-strength-strong", 中: "sector-strength-mid", 弱: "sector-strength-weak" };
 
 // セクター(強度)列: 強度の文字だけ色付けする(緑=強/グレー=中/赤=弱)。
@@ -500,10 +767,10 @@ const MARKET_SCORE_TREND_ARROW = {
 // weight は src/report/market_signal.py DEFAULTS["detail_weights"] と一致させた
 // 表示用の固定値(バックエンドから配点自体は送られてこないため)。
 const MARKET_DETAIL_SCORE_ITEMS = [
-  { key: "breadth", label: "ブレッドス", weight: 40 },
-  { key: "index_trend", label: "指数トレンド", weight: 30 },
-  { key: "momentum", label: "モメンタム", weight: 20 },
-  { key: "risk_appetite", label: "リスク選好", weight: 10 },
+  { key: "breadth", label: "ブレッドス", weight: 40, helpKey: "breadth" },
+  { key: "index_trend", label: "指数トレンド", weight: 30, helpKey: "index_trend_score" },
+  { key: "momentum", label: "モメンタム", weight: 20, helpKey: "momentum_score" },
+  { key: "risk_appetite", label: "リスク選好", weight: 10, helpKey: "risk_appetite" },
 ];
 
 // up_down_ratio_25 は history 24件+当日で計25件、breadth_trend_20d(20日差分)は
@@ -546,7 +813,7 @@ function renderMarketDetailHtml(latest, history) {
     const v = sb[item.key];
     const pct = v != null ? Math.max(0, Math.min(100, v)) : 0;
     const valueText = v != null ? Math.round(v) : "-";
-    return `<div class="score-bar-row"><span>${item.label}(${item.weight}%)</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
+    return `<div class="score-bar-row"><span>${item.label}(${item.weight}%)${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
   }).join("");
 
   const historyLen = history.length;
@@ -572,13 +839,14 @@ function renderMarketDetailHtml(latest, history) {
     <div class="market-detail-body">
       <div class="market-detail-scores">${scoreBarsHtml}</div>
       <div class="market-detail-indicators">
-        <div class="market-detail-row"><span>MA200上回り率</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
-        <div class="market-detail-row"><span>MA50上回り率</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
-        <div class="market-detail-row"><span>騰落レシオ25</span><span>${udText}</span></div>
-        <div class="market-detail-row"><span>NH-NL(当日/累積)</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
-        <div class="market-detail-row"><span>グロース-TOPIX 20日相対</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
+        <div class="market-detail-row"><span>MA200上回り率${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
+        <div class="market-detail-row"><span>MA50上回り率${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
+        <div class="market-detail-row"><span>騰落レシオ25${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
+        <div class="market-detail-row"><span>NH-NL(当日/累積)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
+        <div class="market-detail-row"><span>グロース-TOPIX 20日相対${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
       </div>
       <div class="market-detail-table-wrap">
+        <p class="market-detail-table-caption">指数トレンド表の見方${helpBtnHtml("index_trend_table")}</p>
         <table class="market-detail-table">
           <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
           <tbody>
@@ -627,12 +895,12 @@ function renderMarketSignal(breadth) {
   // market_score/score_trendはタスク3で追加された表示専用の補助指標。旧history
   // (これらが無いエントリ)ではバッジ自体を出さない。
   const scoreBadge = latest.market_score != null
-    ? `<span class="market-score-badge">スコア ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}</span>`
+    ? `<span class="market-score-badge">スコア ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}${helpBtnHtml("market_score")}</span>`
     : "";
 
   el.innerHTML = `
     <div class="market-signal-top">
-      <div class="market-signal-label">${meta.label}</div>
+      <div class="market-signal-label">${meta.label}${helpBtnHtml("market_signal")}</div>
       ${scoreBadge}
     </div>
     <ul class="market-signal-reasons">${reasons}</ul>
@@ -669,7 +937,7 @@ function renderVcpFunnel(breadth) {
 
   el.hidden = false;
   el.innerHTML = `
-    <div class="vcp-funnel-title">VCPファネル(P1銘柄の内訳)</div>
+    <div class="vcp-funnel-title">VCPファネル(スクリーニング通過銘柄の内訳)${helpBtnHtml("vcp_funnel")}</div>
     <div class="vcp-funnel-stats">
       <span>ベース到達(origin_ok): ${originOk(latest)}件</span>
       <span>高値更新中(TOO_RECENT): ${latest.TOO_RECENT || 0}件</span>
@@ -1457,10 +1725,10 @@ function renderStockMargin(stock) {
 
   container.innerHTML = `
     <div class="margin-detail">
-      <div class="margin-ratio-big">${ratioText} ${marginBadgeHtml(m, { detail: true })}</div>
-      <div class="margin-row"><span>買残</span><span>${marginNum(m.buy, 0)}株${wowHtml}</span></div>
-      <div class="margin-row"><span>売残</span><span>${marginNum(m.sell, 0)}株</span></div>
-      <div class="margin-row"><span>買残回転日数</span><span>${dtcText}</span></div>
+      <div class="margin-ratio-big">${ratioText}${helpBtnHtml("margin_ratio")} ${marginBadgeHtml(m, { detail: true })}</div>
+      <div class="margin-row"><span>買残${helpBtnHtml("margin_buy")}</span><span>${marginNum(m.buy, 0)}株${wowHtml}</span></div>
+      <div class="margin-row"><span>売残${helpBtnHtml("margin_sell")}</span><span>${marginNum(m.sell, 0)}株</span></div>
+      <div class="margin-row"><span>買残回転日数${helpBtnHtml("days_to_cover")}</span><span>${dtcText}</span></div>
       <p class="tier-note">${dateText}申込時点(週次データのため最大5営業日遅れることがあります)</p>
     </div>
   `;
@@ -2321,17 +2589,17 @@ function renderScoreBreakdown(stock) {
   const el = document.getElementById("score-breakdown");
   el.innerHTML = "";
   const items = [
-    { label: "テクニカルスコア", value: stock.tech_score },
-    { label: "フルスコア", value: stock.full_score },
-    { label: "VCPスコア", value: stock.vcp_score },
-    { label: "総合スコア", value: stock.total_score },
+    { label: "テクニカルスコア", value: stock.tech_score, helpKey: "tech_score" },
+    { label: "フルスコア", value: stock.full_score, helpKey: "full_score" },
+    { label: "VCPスコア", value: stock.vcp_score, helpKey: "vcp_score" },
+    { label: "総合スコア", value: stock.total_score, helpKey: "total_score" },
   ];
   for (const item of items) {
     if (item.value == null) continue;
     const row = document.createElement("div");
     row.className = "score-bar-row";
     const pct = Math.max(0, Math.min(100, item.value));
-    row.innerHTML = `<span>${item.label}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${item.value}</span>`;
+    row.innerHTML = `<span>${item.label}${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${item.value}</span>`;
     el.appendChild(row);
   }
 }
@@ -2436,7 +2704,7 @@ async function initPositionsView() {
         <thead>
           <tr>
             <th>コード</th><th>銘柄名</th><th>建値</th><th>現在値</th><th>損益%</th>
-            <th>R</th><th>ストップ</th><th>ストップまで%</th><th>保有日数</th><th>シグナル</th>
+            <th>R${helpBtnHtml("r_multiple")}</th><th>ストップ</th><th>ストップまで%</th><th>保有日数</th><th>シグナル${helpBtnHtml("breakeven_sl")}</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
