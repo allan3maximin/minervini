@@ -53,13 +53,18 @@ async function initHeatmap() {
   if (!hmWired) {
     const toggle = document.getElementById("hm-period-toggle");
     if (toggle) {
-      toggle.addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-period]");
-        if (!btn) return;
+      const setPeriod = (btn) => {
         toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
         currentPeriod = btn.dataset.period;
         render();
+      };
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-period]");
+        if (!btn) return;
+        setPeriod(btn);
       });
+      // タブと同じスライド切替(app.jsのwireTabSlide。押したまま滑らせて離す)。
+      if (typeof wireTabSlide === "function") wireTabSlide(toggle, "button[data-period]", setPeriod);
     }
 
     // 詳細/簡易は横スワイプ(scroll-snap)で切替。トグルはそのパネルへスクロール
@@ -72,6 +77,10 @@ async function initHeatmap() {
         if (!btn) return;
         scrollToHmView(btn.dataset.view);
       });
+      // 詳細/簡易もスライド切替対応(押したまま滑らせて離す)。
+      if (typeof wireTabSlide === "function") {
+        wireTabSlide(viewToggle, "button[data-view]", (btn) => scrollToHmView(btn.dataset.view));
+      }
 
       let raf = 0;
       panels.addEventListener(

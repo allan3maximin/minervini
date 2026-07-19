@@ -68,17 +68,34 @@ a { color: var(--link); }
   flex-wrap: wrap;
   margin-bottom: 4px;
 }
+/* 市況分析タブのカード(シグナル/スクリーニング状況/VCPファネル)と
+   見た目を揃える: padding 12px 16px / margin-bottom 14px / タイトル13px 700 */
 .breadth-meter {
-  display: flex;
-  gap: 8px 20px;
-  flex-wrap: wrap;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 14px;
+  padding: 12px 16px;
   font-size: 12px;
   color: var(--text-dim);
-  margin-bottom: 12px; /* 直下の地合いシグナルカードとの間隔 */
+  margin-bottom: 14px;
+}
+.breadth-meter-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.breadth-meter-stats {
+  display: flex;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+}
+/* 数値だけ強調して視線が値に落ちるようにする(ラベルはdimのまま) */
+.breadth-meter-stats b,
+.vcp-funnel-stats b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* --------------------------------------------------------------- buttons */
@@ -124,11 +141,18 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12.5px;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
+  /* スライド切替(wireTabSlide)用: ボタン起点のドラッグをスクロールに取られない */
+  touch-action: none;
 }
 .segmented button.active {
   background: rgba(52, 211, 153, 0.16);
   color: var(--accent);
   font-weight: 600;
+}
+/* スライド中に指の下にあるボタンのプレビュー */
+.segmented button.slide-target {
+  background: rgba(52, 211, 153, 0.22);
+  color: var(--text);
 }
 
 /* リスト画面の並び替えチップ(スコア/RS/前日比)。見た目は.segmentedを継承し、
@@ -1161,6 +1185,8 @@ a.nav-btn:hover { border-color: var(--link); }
 .dock-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
 .dock-btn:hover { color: var(--text); }
 .dock-btn.active { background: rgba(52, 211, 153, 0.14); color: var(--accent); }
+/* スライド中(wireTabSlide)に指の下にあるボタンのプレビュー(離すとそのビューへ) */
+.dock-btn.slide-target { background: rgba(52, 211, 153, 0.22); color: var(--text); }
 .dock-btn.active .dock-label { font-weight: 600; }
 
 /* SPAビュー本体: mainの残り高さを使い切り、必要なビューだけ内部で縦スクロール。 */
@@ -1557,7 +1583,8 @@ a.nav-btn:hover { border-color: var(--link); }
   h1 { font-size: 17px; }
   .page-header { margin-bottom: 6px; }
   .tier-section { padding: 12px 10px; }
-  .breadth-meter { gap: 6px 14px; padding: 8px 10px; }
+  .breadth-meter { padding: 10px 12px; }
+  .breadth-meter-stats { gap: 6px 14px; }
   /* 16px inputs prevent iOS Safari's focus auto-zoom */
   .modal-input, .fund-table input { font-size: 16px; }
   /* モーダルは縦中央寄せ。下に大きめの余白(=閉じる用のタップ領域)を作り、

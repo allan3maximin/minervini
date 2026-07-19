@@ -736,12 +736,15 @@ function renderBreadth(breadth, report) {
   // 地合い指標: 8条件完全一致の件数。breadth履歴優先、なければreport.jsonから。
   const pc = (report && report.priority_counts) || null;
   const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
-  const prioLine = p1 != null ? `<span>8条件合格: ${p1}件</span>` : "";
+  const prioLine = p1 != null ? `<span>8条件合格: <b>${p1}件</b></span>` : "";
   el.innerHTML = `
-    <span>テンプレート通過率: ${passRate}</span>
-    <span>セットアップ数: ${latest.watch_count ?? "-"}</span>
-    <span>直近ブレイク成功率: ${successRate}</span>
-    ${prioLine}
+    <div class="breadth-meter-title">スクリーニング状況</div>
+    <div class="breadth-meter-stats">
+      <span>テンプレート通過率: <b>${passRate}</b></span>
+      <span>セットアップ数: <b>${latest.watch_count ?? "-"}</b></span>
+      <span>直近ブレイク成功率: <b>${successRate}</b></span>
+      ${prioLine}
+    </div>
   `;
 }
 
@@ -940,10 +943,10 @@ function renderVcpFunnel(breadth) {
   el.innerHTML = `
     <div class="vcp-funnel-title">VCPファネル(スクリーニング通過銘柄の内訳)${helpBtnHtml("vcp_funnel")}</div>
     <div class="vcp-funnel-stats">
-      <span>ベース到達(origin_ok): ${originOk(latest)}件</span>
-      <span>高値更新中(TOO_RECENT): ${latest.TOO_RECENT || 0}件</span>
-      <span>形成中(IMMATURE): ${latest.IMMATURE || 0}件</span>
-      <span>ボラ過大(TOO_VOLATILE): ${latest.TOO_VOLATILE || 0}件</span>
+      <span>ベース到達(origin_ok): <b>${originOk(latest)}件</b></span>
+      <span>高値更新中(TOO_RECENT): <b>${latest.TOO_RECENT || 0}件</b></span>
+      <span>形成中(IMMATURE): <b>${latest.IMMATURE || 0}件</b></span>
+      <span>ボラ過大(TOO_VOLATILE): <b>${latest.TOO_VOLATILE || 0}件</b></span>
     </div>
     <div class="vcp-funnel-spark">
       <span class="vcp-funnel-spark-label">TOO_RECENT 直近60日(減少=セットアップ増の先行シグナル)</span>
@@ -1062,13 +1065,18 @@ function initCardSortChips() {
 
     if (chips.dataset.wired) return;
     chips.dataset.wired = "1";
-    chips.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-sort]");
-      if (!btn || !CARD_SORTS[btn.dataset.sort]) return;
+    const applySort = (btn) => {
+      if (!CARD_SORTS[btn.dataset.sort]) return;
       setCardSortKey(tier, btn.dataset.sort);
       sync();
       rerenderTierBody(tier);
+    };
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-sort]");
+      if (!btn) return;
+      applySort(btn);
     });
+    wireTabSlide(chips, "button[data-sort]", applySort);
   });
 }
 
@@ -2620,12 +2628,19 @@ function renderCharts(chart) {
     const toggle = toggleOld.cloneNode(true);
     toggleOld.replaceWith(toggle);
     toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tf === String(DEFAULT_DAILY_BARS)));
+    const applyTf = (btn) => {
+      toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      setTimeframe(btn.dataset.tf);
+    };
     toggle.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-tf]");
       if (!btn) return;
-      toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      setTimeframe(btn.dataset.tf);
+      applyTf(btn);
     });
+    // cloneNodeでdata-slide-wired属性ごと複製されるとwireTabSlideが再配線を
+    // スキップしてしまう(リスナーはcloneされないので死ぬ)ため、必ず消してから配線。
+    delete toggle.dataset.slideWired;
+    wireTabSlide(toggle, "button[data-tf]", applyTf);
   }
 
   const resizeHandler = () => {
@@ -2918,67 +2933,17 @@ function showView(hash) {
   }
 }
 
-// ドック上を横スライド(スワイプ)すると、ドックの並び順で隣のビューへ切り替える。
-// (ドックアイテムの並べ替えではなく画面切り替え。)タップは従来どおり各ボタンの
-// ビューへ直接遷移。スワイプ直後の合成clickはキャプチャ段階で握りつぶして誤遷移を防ぐ。
-const DOCK_SWIPE_THRESHOLD = 36;
-
-function currentViewName() {
-  const raw = (window.location.hash.replace("#", "").split("/")[0]) || "dashboard";
-  return raw;
-}
-
-function initDockSwipe(dock) {
-  let startX = 0;
-  let startY = 0;
-  let tracking = false;
-  let swiped = false;
-
-  dock.addEventListener("pointerdown", (e) => {
-    startX = e.clientX;
-    startY = e.clientY;
-    tracking = true;
-    swiped = false;
-  });
-
-  dock.addEventListener("pointermove", (e) => {
-    if (!tracking || swiped) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (Math.abs(dx) < DOCK_SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
-    swiped = true; // 横スワイプ確定
-    const order = Array.from(dock.querySelectorAll(".dock-btn")).map((b) => b.dataset.view);
-    let idx = order.indexOf(currentViewName());
-    if (idx < 0) idx = 0;
-    // 左スワイプ(dx<0)=次のビュー / 右スワイプ(dx>0)=前のビュー
-    const nextIdx = dx < 0 ? Math.min(order.length - 1, idx + 1) : Math.max(0, idx - 1);
-    if (order[nextIdx] && nextIdx !== idx) window.location.hash = order[nextIdx];
-  });
-
-  const end = () => {
-    tracking = false;
-  };
-  dock.addEventListener("pointerup", end);
-  dock.addEventListener("pointercancel", end);
-
-  // スワイプ直後の合成clickを握りつぶし、タップ扱いの誤遷移を防ぐ。
-  dock.addEventListener(
-    "click",
-    (e) => {
-      if (swiped) {
-        e.stopPropagation();
-        e.preventDefault();
-        swiped = false;
-      }
-    },
-    true
-  );
-}
+// 旧initDockSwipe(スワイプ方向→隣のビューへ移動)は廃止。方向とビュー順の
+// 対応が直感と逆に感じられる問題があったため、タブと同じ wireTabSlide
+// (押したまま滑らせて指の下のボタンで離す=そのビューへ移動)に統一した。
+// 離した場所がそのまま行き先なので方向の解釈違いが起きない。
 
 function initRouter() {
   const dock = document.getElementById("dock-nav");
   if (!dock) return;
-  initDockSwipe(dock);
+  wireTabSlide(dock, ".dock-btn", (btn) => {
+    window.location.hash = btn.dataset.view;
+  });
   dock.querySelectorAll(".dock-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.location.hash = btn.dataset.view;

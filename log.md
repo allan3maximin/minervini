@@ -2,6 +2,42 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-19 (76): Dockスライド逆走修正 + スライド横展開 + 市況分析タブ整理
+
+### 要望(ユーザー原文)
+> dockのスワイプ切り替えが逆に動いちゃう。市況データと分析の切り替えはいい感じ。
+> これをメインDockとセクターの詳細簡易とかにも横展開して。
+> あと市況分析のUI/UXが散らかってるように見えるからよしなに治して欲しい
+
+### 変更内容
+1. **Dockスワイプを`wireTabSlide`方式に置換** (`docs/assets/app.js`)
+   - 旧`initDockSwipe`(左右スワイプ→前後のビュー移動)は方向の解釈が逆に感じ
+     られる問題があったため丸ごと削除(`DOCK_SWIPE_THRESHOLD`/`currentViewName`も)。
+   - `initRouter`冒頭で`wireTabSlide(dock, ".dock-btn", btn => hash = btn.dataset.view)`。
+     指の下のボタンに追従する方式なので方向の解釈が存在せず逆走しない。
+   - CSS: `.dock-btn.slide-target`ハイライト追加。
+2. **スライド切替の横展開** (`app.js` / `heatmap.js` / `style.css`)
+   - セクターマップ 詳細/簡易(`#hm-view-toggle`)・期間(`#hm-period-toggle`)、
+     個別株の時間軸トグル(3M/1Y)、カード並び替えチップに`wireTabSlide`適用。
+     いずれもactivate処理を関数抽出(`setPeriod`/`applyTf`/`applySort`等)して共有。
+   - 時間軸トグルは`cloneNode(true)`が`data-slide-wired`をコピーするが
+     リスナーはコピーしない罠があるため、再wire前に`delete toggle.dataset.slideWired`。
+   - CSS: `.segmented button`に`touch-action: none`と`.slide-target`。
+3. **市況分析タブのUI/UX整理** (`docs/index.html` / `app.js` / `style.css`)
+   - カード順を重要度順に変更: 地合いシグナル(最重要判断)→スクリーニング状況
+     (旧breadth-meter)→VCPファネル。
+   - `#breadth-meter`をタイトル無しのspan羅列から「スクリーニング状況」タイトル付き
+     カードに変更し、VCPファネルカードとpadding(12px 16px)/margin(14px)/
+     タイトル(13px 700)を統一。
+   - 数値を`<b>`で強調(`--text`/600/tabular-nums)、ラベルはdimのまま。
+     breadth・VCPファネル両方に適用し視線が値に落ちるように。
+
+### 検証
+- `node --check` app.js / heatmap.js OK。
+
+### 次にやること
+- 実機でスライド操作の感触確認(特にDockとセクター簡易切替)。
+
 ## 2026-07-19 (75): チャート日付表示の完全統一 + タブのスライド切替 + Dock縮小
 
 ### 要望(ユーザー原文)
