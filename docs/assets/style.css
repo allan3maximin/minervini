@@ -12,7 +12,7 @@
   --link: #60a5fa;
   --radius: 10px;
   --radius-sm: 6px;
-  --dock-h: 64px; /* メインDockの実高さ(ボタン52+padding10+border2)。mainの下余白計算用 */
+  --dock-h: 54px; /* メインDockの実高さ(ボタン42+padding10+border2)。mainの下余白計算用 */
 }
 
 * { box-sizing: border-box; }
@@ -411,8 +411,10 @@ tbody tr.row-static:hover { background: transparent; }
   align-items: center;
   z-index: 3;
   pointer-events: none;
+  /* Lightweight Chartsの自動目盛(textColor #98a2b3 / fontSize 11)と同じ見た目に
+     揃える。最新日だけ色や太さを変えると「日付UIが揃っていない」ように見えるため。 */
   font-size: 11px;
-  color: var(--text);
+  color: var(--text-dim);
   background: #131720;
   padding: 0 3px;
   font-variant-numeric: tabular-nums;
@@ -1144,9 +1146,9 @@ a.nav-btn:hover { border-color: var(--link); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  width: 56px;
-  height: 52px;
+  gap: 2px;
+  width: 56px; /* 横幅は据え置き(高さのみ約0.8倍に縮小) */
+  height: 42px;
   min-height: 0;
   background: transparent;
   border: none;
@@ -1155,7 +1157,7 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--text-dim);
   transition: background 0.18s, color 0.18s;
 }
-.dock-btn .dock-icon { font-size: 18px; line-height: 1; }
+.dock-btn .dock-icon { font-size: 16px; line-height: 1; }
 .dock-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
 .dock-btn:hover { color: var(--text); }
 .dock-btn.active { background: rgba(52, 211, 153, 0.14); color: var(--accent); }
@@ -1212,11 +1214,19 @@ a.nav-btn:hover { border-color: var(--link); }
   white-space: nowrap;
   cursor: pointer;
   transition: background 0.18s, color 0.18s;
+  /* スライド切替(wireTabSlide)用: ボタン起点のドラッグをブラウザのスクロールに
+     取られずpointermoveとして受け取る。バーの余白起点なら従来どおりスクロール可。 */
+  touch-action: none;
 }
 .stock-tab.active, .list-tab.active, .market-tab.active {
   background: var(--accent);
   color: #05130b;
   font-weight: 600;
+}
+/* スライド中に指の下にあるタブのプレビュー(離すとここに切り替わる合図) */
+.stock-tab.slide-target, .list-tab.slide-target, .market-tab.slide-target {
+  background: rgba(52, 211, 153, 0.22);
+  color: var(--text);
 }
 
 .stock-panels {
@@ -1542,7 +1552,7 @@ a.nav-btn:hover { border-color: var(--link); }
 /* --------------------------------------------------------------- mobile */
 
 @media (max-width: 600px) {
-  :root { --dock-h: 56px; }
+  :root { --dock-h: 47px; } /* ボタン37+padding8+border2 */
   body { padding: 8px 10px 0; }
   h1 { font-size: 17px; }
   .page-header { margin-bottom: 6px; }
@@ -1578,8 +1588,8 @@ a.nav-btn:hover { border-color: var(--link); }
 
   /* dock nav: slightly smaller icon+label buttons */
   .dock-nav { padding: 4px; border-radius: 21px; }
-  .dock-btn { width: 48px; height: 46px; gap: 2px; border-radius: 17px; }
-  .dock-btn .dock-icon { font-size: 16px; }
+  .dock-btn { width: 48px; height: 37px; gap: 2px; border-radius: 15px; }
+  .dock-btn .dock-icon { font-size: 14px; }
   .dock-label { font-size: 8.5px; }
   /* 下部ピルタブも少し詰める */
   .stock-tab { padding: 5px 9px; font-size: 12px; }

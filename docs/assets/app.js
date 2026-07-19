@@ -1354,15 +1354,20 @@ function setupStockPanels() {
   if (panels.dataset.wired) return;
   panels.dataset.wired = "1";
 
-  tabs.addEventListener("click", (e) => {
-    const btn = e.target.closest(".stock-tab");
-    if (!btn) return;
+  const goToTab = (btn) => {
     const items = Array.from(tabs.querySelectorAll(".stock-tab"));
     const idx = items.indexOf(btn);
     if (idx < 0) return;
     panels.scrollTo({ left: idx * panels.clientWidth, behavior: "smooth" });
     updateStockActiveTab(btn.dataset.panel);
+  };
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".stock-tab");
+    if (!btn) return;
+    goToTab(btn);
   });
+  wireTabSlide(tabs, ".stock-tab", goToTab);
 
   let raf = 0;
   panels.addEventListener(
@@ -1377,6 +1382,76 @@ function setupStockPanels() {
       });
     },
     { passive: true }
+  );
+}
+
+// ピル型タブバー共通の「スライド切替」。タブボタンを押したまま横に滑らせると
+// 指の下のタブが .slide-target でハイライトされ、そこで離すとそのタブへ切り替わる
+// (例: 市況タブを押したまま右へスライド→市況分析の上で離す)。押した場所と同じ
+// タブで離した/バー外で離した場合は何もしない(タップは従来のclickで処理)。
+// スライド成立後に発火する合成clickはキャプチャ段階で握りつぶす(initDockSwipeと
+// 同じ手法)。activate(btn) には各タブ実装の setActive 相当を渡す。
+function wireTabSlide(tabs, tabSelector, activate) {
+  if (tabs.dataset.slideWired) return;
+  tabs.dataset.slideWired = "1";
+
+  let pointerId = null;
+  let startBtn = null;
+  let previewBtn = null;
+  let slid = false;
+
+  const btnAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const btn = el && el.closest ? el.closest(tabSelector) : null;
+    return btn && tabs.contains(btn) ? btn : null;
+  };
+  const setPreview = (btn) => {
+    if (previewBtn === btn) return;
+    if (previewBtn) previewBtn.classList.remove("slide-target");
+    previewBtn = btn;
+    if (previewBtn) previewBtn.classList.add("slide-target");
+  };
+
+  tabs.addEventListener("pointerdown", (e) => {
+    const btn = e.target.closest(tabSelector);
+    if (!btn || !tabs.contains(btn)) return;
+    pointerId = e.pointerId;
+    startBtn = btn;
+    slid = false;
+    // バー外に指が出てもpointermove/upを追い続けるためのキャプチャ。
+    try { tabs.setPointerCapture(e.pointerId); } catch (_) { /* 古いブラウザは追跡なしで動作 */ }
+  });
+
+  tabs.addEventListener("pointermove", (e) => {
+    if (pointerId === null || e.pointerId !== pointerId) return;
+    const btn = btnAt(e.clientX, e.clientY);
+    if (!btn) return; // バーから縦に外れた間は直前のハイライトを維持(指ブレ対策)
+    if (btn !== startBtn) slid = true;
+    setPreview(btn === startBtn ? null : btn); // 開始タブへ戻ったらキャンセル扱い
+  });
+
+  const finish = (e, commit) => {
+    if (pointerId === null || e.pointerId !== pointerId) return;
+    const target = commit && slid ? (btnAt(e.clientX, e.clientY) || previewBtn) : null;
+    setPreview(null);
+    pointerId = null;
+    startBtn = null;
+    if (target) activate(target);
+    // slid は直後の合成click握りつぶし用に残す(下のcaptureリスナーが消費)。
+  };
+  tabs.addEventListener("pointerup", (e) => finish(e, true));
+  tabs.addEventListener("pointercancel", (e) => finish(e, false));
+
+  tabs.addEventListener(
+    "click",
+    (e) => {
+      if (slid) {
+        e.stopPropagation();
+        e.preventDefault();
+        slid = false;
+      }
+    },
+    true
   );
 }
 
@@ -1410,6 +1485,7 @@ function initListView() {
     if (!btn) return;
     setActive(btn.dataset.panel);
   });
+  wireTabSlide(tabs, ".list-tab", (btn) => setActive(btn.dataset.panel));
 }
 
 // 市況画面(市況データ/市況分析)のタブ切替。initListView と同じパターン
@@ -1443,6 +1519,7 @@ function initMarketTabs() {
     if (!btn) return;
     setActive(btn.dataset.panel);
   });
+  wireTabSlide(tabs, ".market-tab", (btn) => setActive(btn.dataset.panel));
 }
 
 // ルールベース日本語サマリー (src/report/summary.py が生成した
@@ -2138,9 +2215,12 @@ function setupStockCopyButton(stock, chart, report) {
   };
 }
 
-// Formats the hovered/crosshair date label as "MM/DD" (zero-padded). Chart
-// data uses "YYYY-MM-DD" strings, which Lightweight Charts parses into a
-// {year, month, day} BusinessDay object.
+// Formats every axis-level date as zero-padded "MM/DD": the auto tick marks
+// (tickMarkFormatter), the crosshair hover label (timeFormatter), and the
+// always-visible latest-date overlay (addLatestDateLabel) all go through the
+// same format so 目盛/ホバー/最新日 の3つの日付表示が完全に一致する。
+// Chart data uses "YYYY-MM-DD" strings, which Lightweight Charts parses into
+// a {year, month, day} BusinessDay object.
 function formatChartDate(time) {
   let d;
   if (typeof time === "string") {
@@ -2154,7 +2234,9 @@ function formatChartDate(time) {
     // UTCTimestamp (seconds since epoch)
     d = new Date(time * 1000);
   }
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}`;
 }
 
 const CHART_LOCALIZATION = { timeFormatter: formatChartDate };
@@ -2213,7 +2295,9 @@ function makeChart(el, { showTimeAxis }) {
   return LightweightCharts.createChart(el, {
     width: el.clientWidth,
     height: el.clientHeight,
-    layout: { background: { color: CHART_COLORS.bg }, textColor: CHART_COLORS.text },
+    // fontSize 11 はCSS側 .latest-date-label の font-size と揃えるための明示指定
+    // (自動目盛と自前の最新日ラベルの文字サイズ・色を一致させる)。
+    layout: { background: { color: CHART_COLORS.bg }, textColor: CHART_COLORS.text, fontSize: 11 },
     grid: { vertLines: { color: CHART_COLORS.grid }, horzLines: { color: CHART_COLORS.grid } },
     // Fixed-width right axis keeps all panes horizontally aligned.
     rightPriceScale: { minimumWidth: 72, borderColor: CHART_COLORS.grid },
@@ -2522,10 +2606,9 @@ function renderCharts(chart) {
   const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
   let dateLabels = [];
   if (lastDate) {
-    // ゼロ埋め済みの月日をそのまま使う(凡例側の formatLegendDate と同じ
-    // 「/」区切り・ゼロ埋めにして桁揺れとデザインの不一致を防ぐ)。
-    const [, m, d] = lastDate.split("-");
-    const shortDate = `${m}/${d}`;
+    // 軸目盛・ホバー時と同じ formatChartDate を通し、3表示の形式を1関数に集約
+    // (ゼロ埋めMM/DD。独自フォーマットを持たせると再びズレる)。
+    const shortDate = formatChartDate(lastDate);
     const bottomEl = rsChart ? rsEl : volEl;
     dateLabels = [{ el: bottomEl, label: addLatestDateLabel(bottomEl, shortDate) }];
   }
