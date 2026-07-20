@@ -770,12 +770,25 @@ const MARKET_SCORE_TREND_ARROW = {
 
 // weight は src/report/market_signal.py DEFAULTS["detail_weights"] と一致させた
 // 表示用の固定値(バックエンドから配点自体は送られてこないため)。
+// 表示は「寄与度方式」: 各項目の生スコア(0-100)×配点で寄与ptを出し、
+// 「16.0/40pt」のように配点満点に対する寄与で見せる。4項目の寄与合計が
+// 総合スコア(market_score)と一致するので、%表記(40%等)の混在より辻褄が追いやすい。
 const MARKET_DETAIL_SCORE_ITEMS = [
   { key: "breadth", label: "ブレッドス", weight: 40, helpKey: "breadth" },
   { key: "index_trend", label: "指数トレンド", weight: 30, helpKey: "index_trend_score" },
   { key: "momentum", label: "モメンタム", weight: 20, helpKey: "momentum_score" },
   { key: "risk_appetite", label: "リスク選好", weight: 10, helpKey: "risk_appetite" },
 ];
+
+// 寄与pt(生スコア×配点/100)。丸めは0.1pt単位で行い、合計行との誤差を抑える。
+function contributionPt(rawScore, weight) {
+  return Math.round(rawScore * weight) / 100;
+}
+
+// 「16.5pt」「16pt」のように、小数が不要なら省いて表示する。
+function formatPt(v) {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
 
 // up_down_ratio_25 は history 24件+当日で計25件、breadth_trend_20d(20日差分)は
 // 20日前history+当日で計21件が必要(src/report/market_signal.py の
@@ -813,12 +826,25 @@ function indexTrendRowHtml(label, t) {
 
 function renderMarketDetailHtml(latest, history) {
   const sb = latest.score_breakdown || {};
+  // 寄与度方式: バーの塗りは生スコア(0-100)のまま、右の数値は「寄与pt/配点pt」。
+  // 4行の寄与ptを足すと下の合計行(=総合スコア)になる。
+  let contribSum = 0;
+  let hasAnyScore = false;
   const scoreBarsHtml = MARKET_DETAIL_SCORE_ITEMS.map((item) => {
     const v = sb[item.key];
     const pct = v != null ? Math.max(0, Math.min(100, v)) : 0;
-    const valueText = v != null ? Math.round(v) : "-";
-    return `<div class="score-bar-row"><span>${item.label}(${item.weight}%)${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
+    let valueText = `-/${item.weight}pt`;
+    if (v != null) {
+      hasAnyScore = true;
+      const pt = contributionPt(Math.max(0, Math.min(100, v)), item.weight);
+      contribSum += pt;
+      valueText = `${formatPt(pt)}/${item.weight}pt`;
+    }
+    return `<div class="score-bar-row"><span>${item.label}${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
   }).join("");
+  const scoreTotalHtml = hasAnyScore
+    ? `<div class="score-bar-total"><span>合計</span><span>${formatPt(Math.round(contribSum * 10) / 10)}/100pt</span></div>`
+    : "";
 
   const historyLen = history.length;
   const udNote = accumulationNote(historyLen, 25);
@@ -829,47 +855,60 @@ function renderMarketDetailHtml(latest, history) {
 
   const trends = latest.index_trends || {};
 
-  // nh_nl_cumulativeはpct_above_ma200より新しく追加されたフィールドのため、
-  // 旧history側では欠けている場合がある。両系列とも欠損エントリはfilterで除外し、
-  // 2点未満ならsparklineSvgが空文字を返す(=下で「データ蓄積中」表示にフォールバック)。
-  const pct200Series = history.filter((h) => h && h.pct_above_ma200 != null).slice(-60).map((h) => ({ v: h.pct_above_ma200 }));
-  const nhNlSeries = history.filter((h) => h && h.nh_nl_cumulative != null).slice(-60).map((h) => ({ v: h.nh_nl_cumulative }));
-  const pct200Up = pct200Series.length >= 2 && pct200Series[pct200Series.length - 1].v >= pct200Series[0].v;
-  const nhNlUp = nhNlSeries.length >= 2 && nhNlSeries[nhNlSeries.length - 1].v >= nhNlSeries[0].v;
-  const pct200Spark = sparklineSvg(pct200Series, pct200Up) || '<p class="tier-note">データ蓄積中</p>';
-  const nhNlSpark = sparklineSvg(nhNlSeries, nhNlUp) || '<p class="tier-note">データ蓄積中</p>';
+  // 詳細パネルの数値指標はいずれも当日値だけでなく直近最大60日の推移を出す
+  // (breadth.json history が keep_days=60 で持っている分をそのまま可視化)。
+  // 各フィールドは追加時期がバラバラで旧entryでは欠けるため、系列ごとに null を
+  // filter で除外し、2点未満なら sparklineSvg が空文字→「データ蓄積中」に落とす。
+  const MARKET_SPARK_ITEMS = [
+    { key: "market_score", label: "地合いスコア" },
+    { key: "pct_above_ma200", label: "MA200上回り率" },
+    { key: "pct_above_ma50", label: "MA50上回り率" },
+    { key: "up_down_ratio_25", label: "騰落レシオ25" },
+    { key: "nh_nl_cumulative", label: "NH-NL累積" },
+    { key: "growth_rel_20d", label: "グロース-TOPIX相対" },
+  ];
+  const sparklinesHtml = MARKET_SPARK_ITEMS.map((item) => {
+    const series = history.filter((h) => h && h[item.key] != null).slice(-60).map((h) => ({ v: h[item.key] }));
+    const isUp = series.length >= 2 && series[series.length - 1].v >= series[0].v;
+    const spark = sparklineSvg(series, isUp) || '<p class="tier-note">データ蓄積中</p>';
+    return `<div class="market-detail-spark"><div class="market-detail-spark-label">${item.label}</div>${spark}</div>`;
+  }).join("");
 
+  // 4セクション構成: スコア内訳 → 主要指標 → 指数トレンド → 推移。
+  // 見出しを付けて役割の切れ目を明示する(2026-07-20 UI再構成)。
   return `
     <div class="market-detail-body">
-      <div class="market-detail-scores">${scoreBarsHtml}</div>
-      <div class="market-detail-indicators">
-        <div class="market-detail-row"><span>MA200上回り率${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
-        <div class="market-detail-row"><span>MA50上回り率${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
-        <div class="market-detail-row"><span>騰落レシオ25${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
-        <div class="market-detail-row"><span>NH-NL(当日/累積)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
-        <div class="market-detail-row"><span>グロース-TOPIX 20日相対${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
-      </div>
-      <div class="market-detail-table-wrap">
-        <p class="market-detail-table-caption">指数トレンド表の見方${helpBtnHtml("index_trend_table")}</p>
-        <table class="market-detail-table">
-          <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
-          <tbody>
-            ${indexTrendRowHtml("TOPIX", trends.topix)}
-            ${indexTrendRowHtml("日経225", trends.nikkei225)}
-            ${indexTrendRowHtml("グロース250", trends.growth250)}
-          </tbody>
-        </table>
-      </div>
-      <div class="market-detail-sparklines">
-        <div class="market-detail-spark">
-          <div class="market-detail-spark-label">MA200上回り率 推移</div>
-          ${pct200Spark}
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">スコア内訳<span class="market-detail-heading-sub">寄与pt/配点pt</span></h4>
+        <div class="market-detail-scores">${scoreBarsHtml}${scoreTotalHtml}</div>
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">主要指標<span class="market-detail-heading-sub">当日値</span></h4>
+        <div class="market-detail-indicators">
+          <div class="market-detail-row"><span>MA200上回り率${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
+          <div class="market-detail-row"><span>MA50上回り率${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
+          <div class="market-detail-row"><span>騰落レシオ25${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
+          <div class="market-detail-row"><span>NH-NL(当日/累積)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
+          <div class="market-detail-row"><span>グロース-TOPIX 20日相対${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
         </div>
-        <div class="market-detail-spark">
-          <div class="market-detail-spark-label">NH-NL累積 推移</div>
-          ${nhNlSpark}
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">指数トレンド${helpBtnHtml("index_trend_table")}</h4>
+        <div class="market-detail-table-wrap">
+          <table class="market-detail-table">
+            <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
+            <tbody>
+              ${indexTrendRowHtml("TOPIX", trends.topix)}
+              ${indexTrendRowHtml("日経225", trends.nikkei225)}
+              ${indexTrendRowHtml("グロース250", trends.growth250)}
+            </tbody>
+          </table>
         </div>
-      </div>
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">推移<span class="market-detail-heading-sub">直近最大60日</span></h4>
+        <div class="market-detail-sparklines">${sparklinesHtml}</div>
+      </section>
     </div>
   `;
 }
@@ -902,6 +941,20 @@ function renderMarketSignal(breadth) {
     ? `<span class="market-score-badge">スコア ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}${helpBtnHtml("market_score")}</span>`
     : "";
 
+  // 地合い(攻め/中立/守り)の過去推移。signalを持つ履歴を色付きティックで並べ、
+  // レジームがいつ切り替わったかを一目で追えるようにする。signal欠損の旧entryは除外。
+  // 2点未満(=当日のみ)なら意味がないのでストリップ自体を出さない。
+  const signalHist = history.filter((h) => h && h.signal).slice(-60);
+  const signalStripHtml = signalHist.length >= 2
+    ? `<div class="market-signal-history">
+        <span class="market-signal-history-label">地合い推移(直近${signalHist.length}日)</span>
+        <div class="market-signal-history-track">${signalHist.map((h) => {
+          const m = MARKET_SIGNAL_META[h.signal] || MARKET_SIGNAL_META.yellow;
+          return `<span class="msh-tick ${m.className}" title="${escapeHtml(h.date || "")}: ${m.label}"></span>`;
+        }).join("")}</div>
+      </div>`
+    : "";
+
   el.innerHTML = `
     <div class="market-signal-top">
       <div class="market-signal-label">${meta.label}${helpBtnHtml("market_signal")}</div>
@@ -909,6 +962,7 @@ function renderMarketSignal(breadth) {
     </div>
     <ul class="market-signal-reasons">${reasons}</ul>
     <div class="market-signal-stats">MA200上回り率 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
+    ${signalStripHtml}
     ${caution}
     <details class="market-detail">
       <summary>地合い詳細</summary>

@@ -2,6 +2,121 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (79): 市況分析UI改善(寄与度方式 + 地合い詳細セクション再構成)
+
+### 要望(ユーザー原文)
+> 市況分析のUIを改善して欲しい。セクションの再構成。
+> 地合い詳細の40%とかパーセンテージがバラバラだけど統一は難しいんかな
+(AskUserQuestion回答: 配点表示=「寄与度方式」/ 再構成=「おまかせ」)
+
+### 変更内容(`docs/assets/app.js` / `docs/assets/style.css`)
+1. **スコア内訳を寄与度方式に** (`renderMarketDetailHtml`)
+   - 旧: 「ブレッドス(40%)」ラベル + 生スコア0-100の数値。%の意味(配点)と
+     バーの%(生スコア)が混在して分かりにくかった。
+   - 新: ラベルから(40%)を撤去し、右の値を「寄与pt/配点pt」(例 25/40pt)に。
+     寄与pt = 生スコア×配点/100(0.1pt丸め、`contributionPt`/`formatPt`追加)。
+     バーの塗りは従来通り生スコア%。末尾に「合計 xx/100pt」行を追加、
+     4項目の寄与合計=総合スコアで辻褄が合う構造を明示。
+   - CSS: `.score-bar-total`、`.market-detail-scores .score-bar-row`の値列を
+     72pxに拡幅(「16.5/40pt」対応)+tabular-nums。
+2. **地合い詳細を4セクション構成に再編**
+   - スコア内訳(寄与pt/配点pt)→ 主要指標(当日値)→ 指数トレンド → 推移(直近最大60日)
+     の見出し付き`<section>`に整理(`.market-detail-section`/`.market-detail-heading(-sub)`)。
+   - 「指数トレンド表の見方」captionは見出しにhelpボタンごと統合し
+     `.market-detail-table-caption` CSSを削除。スパークラインの各ラベルから
+     重複していた「〜推移」suffixを撤去(セクション見出しに集約)。
+   - タブ全体のカード順(シグナル→スクリーニング状況→VCPファネル)は
+     重要度順の既存設計を維持し変更なし。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- 寄与pt計算をnodeで単体確認(62.5/100/33.3/0 → 25+30+6.7+0=61.7/100pt)。
+- モバイル時も `.market-detail-scores .score-bar-row` の詳細度が共有ルールに勝ち
+  72px列が維持されることを確認(specificity 0,2,0 > 0,1,0)。
+- 実機確認待ち: 地合い詳細の4見出し表示、合計行、狭幅での値列折返し。
+
+### 次にやること
+- 実機で見栄え確認(特にモバイルのスコア内訳の値列)。
+- セッション78のbackfillワークフロー実行はまだならそちらも。
+
+## 2026-07-19 (78): 「データ蓄積中」を埋めるbackfillを手動ワークフロー化
+
+### 要望(ユーザー原文)
+> データ蓄積中のやつを集めて欲しいって話や
+(セッション77のUI追加に対する補足。UIやなく、蓄積型指標の過去分を実データで埋めたい)
+
+### 状況整理
+- 「データ蓄積中」= breadth.json history の task3指標(market_score/up_down_ratio_25/
+  growth_rel_20d/nh_nl_cumulative/index_trends 等)が、指標追加日(2026-07-18)より前の
+  古いエントリで null のまま → スパークラインが2点未満で「データ蓄積中」表示になる。
+- 埋める道具は既存 `scripts/backfill_breadth_history.py`(冪等・キャッシュ済み
+  data/prices/*.parquet と指数parquetだけで過去日を再計算、ネット取得なし)。
+- ただし docs/data/breadth.json は AES-GCM暗号化で、鍵 `DASHBOARD_DATA_KEY` は
+  **GitHub Secretsにのみ**存在しローカル/このサンドボックスには無い。よって
+  ローカルでは復号できず実行不可(実測: load_breadth()でRuntimeError=鍵未設定)。
+  → 確実に実行できるのは鍵を持つCI上のみ。
+
+### 変更内容
+- **`.github/workflows/backfill-breadth.yml` を新規追加**(workflow_dispatch のみ)。
+  - daily.yml のcommit/push構造を踏襲。concurrency group は `minervini-daily` を
+    共有し日次パイプラインと直列化(breadth.json/push競合回避)。
+  - `DASHBOARD_DATA_KEY` を secrets から渡して `backfill_breadth_history.py` を実行、
+    docs/data/breadth.json のみ add してcommit → pull --rebase -X theirs → push。
+  - inputs.dry_run(既定false): true なら `--dry-run` で件数確認のみ・commitスキップ。
+  - 日次に常設しない理由: backfillは全銘柄(≈1000)に compute_all を再適用し数分
+    かかる。冪等なので一度回せば以降no-op。必要な時だけ手動起動する設計。
+
+### 実行手順(ユーザー操作)
+1. GitHub → Actions → "Backfill breadth history" → Run workflow(dry_run=true)で件数確認。
+2. 問題なければ dry_run=false で本実行 → breadth.json が更新commitされる。
+3. GitHub Pages反映後、市況分析→地合い詳細のスパークライン(セッション77で追加)が
+   「データ蓄積中」から実データに変わる。
+
+### 検証
+- `tests/test_backfill_breadth_history.py` 6件パス(compute経路は健全)。
+- backfill-breadth.yml は yaml.safe_load OK。
+- ローカル `--dry-run` 実行は鍵未設定のRuntimeErrorで停止することを確認
+  (=唯一のブロッカーは鍵。CIでは解消)。
+
+### 次にやること
+- ユーザーが上記ワークフローを1回実行 → breadth.json backfill反映を確認。
+
+## 2026-07-19 (77): 市況分析タブに過去データ(履歴)を追加
+
+### 要望(ユーザー原文)
+> 市況の過去データを入れたい
+(AskUserQuestion回答: 対象=「市況分析の項目」/ 範囲=「出る分だけ」/ 見せ方=「おまかせ」)
+
+### 背景
+- 市況分析タブ(`data-panel="analysis"`)は当日値中心の表示で、推移が出ていたのは
+  MA200上回り率・NH-NL累積・VCP TOO_RECENTのスパークライン3本だけだった。
+- 裏の `breadth.json` history は `build_site.update_breadth(keep_days=60)` で
+  最大60日分保持。→「出る分」= 最大60日。既存の履歴をそのまま可視化する方針。
+
+### 変更内容(`docs/assets/app.js` / `docs/assets/style.css`)
+1. **地合いシグナル過去推移ストリップ** (`renderMarketSignal`)
+   - historyの`signal`を持つ直近60日を色付きティック(緑=攻め/黄=中立/赤=守り)で
+     横並び表示。レジーム転換がいつ起きたか一目で追える。`title`に日付+ラベル。
+   - signal欠損の旧entryはfilter除外。2点未満(当日のみ)ならストリップ非表示。
+   - CSS: `.market-signal-history*` / `.msh-tick`(色は既存シグナルカードと同一の
+     `--accent`/`--warn`/`--danger`、欠損時は`--border`)。
+2. **詳細パネルの数値指標を全項目スパークライン化** (`renderMarketDetailHtml`)
+   - 旧: MA200上回り率・NH-NL累積の2本ハードコード。
+   - 新: `MARKET_SPARK_ITEMS` config化し、地合いスコア/MA200上回り率/MA50上回り率/
+     騰落レシオ25/NH-NL累積/グロース-TOPIX相対 の6本を直近60日で表示。
+   - 各系列とも `null` を filter 除外→2点未満は既存の「データ蓄積中」フォールバック。
+     フィールド追加時期がバラバラな旧historyでも壊れないガードは踏襲。
+   - `.market-detail-sparklines`(grid 2列/モバイル1列)はCSS変更不要で自動折返し。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- スパークライン/ストリップは既存 `sparklineSvg` と `MARKET_SIGNAL_META` を再利用。
+- 実機確認待ち(GitHub Pages反映後): 市況分析→地合い詳細で6本のスパークライン、
+  シグナルカードに履歴ストリップが出るか。history 60日蓄積前は本数が実データ日数分。
+
+### 次にやること
+- 実機で見栄え確認。ティック本数が多い狭幅端末での潰れ具合をチェック。
+
 ## 2026-07-19 (76): Dockスライド逆走修正 + スライド横展開 + 市況分析タブ整理
 
 ### 要望(ユーザー原文)

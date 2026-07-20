@@ -663,6 +663,27 @@ a.nav-btn:hover { border-color: var(--link); }
   font-weight: 600;
   font-size: 13px;
 }
+/* 地合い(攻め/中立/守り)の過去推移ストリップ。1ティック=1営業日、色は現行
+   シグナルカードと同じ緑/黄/赤。データ欠損日は出さない(filter済み)ため
+   ティックの本数=実データ日数。 */
+.market-signal-history { margin-top: 10px; }
+.market-signal-history-label { font-size: 11px; color: var(--text-dim); }
+.market-signal-history-track {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  align-items: stretch;
+}
+.msh-tick {
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.msh-tick.signal-green { background: var(--accent); }
+.msh-tick.signal-yellow { background: var(--warn); }
+.msh-tick.signal-red { background: var(--danger); }
 .market-signal-card.signal-green {
   border-color: var(--accent);
   background: rgba(52, 211, 153, 0.08);
@@ -726,9 +747,48 @@ a.nav-btn:hover { border-color: var(--link); }
   margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+/* 地合い詳細の4セクション(スコア内訳/主要指標/指数トレンド/推移)。
+   見出しで役割の切れ目を明示する(2026-07-20 UI再構成)。 */
+.market-detail-section { min-width: 0; }
+.market-detail-heading {
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.market-detail-heading-sub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
 }
 .market-detail-scores { display: flex; flex-direction: column; min-width: 0; }
+/* 値列は「16.5/40pt」形式が入るため共有の48pxより広くする */
+.market-detail-scores .score-bar-row {
+  grid-template-columns: 96px 1fr 72px;
+}
+.market-detail-scores .score-bar-row > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 寄与ptの合計行。4本のバーの寄与を足すと総合スコアになる対応を明示 */
+.score-bar-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 /* score-bar-rowは元々120px固定ラベル列(短い和名想定)を他画面と共有しているが、
    「指数トレンド(30%)」等の長いラベルはgridアイテムのmin-width:auto既定によって
    列を突き破って右にはみ出す。ここだけ折返し可能にして防ぐ。 */
@@ -762,11 +822,6 @@ a.nav-btn:hover { border-color: var(--link); }
   font-size: 11px;
   margin-left: 4px;
   display: inline-block;
-}
-.market-detail-table-caption {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin: 0 0 4px;
 }
 .market-detail-table-wrap {
   width: 100%;
