@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=b2a8ce5b">
+<link rel="stylesheet" href="assets/style.css?v=02d8c083">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -95,24 +95,21 @@
   <div class="list-panels" id="list-panels">
     <div class="list-panel" data-panel="confirmed">
       <section class="tier-section">
-        <h2>〔本命〕ファンダ強度確認済み</h2>
-        <p class="tier-note">VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上(Minervini Code 33準拠)を満たした銘柄。</p>
+        <div class="tier-head"><span class="tier-head-title">本命</span><button type="button" class="help-btn" data-help="tier_confirmed" aria-label="用語説明: 本命">?</button></div>
         <div id="confirmed-tier-body"></div>
       </section>
     </div>
 
     <div class="list-panel" data-panel="pool">
       <section class="tier-section">
-        <h2>〔候補〕セットアップ完成・エントリー可能</h2>
-        <p class="tier-note">VCPベース完成済み(ピボット・ストップあり)だが、ファンダが未確認または昇格基準(EPS YoY+25%/売上YoY+20%)未達。純テクニカル評価によるランキング。「ファンダ状態」列の「ファンダ弱」はデータはあるが基準未達の銘柄。</p>
+        <div class="tier-head"><span class="tier-head-title">候補</span><button type="button" class="help-btn" data-help="tier_pool" aria-label="用語説明: 候補">?</button></div>
         <div id="pool-tier-body"></div>
       </section>
     </div>
 
     <div class="list-panel" data-panel="watchlist">
       <section class="tier-section">
-        <h2>〔監視〕8条件合格・セットアップ形成待ち</h2>
-        <p class="tier-note">トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだエントリーできない銘柄。ベースが検出されると上の〔候補〕/〔本命〕に昇格します。全件RS降順。</p>
+        <div class="tier-head"><span class="tier-head-title">監視</span><button type="button" class="help-btn" data-help="tier_watchlist" aria-label="用語説明: 監視">?</button></div>
         <div id="watchlist-tier-body"></div>
       </section>
     </div>
@@ -128,7 +125,6 @@
     <div class="list-tools">
       <button type="button" class="list-tool-btn" id="list-sort-btn" aria-label="並び替え">
         <i class="bi bi-sort-down"></i>
-        <span id="list-sort-label" class="list-sort-label">スコア</span>
       </button>
       <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="フィルタ">
         <i class="bi bi-funnel"></i>
@@ -410,7 +406,7 @@
           <div id="volume-container" class="chart-box chart-box-small"></div>
         </div>
         <div class="chart-sub" id="rs-card">
-          <span class="chart-sub-label">RS（対TOPIX）</span><button type="button" class="help-btn" data-help="rs_line" aria-label="用語説明: RS(対TOPIX)">?</button>
+          <span class="chart-sub-label">RS（対TOPIX）<button type="button" class="help-btn" data-help="rs_line" aria-label="用語説明: RS(対TOPIX)">?</button></span>
           <div id="rs-container" class="chart-box chart-box-small"></div>
         </div>
         <div id="chart-date-axis" class="chart-date-axis" aria-hidden="true"></div>
@@ -490,6 +486,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=bb019acc"></script>
+<script src="assets/app.js?v=5c429740"></script>
 </body>
 </html>

@@ -2,6 +2,38 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (86): 個別株ナビ反転 / ティア見出しヘルプ化 / ソートアイコン化 / ヘルプ位置
+
+### 要望(ユーザー原文)
+> ＜＞が存在しない時もスペースは保持して(＜しか無い時に右詰めになるのが気になる)
+> ＜＞の動きが逆? ＞でリストの上、＜で下に進むのが感覚と逆だから逆にして
+> 〔監視〕…の説明表記を枠から外して、枠は「あと一歩」「ベース形成中」等の単位に。本命/候補は枠1つでOK
+> 「毎日見るのは"あと一歩"9件だけでOK」の表記も不要
+> ティアの説明文はヘルプマークに寄せて(候補/本命も同様)。リストのスペースを確保したい
+> ソートもアイコンのみでOK。スコア/RSの表記は不要
+> SP表示の個別株スコア内訳(テクニカルスコア)がヘルプマークと2行になっているので1行に
+> グラフのピボット/損切りのヘルプマークが若干上ずれ。上下センタリングしたい。他のヘルプも一通り
+
+### 対応
+- **前後ナビ ＜＞ 反転+スペース保持**: `updateStockNav` で ＜(左)=リストの上(idx-1)/
+  ＞(右)=下(idx+1) に割当を反転。参照先が無い側は `display:none` をやめ
+  `.stock-nav-btn.is-empty{visibility:hidden}` にして枠を保持(右詰め回避)。
+- **ティア見出しをコンパクト化+ヘルプ集約**: index.htmlの各パネルの `h2`+`.tier-note`
+  長文を削除し、`.tier-head`(短い名称+`?`ヘルプ)に置換。説明文は TERM_HELP に
+  `tier_confirmed`/`tier_pool`/`tier_watchlist` を新設してポップオーバーへ移動。
+  監視の「枠」はもともと renderStageSection(あと一歩/ベース形成中…)が担うのでそのまま。
+  renderPriorityTier の「毎日見るのは…だけでOK」注記を削除。
+- **ソートはアイコンのみ**: `#list-sort-label` スパンをHTMLから削除(updateListSortLabelは
+  `if(!el)return`でガード済み)。ソート内容はシートで選ぶ。
+- **SPスコア内訳を1行**: SPの `.score-bar-row` 1列目を 96px→116px、3列目40→36px。
+  `.score-bar-row > span:first-child` を inline-flex + `white-space:nowrap` で折返し防止。
+- **ヘルプマークの上下位置**: `.line-toggles` に `align-items:center`(15pxの`?`が34px
+  ラベルに対しstretch不能で上寄せになっていた原因を解消)。RSは `?` を
+  `.chart-sub-label` スパン内に入れ、ラベルを inline-flex+center 化、`?`だけ
+  pointer-events:auto に。
+- cache-buster: style.css b2a8ce5b→02d8c083, app.js bb019acc→5c429740。
+  ローカルは暗号化report.jsonで描画不可 → push後にiPhoneミラーで目視確認・微調整。
+
 ## 2026-07-20 (85): UIまとめ4点(設定ドックFixed / VCP定数非表示 / 指数枠グラデ / 永続フィルタ適用ボタン)
 
 ### 要望(ユーザー原文)

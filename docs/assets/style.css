@@ -470,7 +470,7 @@ tbody tr.row-static:hover { background: transparent; }
   margin: 12px 0 8px;
 }
 
-.line-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+.line-toggles { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .line-toggle {
   display: inline-flex;
   align-items: center;
@@ -581,6 +581,12 @@ tbody tr.row-static:hover { background: transparent; }
   gap: 10px;
   margin: 6px 0;
   font-size: 12px;
+}
+/* 1列目(ラベル+ヘルプ「?」)は1行固定・上下中央。SPの狭い列でも折り返さない */
+.score-bar-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 .score-bar {
   background: var(--panel);
@@ -1419,8 +1425,9 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .stock-nav-btn:active { color: var(--text); }
 .stock-nav-btn:disabled { opacity: 0.3; cursor: default; }
-/* 参照先が無いナビは非表示。display:inline-flex がUAの[hidden]に勝つため明示的に潰す */
-.stock-nav-btn[hidden] { display: none; }
+/* 参照先が無いナビは、右詰めにならないようスペースを保ったまま不可視化する
+   (display:none だと片方欠けたとき残りが端に寄ってしまうため) */
+.stock-nav-btn.is-empty { visibility: hidden; }
 .stock-nav-btn .bi { line-height: 1; }
 .stock-tab, .list-tab, .market-tab {
   flex: 1 0 auto;
@@ -1509,6 +1516,9 @@ a.nav-btn:hover { border-color: var(--link); }
   top: 3px;
   left: 8px;
   z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: var(--text-dim);
   background: rgba(19, 23, 32, 0.7);
@@ -1516,6 +1526,8 @@ a.nav-btn:hover { border-color: var(--link); }
   border-radius: 8px;
   pointer-events: none;
 }
+/* ラベル(pointer-events:none)の中でもヘルプの「?」はタップできるように */
+.chart-sub-label .help-btn { pointer-events: auto; }
 .stock-panel .chart-box { flex: 1 1 auto; height: auto; }
 /* カード頭に移したピボット/損切りトグルはコンパクトに */
 .chart-card-head .line-toggles { gap: 10px; }
@@ -1561,7 +1573,17 @@ a.nav-btn:hover { border-color: var(--link); }
   min-height: 0;
 }
 .list-panel .tier-section > h2,
+.list-panel .tier-section > .tier-head,
 .list-panel .tier-note { flex: 0 0 auto; }
+/* コンパクトなティア見出し(短い名称+ヘルプ「?」のみ)。説明文はヘルプに集約し
+   リストの表示スペースを最大化する。 */
+.tier-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+}
+.tier-head-title { font-size: 13px; font-weight: 600; color: var(--text-dim); }
 /* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
    横スクロール表は廃止したので縦のみ(横は明示的に禁止)。 */
 .list-panel [id$="-tier-body"] {
@@ -1947,7 +1969,8 @@ a.nav-btn:hover { border-color: var(--link); }
      スマホでも親指が届く位置に置く。余白部分タップでオーバーレイのcloseが効く。 */
   .modal-overlay { padding: 10px 10px 18vh; align-items: center; }
   .modal-box { padding: 14px; max-height: 74dvh; border-radius: 14px; }
-  .score-bar-row { grid-template-columns: 96px 1fr 40px; }
+  /* ラベル+「?」が2行に折れないよう1列目を確保しnowrap(テクニカルスコア=8字+?) */
+  .score-bar-row { grid-template-columns: 116px 1fr 36px; }
 
   /* market overview: 2-up cards, tighter */
   .market-cards { grid-template-columns: repeat(2, 1fr); gap: 6px; }

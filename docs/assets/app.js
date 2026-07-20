@@ -214,6 +214,26 @@ const TERM_HELP = {
     title: "建値SL",
     body: "損切りラインを買値(建値)まで引き上げること。以後そのポジションは\n最悪でも損失ゼロになり、無リスクで利を伸ばせる。",
   },
+  tier_confirmed: {
+    title: "〔本命〕ファンダ強度確認済み",
+    body:
+      "VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上\n" +
+      "(Minervini Code 33準拠)を満たした銘柄。",
+  },
+  tier_pool: {
+    title: "〔候補〕セットアップ完成・エントリー可能",
+    body:
+      "VCPベース完成済み(ピボット・ストップあり)だが、ファンダが未確認または\n" +
+      "昇格基準(EPS YoY+25%/売上YoY+20%)未達。純テクニカル評価によるランキング。\n" +
+      "「ファンダ弱」はデータはあるが基準未達の銘柄。",
+  },
+  tier_watchlist: {
+    title: "〔監視〕8条件合格・セットアップ形成待ち",
+    body:
+      "トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだ\n" +
+      "エントリーできない銘柄。ベースが検出されると〔候補〕/〔本命〕に昇格する。\n" +
+      "全件RS降順。",
+  },
 };
 
 function helpBtnHtml(key) {
@@ -1510,19 +1530,22 @@ function orderedTierCodes(tier) {
 // 個別株画面の前後ナビ(＜=次へ / ＞=前へ)。listNavTier のフィルタ済み並び順で
 // 現在銘柄の前後を割り出し、ボタンの遷移先(dataset.target)と有効/無効を更新。
 function updateStockNav(code) {
-  const nextBtn = document.getElementById("stock-nav-next"); // ＜ = 次へ(index+1)
-  const prevBtn = document.getElementById("stock-nav-prev"); // ＞ = 前へ(index-1)
-  if (!nextBtn || !prevBtn) return;
+  const leftBtn = document.getElementById("stock-nav-next");  // ＜ = リストの上へ(index-1)
+  const rightBtn = document.getElementById("stock-nav-prev"); // ＞ = リストの下へ(index+1)
+  if (!leftBtn || !rightBtn) return;
   const codes = orderedTierCodes(listNavTier);
   const idx = codes.indexOf(code);
-  const nextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
-  const prevCode = idx > 0 ? codes[idx - 1] : null;
-  // 参照先(前後の銘柄)が無いボタンは無効化ではなく非表示にする。
-  // リスト外から直接開いた(idx<0)場合は両方消える。
-  nextBtn.dataset.target = nextCode || "";
-  nextBtn.hidden = !nextCode;
-  prevBtn.dataset.target = prevCode || "";
-  prevBtn.hidden = !prevCode;
+  const upCode = idx > 0 ? codes[idx - 1] : null;
+  const downCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
+  // ＜=リストの上へ / ＞=リストの下へ(体感に合わせて左右反転)。参照先が無い側は
+  // 右詰めにならないよう、スペースを保ったまま不可視化(is-empty)する。
+  const set = (btn, target) => {
+    btn.hidden = false;
+    btn.dataset.target = target || "";
+    btn.classList.toggle("is-empty", !target);
+  };
+  set(leftBtn, upCode);
+  set(rightBtn, downCode);
 }
 
 // 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。
@@ -1765,12 +1788,6 @@ function renderPriorityTier(report, containerId) {
     const key = setupStageGroupKey(s) || "inactive";
     byGroup.get(key).push(s);
   }
-
-  const note = document.createElement("p");
-  note.className = "tier-note";
-  const nearCount = byGroup.get("near").length;
-  note.textContent = `全${stocks.length}件 — 毎日見るのは「あと一歩」${nearCount}件だけでOK`;
-  container.appendChild(note);
 
   for (const g of SETUP_STAGE_GROUPS) {
     const group = byGroup.get(g.key);
