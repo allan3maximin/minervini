@@ -1731,16 +1731,24 @@ a.nav-btn:hover { border-color: var(--link); }
 
 /* ------------------------------------------------------- 投資法ページ */
 
+/* 外側は透明コンテナ。各テーマは .invest-section が個別に枠を持つ
+   (監視タブの stage-section と同じ考え方で二重枠を避ける)。 */
 .invest-content {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 18px;
   margin-bottom: 16px;
   line-height: 1.75;
 }
+/* テーマ単位の背景枠。監視タブの stage-section と揃える。 */
+.invest-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+  margin-bottom: 12px;
+}
+.invest-section:last-of-type { margin-bottom: 0; }
 .invest-content h3 { margin-top: 22px; color: var(--text); }
-.invest-content h3:first-child { margin-top: 0; }
+.invest-content h3:first-child,
+.invest-section h3 { margin-top: 0; }
 .invest-content p { margin: 6px 0; color: var(--text-dim); }
 .invest-content ul, .invest-content ol { margin: 6px 0; padding-left: 20px; }
 .invest-content li { margin: 4px 0; }
