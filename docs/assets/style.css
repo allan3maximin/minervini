@@ -1786,6 +1786,37 @@ a.nav-btn:hover { border-color: var(--link); }
 .invest-pager-btn.is-hidden { visibility: hidden; }
 .invest-pager-pos { color: var(--text-dim); font-size: 12px; flex: 0 0 auto; }
 
+/* 解説図(インラインSVG)。テーマトークンで配色し、幅は本文いっぱいに。 */
+.invest-fig { margin: 14px 0 6px; }
+.invest-fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-sizing: border-box;
+}
+.invest-fig figcaption { margin-top: 6px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+.invest-fig .fig-price { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.invest-fig .fig-ma { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.invest-fig .fig-ma50 { stroke: var(--accent); stroke-dasharray: none; }
+.invest-fig .fig-zone { fill: var(--accent); opacity: 0.12; }
+.invest-fig .fig-div { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.invest-fig .fig-pivot { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 3; }
+.invest-fig .fig-vol rect { fill: var(--text-dim); opacity: 0.55; }
+.invest-fig .fig-vol-spike { fill: var(--accent); opacity: 0.7; }
+.invest-fig .fig-up { fill: var(--accent); }
+.invest-fig .fig-up-wick { stroke: var(--accent); stroke-width: 2; }
+.invest-fig .fig-label { fill: var(--text-dim); font-size: 12px; }
+.invest-fig .fig-label-buy { fill: var(--accent); }
+.invest-fig .fig-label-warn { fill: var(--warn); }
+
+/* 設定→投資法のトピック一覧(リンクカードを縦に並べる)。 */
+.settings-link-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.settings-link-card > i:first-child { font-size: 18px; color: var(--text-dim); flex: 0 0 auto; }
+
 /* --------------------------------------------------------- 設定画面 */
 
 /* 設定のサブタブ(バッチ実行/履歴・フィルター設定・投資法)。ピル型セグメント。 */

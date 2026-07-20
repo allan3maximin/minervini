@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=af3c6f8a">
+<link rel="stylesheet" href="assets/style.css?v=f0ef9bff">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -225,6 +225,21 @@
     <section class="invest-section" data-section="stage">
       <h3>ステージ分析(4つの局面)</h3>
       <p>株価は下の4局面をぐるぐる巡る。今どの局面にいるかを移動平均線の「並び」と「傾き」、そして出来高で見分ける。買っていいのは<b>ステージ2だけ</b>。この判定を外すと、他がどれだけ良くても勝てない。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 210" role="img" aria-label="ステージ1〜4の株価サイクル図">
+          <rect class="fig-zone" x="165" y="14" width="150" height="168" />
+          <line class="fig-div" x1="165" y1="14" x2="165" y2="182" />
+          <line class="fig-div" x1="315" y1="14" x2="315" y2="182" />
+          <line class="fig-div" x1="452" y1="14" x2="452" y2="182" />
+          <path class="fig-ma" d="M20,162 C120,160 175,150 260,120 C340,96 400,90 460,106 C520,122 580,152 620,166" />
+          <polyline class="fig-price" points="20,160 55,153 85,161 115,150 145,157 165,150 195,138 220,146 248,108 272,118 300,80 315,60 340,80 362,58 388,90 412,64 436,92 452,74 488,104 512,94 540,138 566,126 596,166 620,176" />
+          <text class="fig-label" x="92" y="200" text-anchor="middle">①底固め</text>
+          <text class="fig-label fig-label-buy" x="240" y="200" text-anchor="middle">②上昇(買い)</text>
+          <text class="fig-label" x="383" y="200" text-anchor="middle">③天井</text>
+          <text class="fig-label" x="536" y="200" text-anchor="middle">④下降</text>
+        </svg>
+        <figcaption>破線=200日線。買うのは50&gt;150&gt;200が上向きに揃い、押し目が浅いステージ2だけ。</figcaption>
+      </figure>
       <ul>
         <li><b>ステージ1(底固め・無関心期)</b> 長い下落や急落のあと、値動きが横ばいのレンジに落ち着く。200日線がフラット化し、株価はその上下を行き来する。出来高は細り、世間の関心も薄い。ここでスマートマネーが静かに仕込む。<b>まだ方向感が無いので買わず、監視リストに入れて待つ</b>。数ヶ月〜年単位で続くこともある。</li>
         <li><b>ステージ2(上昇・前進期)</b> トレンドテンプレート合格の局面。<b>50日 &gt; 150日 &gt; 200日</b>の並びで各線が上向きになり、株価は高値・安値を切り上げる。押し目は<b>出来高を減らして</b>浅く作り、ブレイクは<b>出来高を伴って</b>上放れる。大陽線が多く、下げは短く浅い。<b>唯一の買い場</b>で、SEPAの全エネルギーをここに集中する。</li>
@@ -252,6 +267,19 @@
     <section class="invest-section" data-section="template">
       <h3>トレンドテンプレート(8条件)</h3>
       <p>ステージ2にあることを機械的に確認するための8つのMUST条件。感覚を排し、1つでも欠ければステージ2とは認めない。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 680 170" role="img" aria-label="株価と移動平均線の並び図">
+          <polyline class="fig-price" points="20,124 45,112 70,120 95,102 120,110 150,90 180,98 210,80 240,88 275,68 315,76 355,58 400,64 450,48 500,56 555,42 596,38" />
+          <line class="fig-ma fig-ma50" x1="20" y1="128" x2="596" y2="54" />
+          <line class="fig-ma" x1="20" y1="140" x2="596" y2="88" />
+          <line class="fig-ma" x1="20" y1="150" x2="596" y2="116" />
+          <text class="fig-label fig-label-buy" x="604" y="40" text-anchor="start">株価</text>
+          <text class="fig-label" x="604" y="58" text-anchor="start">50日</text>
+          <text class="fig-label" x="604" y="92" text-anchor="start">150日</text>
+          <text class="fig-label" x="604" y="120" text-anchor="start">200日</text>
+        </svg>
+        <figcaption>ステージ2の並び=上から株価&gt;50日&gt;150日&gt;200日。各線がそろって右肩上がり。</figcaption>
+      </figure>
       <ol>
         <li><b>終値が150日線・200日線より上</b> — 中長期の買い方が利益を持っている状態。</li>
         <li><b>150日線が200日線より上</b> — 中期の勢いが長期を上回っている。</li>
@@ -268,6 +296,30 @@
     <section class="invest-section" data-section="vcp">
       <h3>VCP(値幅収縮パターン, V1〜V7)</h3>
       <p>強い銘柄でも上昇前には必ず「収縮」する。上げが続くと利食い・投げが出て一度押すが、強い銘柄ほど押しが浅く・短くなっていく。この<b>売り圧力の減衰=供給の枯れ</b>を、値幅と出来高の両面から確認するのがVCP(Volatility Contraction Pattern)。チャート上は左が深く右が浅い、階段状に締まっていく「足あと」として現れる。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 232" role="img" aria-label="VCP 値幅収縮とブレイクの図">
+          <line class="fig-pivot" x1="118" y1="66" x2="470" y2="66" />
+          <text class="fig-label fig-label-warn" x="120" y="58" text-anchor="start">ピボット</text>
+          <polyline class="fig-price" points="20,150 60,108 90,120 120,66 150,102 175,128 205,94 235,70 262,96 285,110 308,88 330,72 352,92 372,98 394,84 415,74 432,84 448,88 466,70 484,60 512,42 548,28 578,20" />
+          <text class="fig-label" x="175" y="146" text-anchor="middle">深い</text>
+          <text class="fig-label" x="448" y="106" text-anchor="middle">浅い</text>
+          <g class="fig-vol">
+            <rect x="44" y="182" width="12" height="30" />
+            <rect x="114" y="188" width="12" height="24" />
+            <rect x="169" y="192" width="12" height="20" />
+            <rect x="229" y="194" width="12" height="18" />
+            <rect x="279" y="198" width="12" height="14" />
+            <rect x="324" y="201" width="12" height="11" />
+            <rect x="366" y="204" width="12" height="8" />
+            <rect x="409" y="206" width="12" height="6" />
+            <rect x="442" y="207" width="12" height="5" />
+          </g>
+          <rect class="fig-vol-spike" x="480" y="170" width="14" height="42" />
+          <text class="fig-label" x="405" y="228" text-anchor="middle">出来高ドライアップ</text>
+          <text class="fig-label fig-label-buy" x="512" y="164" text-anchor="middle">ブレイク↑</text>
+        </svg>
+        <figcaption>押しが深→浅と収縮し安値は切り上がる。出来高が枯れた後、ピボットを出来高増で上抜けた点が本来のエントリー。</figcaption>
+      </figure>
       <ol>
         <li><b>V1 収縮の回数</b> 押し(収縮)が2〜6回。回数はTで数える(2T・3T…)。</li>
         <li><b>V2 収縮の深さが逓減</b> 押しの深さが段階的に浅くなる(例: 25%→15%→8%)。これが最重要。</li>
@@ -284,6 +336,26 @@
     <section class="invest-section" data-section="entry">
       <h3>エントリーの実例</h3>
       <p>ピボットは「最後の小さな収縮の高値=ベースの直近の抵抗ライン」。そこを平時より明確に多い出来高(目安: 50日平均の1.5倍以上)で上抜けたバーの引けで買うのが基本形。逆指値でブレイク価格に置いておき、抜けたら乗る形でも良い。狙いは「抵抗を抜けて、そこが今度は支持に変わる」瞬間。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 210" role="img" aria-label="ピボット上抜けエントリーの図">
+          <line class="fig-pivot" x1="40" y1="82" x2="470" y2="82" />
+          <text class="fig-label fig-label-warn" x="44" y="74" text-anchor="start">ピボット(抵抗→支持)</text>
+          <polyline class="fig-price" points="20,120 55,102 95,112 135,94 175,100 215,90 255,96 300,88 345,92 378,88" />
+          <rect class="fig-up" x="398" y="42" width="18" height="52" />
+          <line class="fig-up-wick" x1="407" y1="30" x2="407" y2="42" />
+          <polyline class="fig-price" points="416,46 450,40 486,32 520,26" />
+          <g class="fig-vol">
+            <rect x="52" y="176" width="10" height="16" />
+            <rect x="132" y="178" width="10" height="14" />
+            <rect x="212" y="180" width="10" height="12" />
+            <rect x="297" y="182" width="10" height="10" />
+            <rect x="375" y="183" width="10" height="9" />
+          </g>
+          <rect class="fig-vol-spike" x="399" y="150" width="16" height="42" />
+          <text class="fig-label fig-label-buy" x="440" y="150" text-anchor="middle">出来高急増でブレイク</text>
+        </svg>
+        <figcaption>抵抗(ピボット)まで浅い収縮でタメ、出来高急増を伴って抜けたバーの引けで買う。抜けた抵抗は以後の支持になる。</figcaption>
+      </figure>
       <p><b>良いブレイクアウト(仕掛けたい形)</b></p>
       <ul>
         <li>最終収縮がタイト(値幅10%以内、理想は数%)で、直前に出来高がドライアップしている。</li>
@@ -441,15 +513,60 @@
 
   <div class="settings-subpanel" data-subpanel="invest">
   <section class="settings-section">
-    <h3>投資法</h3>
-    <a href="#invest" class="settings-link-card">
-      <i class="bi bi-journal-text"></i>
-      <span class="settings-link-text">
-        <strong>投資法(SEPA)の解説</strong>
-        <span class="tier-note">トレンドテンプレート・VCP・エントリー/損切りの基準を見る</span>
-      </span>
-      <i class="bi bi-chevron-right settings-link-chevron"></i>
-    </a>
+    <h3>投資法(SEPA)の解説</h3>
+    <p class="tier-note">読みたい項目を選ぶと、その解説を開く(下部の前に/次にで順送りもできる)。</p>
+    <div class="settings-link-list">
+      <a href="#invest/cycle" class="settings-link-card">
+        <i class="bi bi-1-circle"></i>
+        <span class="settings-link-text"><strong>SEPAの基本サイクル</strong><span class="tier-note">手法の全体像と5つの柱</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/stage" class="settings-link-card">
+        <i class="bi bi-2-circle"></i>
+        <span class="settings-link-text"><strong>ステージ分析(4局面)</strong><span class="tier-note">今どこにいるかの見分け方</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/fundamentals" class="settings-link-card">
+        <i class="bi bi-3-circle"></i>
+        <span class="settings-link-text"><strong>ファンダメンタルズ</strong><span class="tier-note">増益・利益率・触媒</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/template" class="settings-link-card">
+        <i class="bi bi-4-circle"></i>
+        <span class="settings-link-text"><strong>トレンドテンプレート(8条件)</strong><span class="tier-note">ステージ2を機械判定するMUST条件</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/vcp" class="settings-link-card">
+        <i class="bi bi-5-circle"></i>
+        <span class="settings-link-text"><strong>VCP(値幅収縮)</strong><span class="tier-note">供給の枯れをV1〜V7で確認</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/entry" class="settings-link-card">
+        <i class="bi bi-6-circle"></i>
+        <span class="settings-link-text"><strong>エントリーの実例</strong><span class="tier-note">ピボット買いと良し悪しの見分け</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/market" class="settings-link-card">
+        <i class="bi bi-7-circle"></i>
+        <span class="settings-link-text"><strong>地合い / 市場全体の判定</strong><span class="tier-note">FTD・売り抜け日・攻守の切替</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/risk" class="settings-link-card">
+        <i class="bi bi-8-circle"></i>
+        <span class="settings-link-text"><strong>リスク管理・資金管理</strong><span class="tier-note">損切り・サイズ・段階投入</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/exit" class="settings-link-card">
+        <i class="bi bi-9-circle"></i>
+        <span class="settings-link-text"><strong>利益確定とポジション管理</strong><span class="tier-note">強さで売る/弱さで売る</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/map" class="settings-link-card">
+        <i class="bi bi-grid-3x3-gap"></i>
+        <span class="settings-link-text"><strong>このダッシュボードとの対応</strong><span class="tier-note">本命/候補/監視との対応</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+    </div>
   </section>
   </div>
   </div>
