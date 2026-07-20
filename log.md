@@ -21,6 +21,32 @@
 
 ---
 
+## 2026-07-20 (91): 投資法をページャ方式に(メニュー廃止・外枠撤去・前後ナビ)
+
+### 要望(ユーザー原文)
+> １段上げたい。投資法画面＝SEPAの解説　でOK 投資法画面に基本サイクルや
+> ステージ分析などを表示して。各説明画面の外枠は不要。一番下に次にと前にをつけて
+
+### 対応
+- **メニュー廃止・1段上げ**: (90)の一覧(`#invest-menu`)→詳細(`#invest-detail`/戻る)構造を
+  撤去し、投資法画面をそのまま SEPA 解説に。`#invest` で先頭(基本サイクル)を直接表示、
+  10セクションを `data-section` 順に1枚ずつ見せるページャに変更。
+- **外枠撤去**: `.invest-section` の背景・枠線・padding を削除(`margin:0` のみ)。
+  各説明は枠なしで全幅表示。
+- **前後ナビ**: 下端に `#invest-pager-nav`(前に / 位置表示 n/N / 次に)を固定。
+  `#invest/<前後id>` へのハッシュ遷移で駆動、端末の戻るでも前セクションへ。
+  端(先頭/末尾)ではボタンを `visibility:hidden`(`.is-hidden`)で場所だけ保持
+  (log 86 の方針を踏襲)。
+- **JS**: `initInvestView(param)` をページャ用に書き換え。param 不正/無しは先頭表示、
+  prev/next の href と `.is-hidden`、位置ラベルを更新、`pager.scrollTop=0`。
+- **CSS**: `.invest-view` を縦フレックス+overflow:hidden、`.invest-content` を内側
+  スクロール、`.invest-pager-nav`/`.invest-pager-btn`/`.invest-pager-pos` を追加
+  (batch-view と同じ「本文スクロール+下端固定ナビ」構成)。menu/back/section枠のCSSは削除。
+- cache-buster: style.css `?v=af3c6f8a` / app.js `?v=553ca1d9`。
+- node --check OK / invest-section=10 / 旧id(menu/detail/back)残存=0 を確認。
+
+---
+
 ## 2026-07-20 (90): 投資法を一覧→詳細(メニュー)方式に + 大幅加筆
 
 ### 要望(ユーザー原文)

@@ -1731,64 +1731,21 @@ a.nav-btn:hover { border-color: var(--link); }
 
 /* ------------------------------------------------------- 投資法ページ */
 
-/* 一覧→詳細方式。invest-menu(項目一覧)とinvest-detail(戻る+セクション1枚)を
-   initInvestView がハッシュ(#invest / #invest/<id>)で出し分ける。 */
-.invest-menu > h2 { margin: 0 0 4px; }
-.invest-menu > .tier-note { margin: 0 0 12px; }
-.invest-menu-list { display: flex; flex-direction: column; gap: 8px; }
-.invest-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  color: var(--text);
-  text-decoration: none;
-}
-.invest-menu-item:hover,
-.invest-menu-item:focus-visible { border-color: var(--border-strong); }
-.imi-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-.imi-text > strong { font-size: 14px; }
-.imi-text > .tier-note { margin: 0; }
-.imi-chevron { color: var(--text-dim); font-size: 14px; flex: 0 0 auto; }
-
-/* 詳細ヘッダの戻るリンク。個別株の前後ナビ等と同じトーンで控えめに。 */
-.invest-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 12px;
-  padding: 6px 10px 6px 6px;
-  border-radius: 999px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 13px;
-  text-decoration: none;
-}
-.invest-back:hover,
-.invest-back:focus-visible { border-color: var(--border-strong); color: var(--text); }
-
-/* 外側は透明コンテナ。各テーマは .invest-section が個別に枠を持つ
-   (監視タブの stage-section と同じ考え方で二重枠を避ける)。 */
+/* ページャ方式。initInvestView が data-section の並び順に1枚ずつ表示し、
+   下部の前に/次にで送る(#invest / #invest/<id>)。invest-view は縦フレックスで、
+   本文だけスクロールしナビは下端に固定する(設定タブの batch-view と同じ考え方)。 */
+.invest-view { display: flex; flex-direction: column; overflow: hidden; }
 .invest-content {
-  margin-bottom: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   line-height: 1.75;
 }
-/* テーマ単位の背景枠。監視タブの stage-section と揃える。 */
-.invest-section {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px 16px;
-  margin-bottom: 12px;
-}
-.invest-section:last-of-type { margin-bottom: 0; }
-.invest-content h3 { margin-top: 22px; color: var(--text); }
-.invest-content h3:first-child,
-.invest-section h3 { margin-top: 0; }
+/* 外枠は付けない。各セクションは余白のみで区切る。 */
+.invest-section { margin: 0; }
+.invest-content h3 { margin-top: 0; color: var(--text); }
 .invest-content p { margin: 6px 0; color: var(--text-dim); }
 .invest-content ul, .invest-content ol { margin: 6px 0; padding-left: 20px; }
 .invest-content li { margin: 4px 0; }
@@ -1800,6 +1757,34 @@ a.nav-btn:hover { border-color: var(--link); }
   color: var(--warn);
   font-size: 12px;
 }
+
+/* 下端固定の前後ナビ。矢印が無い端でも visibility:hidden で場所を保つ。 */
+.invest-pager-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.invest-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.invest-pager-btn:hover,
+.invest-pager-btn:focus-visible { border-color: var(--border-strong); }
+.invest-pager-btn.is-hidden { visibility: hidden; }
+.invest-pager-pos { color: var(--text-dim); font-size: 12px; flex: 0 0 auto; }
 
 /* --------------------------------------------------------- 設定画面 */
 

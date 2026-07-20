@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=7fa0e3d9">
+<link rel="stylesheet" href="assets/style.css?v=af3c6f8a">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -205,58 +205,8 @@
 
 <section id="view-invest" class="view-section invest-view" hidden>
 
-  <!-- 一覧(メニュー)。項目タップで #invest/<id> に遷移し詳細を開く。 -->
-  <div class="invest-menu" id="invest-menu">
-    <h2>Minervini投資法(SEPA)</h2>
-    <p class="tier-note">読みたい項目を選んでください。</p>
-    <nav class="invest-menu-list">
-      <a class="invest-menu-item" href="#invest/cycle">
-        <span class="imi-text"><strong>SEPAの基本サイクル</strong><span class="tier-note">手法の全体像と5つの柱、ステージ循環の考え方</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/stage">
-        <span class="imi-text"><strong>ステージ分析</strong><span class="tier-note">株価が巡る4局面と、今どこにいるかの見分け方</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/fundamentals">
-        <span class="imi-text"><strong>ファンダメンタルズ(業績と触媒)</strong><span class="tier-note">大化けの燃料=増益・利益率・触媒とスマートマネー</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/template">
-        <span class="imi-text"><strong>トレンドテンプレート(8条件)</strong><span class="tier-note">ステージ2を機械的に判定するMUST条件</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/vcp">
-        <span class="imi-text"><strong>VCP(値幅収縮パターン)</strong><span class="tier-note">供給の枯れをV1〜V7で確認する足あと</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/entry">
-        <span class="imi-text"><strong>エントリーの実例</strong><span class="tier-note">ピボット買いと、良い/悪いブレイクアウトの見分け</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/market">
-        <span class="imi-text"><strong>地合い / 市場全体の判定</strong><span class="tier-note">FTD・売り抜け日・攻めと守りの切替</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/risk">
-        <span class="imi-text"><strong>リスク管理・資金管理</strong><span class="tier-note">損切り・ポジションサイズ・段階的な資金投入</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/exit">
-        <span class="imi-text"><strong>利益確定とポジション管理</strong><span class="tier-note">強さで売る/弱さで売る・トレーリング</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-      <a class="invest-menu-item" href="#invest/map">
-        <span class="imi-text"><strong>このダッシュボードとの対応</strong><span class="tier-note">本命/候補/監視がSEPAのどの段階か</span></span>
-        <i class="bi bi-chevron-right imi-chevron"></i>
-      </a>
-    </nav>
-  </div>
-
-  <!-- 詳細。initInvestView が data-section の一致する1枚だけ表示する。 -->
-  <div class="invest-detail" id="invest-detail" hidden>
-    <a class="invest-back" href="#invest"><i class="bi bi-chevron-left"></i> 投資法</a>
-    <div class="invest-content" id="invest-detail-body">
+  <!-- ページャ。initInvestView が data-section の一致する1枚だけ表示し、下部のナビで前後に送る。 -->
+  <div class="invest-content" id="invest-pager">
 
     <section class="invest-section" data-section="cycle">
       <h3>SEPAの基本サイクル</h3>
@@ -399,8 +349,13 @@
       <p class="invest-note">毎日ざっと見るなら「市況概要で地合い → 監視の"あと一歩" → 候補/本命」の順が効率的。地合いが悪い日は無理に新規を探さない、というルールと合わせて使う。</p>
     </section>
 
-    </div>
   </div>
+
+  <nav class="invest-pager-nav" id="invest-pager-nav">
+    <a class="invest-pager-btn" id="invest-prev" href="#invest"><i class="bi bi-chevron-left"></i> 前に</a>
+    <span class="invest-pager-pos" id="invest-pager-pos"></span>
+    <a class="invest-pager-btn" id="invest-next" href="#invest">次に <i class="bi bi-chevron-right"></i></a>
+  </nav>
 </section>
 
 <section id="view-positions" class="view-section" hidden>
@@ -628,6 +583,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=82f284ba"></script>
+<script src="assets/app.js?v=553ca1d9"></script>
 </body>
 </html>

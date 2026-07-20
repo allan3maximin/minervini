@@ -3517,23 +3517,34 @@ const VIEWS = ["dashboard", "heatmap", "stocklist", "invest", "positions", "batc
 // #invest/<id>   = 対応する data-section の詳細1枚だけ表示(戻るリンクで #invest に戻る)。
 // ハッシュ遷移で駆動するため、ブラウザ/端末の「戻る」でも一覧に戻れる。
 function initInvestView(param) {
-  const menu = document.getElementById("invest-menu");
-  const detail = document.getElementById("invest-detail");
-  if (!menu || !detail) return;
-  const sections = detail.querySelectorAll(".invest-section");
-  let target = null;
-  sections.forEach((s) => {
-    const on = !!param && s.dataset.section === param;
-    s.hidden = !on;
-    if (on) target = param;
-  });
-  const showDetail = target !== null;
-  menu.hidden = showDetail;
-  detail.hidden = !showDetail;
+  // ページャ。data-section の並び順に1枚ずつ表示し、下部の前に/次にで送る。
+  const pager = document.getElementById("invest-pager");
+  if (!pager) return;
+  const sections = Array.from(pager.querySelectorAll(".invest-section"));
+  if (!sections.length) return;
+  const ids = sections.map((s) => s.dataset.section);
+  // paramが無い/不正なら先頭を表示。
+  let idx = ids.indexOf(param);
+  if (idx < 0) idx = 0;
+  sections.forEach((s, i) => { s.hidden = i !== idx; });
+
+  const prev = document.getElementById("invest-prev");
+  const next = document.getElementById("invest-next");
+  const pos = document.getElementById("invest-pager-pos");
+  if (prev) {
+    const hasPrev = idx > 0;
+    prev.classList.toggle("is-hidden", !hasPrev);
+    prev.href = hasPrev ? `#invest/${ids[idx - 1]}` : "#invest";
+  }
+  if (next) {
+    const hasNext = idx < ids.length - 1;
+    next.classList.toggle("is-hidden", !hasNext);
+    next.href = hasNext ? `#invest/${ids[idx + 1]}` : "#invest";
+  }
+  if (pos) pos.textContent = `${idx + 1} / ${sections.length}`;
+
   // 前回のスクロール位置を引き継がないようリセット。
-  const body = document.getElementById("invest-detail-body");
-  if (body) body.scrollTop = 0;
-  (showDetail ? detail : menu).scrollTop = 0;
+  pager.scrollTop = 0;
 }
 
 function showView(hash) {
