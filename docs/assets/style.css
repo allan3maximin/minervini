@@ -1738,7 +1738,17 @@ a.nav-btn:hover { border-color: var(--link); }
   font-weight: 600;
 }
 /* 下部配置版: 各サブパネルの下に置くので上に余白を取り、下余白は詰める。 */
-.settings-subtabs-bottom { margin: 20px 0 0; }
+/* 設定ビューを縦flex化し、サブタブ(バッチ/フィルター/投資法)を株リストの
+   本命/候補/監視ドックと同様に画面下部へ固定。パネル群だけが内側スクロールする。 */
+.batch-view { display: flex; flex-direction: column; overflow: hidden; }
+.batch-view > h2 { flex: 0 0 auto; }
+.batch-view .settings-subpanels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-subtabs-bottom { flex: 0 0 auto; margin: 10px 0 2px; }
 .settings-subpanel { display: none; }
 .settings-subpanel.active { display: block; }
 
@@ -1778,6 +1788,15 @@ a.nav-btn:hover { border-color: var(--link); }
   border-radius: var(--radius);
   padding: 14px;
 }
+/* ボトムシート内のフィルタは、シート自体が枠と余白を持つので、内側フォームの
+   二重の背景/枠/内側パディングを消してタイトに。表示市場の下に空く余白を詰める。 */
+#adhoc-filter-form.list-filter-form {
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 12px;
+}
+#adhoc-filter-form .lf-actions { border-top: none; padding-top: 4px; }
 .lf-row { display: flex; flex-wrap: wrap; gap: 14px; }
 .lf-field {
   display: flex;
@@ -1814,6 +1833,8 @@ a.nav-btn:hover { border-color: var(--link); }
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+/* 適用ボタンは常に右端へ寄せる(クリア/ステータスは左寄せのまま) */
+.lf-actions .lf-apply, .lf-actions #alf-apply-btn { margin-left: auto; }
 .lf-status { font-size: 12px; color: var(--text-dim); }
 .lf-status.lf-status-active { color: var(--accent, #4ea1ff); }
 

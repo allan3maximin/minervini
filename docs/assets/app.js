@@ -524,6 +524,31 @@ function formatIndexChange(entry) {
   return `${sign}${entry.change.toLocaleString("ja-JP")}${pct}`;
 }
 
+// 前営業日比の騰落率に応じてカード枠色を連続グラデーションで返す。
+// 上げ=緑・下げ=赤で、変動が大きいほど濃く(彩度↑・明度↓)なる。±CAP%で最大濃度。
+// 金利(unit=="%")は騰落率が無いのでpt差を小さめのCAPで代用。ぱっと見で
+// 指数の動きの大きさを掴めるようにするのが狙い。無風(≈0)は既定枠色のまま。
+function indexEdgeStyle(entry) {
+  let t; // -1..+1 に正規化した変動の強さ(符号=方向)
+  if (entry.change_pct != null) {
+    t = entry.change_pct / 2.5; // ±2.5%で最大濃度
+  } else if (entry.unit === "%" && entry.change != null) {
+    t = entry.change / 0.08; // 金利は±0.08ptで最大濃度
+  } else {
+    return "";
+  }
+  t = Math.max(-1, Math.min(1, t));
+  const mag = Math.abs(t);
+  if (mag < 0.03) return ""; // ほぼ無風は既定の枠色を維持
+  const hue = t > 0 ? 145 : 2; // 緑 / 赤
+  const sat = Math.round(38 + mag * 50); // 38%→88%
+  const light = Math.round(60 - mag * 26); // 60%→34%(大きいほど濃く暗く)
+  const edge = `hsl(${hue} ${sat}% ${light}%)`;
+  const glow = `hsla(${hue}, ${sat}%, ${light}%, 0.16)`;
+  // 枠(border) + 1px内側リングで実質2px化しつつ、淡いグローで面としても視認。
+  return `border-color:${edge};box-shadow:inset 0 0 0 1px ${edge},0 0 10px ${glow};`;
+}
+
 function sparklineSvg(series, isUp) {
   const points = (series || []).slice(-60).map((p) => p.v);
   if (points.length < 2) return "";
@@ -565,8 +590,9 @@ function renderMarketOverview(indices) {
       MARKET_ENTRIES[entry.key] = entry;
       const isUp = (entry.change ?? 0) >= 0;
       const stale = staleKeys.has(entry.key);
+      const edge = stale ? "" : indexEdgeStyle(entry);
       return `
-        <div class="market-card${stale ? " is-stale" : ""}" role="button" tabindex="0" data-market-key="${escapeHtml(entry.key)}">
+        <div class="market-card${stale ? " is-stale" : ""}" role="button" tabindex="0" data-market-key="${escapeHtml(entry.key)}"${edge ? ` style="${edge}"` : ""}>
           <div class="market-card-name">${entry.name}${stale ? '<span class="stale-badge" title="最新データの取得に失敗（キャッシュ表示）">stale</span>' : ""}</div>
           <div class="market-card-value">${formatIndexValue(entry)}</div>
           <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
@@ -996,13 +1022,13 @@ function renderVcpFunnel(breadth) {
   el.innerHTML = `
     <div class="vcp-funnel-title">VCPファネル(スクリーニング通過銘柄の内訳)${helpBtnHtml("vcp_funnel")}</div>
     <div class="vcp-funnel-stats">
-      <span>ベース到達(origin_ok): <b>${originOk(latest)}件</b></span>
-      <span>高値更新中(TOO_RECENT): <b>${latest.TOO_RECENT || 0}件</b></span>
-      <span>形成中(IMMATURE): <b>${latest.IMMATURE || 0}件</b></span>
-      <span>ボラ過大(TOO_VOLATILE): <b>${latest.TOO_VOLATILE || 0}件</b></span>
+      <span>ベース到達: <b>${originOk(latest)}件</b></span>
+      <span>高値更新中: <b>${latest.TOO_RECENT || 0}件</b></span>
+      <span>形成中: <b>${latest.IMMATURE || 0}件</b></span>
+      <span>ボラ過大: <b>${latest.TOO_VOLATILE || 0}件</b></span>
     </div>
     <div class="vcp-funnel-spark">
-      <span class="vcp-funnel-spark-label">TOO_RECENT 直近60日(減少=セットアップ増の先行シグナル)</span>
+      <span class="vcp-funnel-spark-label">高値更新中 直近60日(減少=セットアップ増の先行シグナル)</span>
       ${spark}
     </div>
   `;
@@ -1207,6 +1233,23 @@ function initListFilterSettings() {
         segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
       }
       persistAndRerender();
+    });
+  }
+
+  // 永続フィルタは入力の都度も反映されるが、ユーザーが「確定した」と分かるよう
+  // 明示の適用ボタンも用意。押下時に保存+全ティア再描画し、一瞬フィードバックを出す。
+  const applyBtn = document.getElementById("lf-apply-btn");
+  if (applyBtn) {
+    applyBtn.addEventListener("click", () => {
+      persistAndRerender();
+      const status = document.getElementById("lf-status");
+      if (status) {
+        const active = listFilterActive(loadListFilters());
+        status.textContent = "✓ 適用しました";
+        status.classList.toggle("lf-status-active", active);
+        clearTimeout(applyBtn._t);
+        applyBtn._t = setTimeout(updateListFilterStatus, 1500);
+      }
     });
   }
 }

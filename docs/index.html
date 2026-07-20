@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=0c367476">
+<link rel="stylesheet" href="assets/style.css?v=b2a8ce5b">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -142,7 +142,7 @@
 
   <div class="bottom-sheet" id="filter-sheet" role="dialog" aria-label="フィルタ" hidden>
     <div class="sheet-head">
-      <span class="sheet-title"><i class="bi bi-funnel"></i> フィルタ <small>その時用・リロードで解除</small></span>
+      <span class="sheet-title"><i class="bi bi-funnel"></i> フィルタ <small>リロードで解除</small></span>
       <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="sheet-body list-filter-form" id="adhoc-filter-form">
@@ -273,7 +273,7 @@
   <p class="tier-note" id="positions-warnings" hidden></p>
 </section>
 
-<section id="view-batch" class="view-section" hidden>
+<section id="view-batch" class="view-section batch-view" hidden>
   <h2>設定</h2>
 
   <div class="settings-subpanels">
@@ -340,6 +340,7 @@
       <div class="lf-actions">
         <button type="button" id="lf-clear-btn" class="secondary">フィルタをクリア</button>
         <span id="lf-status" class="lf-status">フィルタなし</span>
+        <button type="button" id="lf-apply-btn" class="primary lf-apply">適用</button>
       </div>
     </div>
   </section>
@@ -489,6 +490,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=1ae45e42"></script>
+<script src="assets/app.js?v=bb019acc"></script>
 </body>
 </html>

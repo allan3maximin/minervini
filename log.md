@@ -2,6 +2,31 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (85): UIまとめ4点(設定ドックFixed / VCP定数非表示 / 指数枠グラデ / 永続フィルタ適用ボタン)
+
+### 要望(ユーザー原文)
+> 設定画面のバッチ実行履歴 フィルター設定 投資法のドックをFixed(株リストのドックみたいに)
+> VCPファネルの origin_ok のような内部的な定数は非表示にしてサッパリさせて。全部日本語名標記のみでOK
+> 市況概要の指数は変動率(前営業日比)に合わせてカード枠の色を変えて欲しい。濃い赤〜薄い赤〜無色〜薄い緑〜濃い緑をできる限りグラデーションで
+> 永続フィルタは適用ボタンを作って欲しい。モーダルの適用ボタンも右寄せに。「その時用」表記は不要。表示している市場の下部のスペースをなくして
+
+### 対応
+- **設定サブタブをFixedドック化**: `#view-batch` に `batch-view` クラス付与。
+  `.batch-view{display:flex;flex-direction:column;overflow:hidden}` で、`h2`と
+  `.settings-subtabs-bottom` を `flex:0 0 auto`、中身の `.settings-subpanels` を
+  `flex:1 1 auto;min-height:0;overflow-y:auto` に。株リストのティアドックと同じ挙動。
+- **VCPファネルの内部定数を非表示**: `renderVcpFunnel` のラベルから `(origin_ok)` 等を除去。
+  `ベース到達:` `高値更新中:` `形成中:` `ボラ過大:` の日本語のみ表記に統一。
+- **指数カード枠のグラデ着色**: `indexEdgeStyle(entry)` を新設。change_pct(なければ%単位のchange)を
+  ±で正規化し、hue(緑145/赤2)・彩度・明度を連続変化させて `border-color`+`box-shadow` を返す。
+  `renderMarketOverview` のカードに inline style として適用(stale時は無色)。
+- **永続フィルタに適用ボタン**: 設定側フィルタ `.lf-actions` に `#lf-apply-btn` 追加+配線
+  (`persistAndRerender`実行+「✓適用しました」表示)。モーダル/設定の適用ボタンを
+  `margin-left:auto` で右寄せ。sheet-title の「その時用・」表記を削除(「リロードで解除」のみ)。
+  アドホックシートの余分な背景/枠/下部スペースを除去(`#adhoc-filter-form` を透明化)。
+- cache-buster: style.css 0c367476→b2a8ce5b, app.js 1ae45e42→bb019acc。
+  ローカルは暗号化report.jsonで描画不可 → push後にiPhoneミラーで目視確認・微調整。
+
 ## 2026-07-20 (84): 個別株タブバーの縦位置ズレ修正
 
 ### 要望(ユーザー原文)
