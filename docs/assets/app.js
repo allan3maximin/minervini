@@ -1068,24 +1068,27 @@ function renderP1Warning(report) {
 // localStorage に保存し、本命/候補/監視の全ティアで renderTier /
 // renderPriorityTier が描画前に適用する。空欄の項目は無視。指標が欠損(null)の
 // 銘柄はそのフィルタでは除外しない(データ無しで黙って消えると気づけないため)。
-// 単元価格 = 株価 × SHARES_PER_UNIT(日本株は原則100株単位)= 最低購入代金。
 // ---------------------------------------------------------------------------
 const LIST_FILTER_SETTINGS_KEY = "minervini_list_filters";
-const SHARES_PER_UNIT = 100;
 const LIST_FILTER_SEGMENTS = ["プライム", "スタンダード", "グロース"];
 
-// 全項目が空のフィルタ(恒久・一時どちらの初期値にも使う)。
+// 全項目が無効(=絞り込みなし)のフィルタ。showSegmentsは「表示する市場」で、
+// 初期値は全市場チェック(=全表示=絞り込みなし)。恒久・一時どちらの初期値にも使う。
 function emptyListFilter() {
   return {
-    maxUnitCost: null, minClose: null, maxClose: null,
+    minClose: null, maxClose: null,
     minRs: null, minScore: null, minMcap: null, maxMcap: null,
-    excludeSegments: [],
+    showSegments: [...LIST_FILTER_SEGMENTS],
   };
 }
 
 // リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
 // のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
 let adhocListFilter = emptyListFilter();
+
+// 個別株画面の前後ナビが辿るリストのティア(本命/候補/監視)。カードから遷移した
+// ときに記録し、個別株画面の ＜/＞ で同ティアのフィルタ済み並び順を前後移動する。
+let listNavTier = null;
 
 function loadListFilters() {
   const def = emptyListFilter();
@@ -1094,17 +1097,24 @@ function loadListFilters() {
     if (!raw) return def;
     const p = JSON.parse(raw) || {};
     const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+    // showSegments(表示する市場)。旧データの excludeSegments(除外する市場)は
+    // 反転して読み込む。どちらも無ければ全市場表示(絞り込みなし)。
+    let showSegments;
+    if (Array.isArray(p.showSegments)) {
+      showSegments = p.showSegments.filter((x) => LIST_FILTER_SEGMENTS.includes(x));
+    } else if (Array.isArray(p.excludeSegments)) {
+      showSegments = LIST_FILTER_SEGMENTS.filter((x) => !p.excludeSegments.includes(x));
+    } else {
+      showSegments = [...LIST_FILTER_SEGMENTS];
+    }
     return {
-      maxUnitCost: num(p.maxUnitCost),
       minClose: num(p.minClose),
       maxClose: num(p.maxClose),
       minRs: num(p.minRs),
       minScore: num(p.minScore),
       minMcap: num(p.minMcap),
       maxMcap: num(p.maxMcap),
-      excludeSegments: Array.isArray(p.excludeSegments)
-        ? p.excludeSegments.filter((x) => LIST_FILTER_SEGMENTS.includes(x))
-        : [],
+      showSegments,
     };
   } catch (e) {
     return def;
@@ -1125,14 +1135,13 @@ function saveListFilters(f) {
 function initListFilterSettings() {
   const form = document.getElementById("list-filter-form");
   if (!form) return;
-  const segWrap = document.getElementById("lf-exclude-segments");
+  const segWrap = document.getElementById("lf-show-segments");
 
   const f = loadListFilters();
   const setVal = (id, v) => {
     const el = document.getElementById(id);
     if (el) el.value = v == null ? "" : v;
   };
-  setVal("lf-max-unit-cost", f.maxUnitCost);
   setVal("lf-min-close", f.minClose);
   setVal("lf-max-close", f.maxClose);
   setVal("lf-min-rs", f.minRs);
@@ -1141,7 +1150,7 @@ function initListFilterSettings() {
   setVal("lf-max-mcap", f.maxMcap);
   if (segWrap) {
     segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.checked = f.excludeSegments.includes(cb.value);
+      cb.checked = f.showSegments.includes(cb.value);
     });
   }
   updateListFilterStatus();
@@ -1161,14 +1170,13 @@ function initListFilterSettings() {
       segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
     }
     return {
-      maxUnitCost: num("lf-max-unit-cost"),
       minClose: num("lf-min-close"),
       maxClose: num("lf-max-close"),
       minRs: num("lf-min-rs"),
       minScore: num("lf-min-score"),
       minMcap: num("lf-min-mcap"),
       maxMcap: num("lf-max-mcap"),
-      excludeSegments: segs,
+      showSegments: segs,
     };
   };
 
@@ -1195,7 +1203,8 @@ function initListFilterSettings() {
     clearBtn.addEventListener("click", () => {
       form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
       if (segWrap) {
-        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+        // クリア=絞り込みなし=全市場表示なので全チェック。
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
       }
       persistAndRerender();
     });
@@ -1216,13 +1225,12 @@ function updateListFilterStatus() {
 function initAdhocFilter() {
   const form = document.getElementById("adhoc-filter-form");
   if (!form) return;
-  const segWrap = document.getElementById("alf-exclude-segments");
+  const segWrap = document.getElementById("alf-show-segments");
 
   const setVal = (id, v) => {
     const el = document.getElementById(id);
     if (el) el.value = v == null ? "" : v;
   };
-  setVal("alf-max-unit-cost", adhocListFilter.maxUnitCost);
   setVal("alf-min-close", adhocListFilter.minClose);
   setVal("alf-max-close", adhocListFilter.maxClose);
   setVal("alf-min-rs", adhocListFilter.minRs);
@@ -1231,7 +1239,7 @@ function initAdhocFilter() {
   setVal("alf-max-mcap", adhocListFilter.maxMcap);
   if (segWrap) {
     segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.checked = adhocListFilter.excludeSegments.includes(cb.value);
+      cb.checked = adhocListFilter.showSegments.includes(cb.value);
     });
   }
   updateAdhocFilterBadge();
@@ -1239,55 +1247,50 @@ function initAdhocFilter() {
   if (form.dataset.wired) return;
   form.dataset.wired = "1";
 
-  const readForm = () => {
-    const num = (id) => {
-      const el = document.getElementById(id);
-      if (!el || el.value === "") return null;
-      const n = Number(el.value);
-      return isFinite(n) && n >= 0 ? n : null;
-    };
-    const segs = [];
-    if (segWrap) {
-      segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
-    }
-    return {
-      maxUnitCost: num("alf-max-unit-cost"),
-      minClose: num("alf-min-close"),
-      maxClose: num("alf-max-close"),
-      minRs: num("alf-min-rs"),
-      minScore: num("alf-min-score"),
-      minMcap: num("alf-min-mcap"),
-      maxMcap: num("alf-max-mcap"),
-      excludeSegments: segs,
-    };
-  };
-
-  const applyAndRerender = () => {
-    adhocListFilter = readForm();
-    updateAdhocFilterBadge();
-    if (reportCache && reportCache.data) {
-      rerenderTierBody("confirmed");
-      rerenderTierBody("pool");
-      rerenderTierBody("watchlist");
-    }
-  };
-
-  form.addEventListener("change", applyAndRerender);
-  form.addEventListener("input", (e) => {
-    if (e.target && e.target.tagName === "INPUT" && e.target.type === "number") {
-      applyAndRerender();
-    }
-  });
-
+  // 反映は「適用」ボタン(initListTools側で配線)だけ。入力の都度反映はしない。
   const clearBtn = document.getElementById("alf-clear-btn");
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
+      // フォームの見た目だけリセット(絞り込みなし=全市場チェック)。
+      // 実際の反映は「適用」を押したとき。
       form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
       if (segWrap) {
-        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
       }
-      applyAndRerender();
     });
+  }
+}
+
+// リスト画面の一時フィルタフォーム(alf-*)を読んで adhocListFilter に反映+再描画。
+// 「適用」ボタン押下時に呼ぶ。
+function applyAdhocFilterFromForm() {
+  const form = document.getElementById("adhoc-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("alf-show-segments");
+  const num = (id) => {
+    const el = document.getElementById(id);
+    if (!el || el.value === "") return null;
+    const n = Number(el.value);
+    return isFinite(n) && n >= 0 ? n : null;
+  };
+  const segs = [];
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
+  }
+  adhocListFilter = {
+    minClose: num("alf-min-close"),
+    maxClose: num("alf-max-close"),
+    minRs: num("alf-min-rs"),
+    minScore: num("alf-min-score"),
+    minMcap: num("alf-min-mcap"),
+    maxMcap: num("alf-max-mcap"),
+    showSegments: segs,
+  };
+  updateAdhocFilterBadge();
+  if (reportCache && reportCache.data) {
+    rerenderTierBody("confirmed");
+    rerenderTierBody("pool");
+    rerenderTierBody("watchlist");
   }
 }
 
@@ -1297,10 +1300,12 @@ function updateAdhocFilterBadge() {
   if (!badge) return;
   const f = adhocListFilter;
   let n = 0;
-  ["maxUnitCost", "minClose", "maxClose", "minRs", "minScore", "minMcap", "maxMcap"].forEach((k) => {
+  ["minClose", "maxClose", "minRs", "minScore", "minMcap", "maxMcap"].forEach((k) => {
     if (f[k] != null) n++;
   });
-  n += (f.excludeSegments ? f.excludeSegments.length : 0);
+  // 市場: 全表示なら絞り込みなし。チェックを外した数だけ絞り込みとして数える。
+  const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
+  n += Math.max(0, LIST_FILTER_SEGMENTS.length - shown);
   if (n > 0) {
     badge.textContent = n;
     badge.hidden = false;
@@ -1311,24 +1316,26 @@ function updateAdhocFilterBadge() {
 
 // 何かしらフィルタが有効か(件数表示やステータス文言の要否判定に使う)
 function listFilterActive(f) {
+  const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
   return (
-    f.maxUnitCost != null || f.minClose != null || f.maxClose != null ||
+    f.minClose != null || f.maxClose != null ||
     f.minRs != null || f.minScore != null || f.minMcap != null ||
-    f.maxMcap != null || (f.excludeSegments && f.excludeSegments.length > 0)
+    f.maxMcap != null || shown < LIST_FILTER_SEGMENTS.length
   );
 }
 
 function stockPassesListFilter(s, f) {
-  // 単元価格(最低購入代金 = 株価×100株)の上限
-  if (f.maxUnitCost != null && s.close != null && s.close * SHARES_PER_UNIT > f.maxUnitCost) return false;
   if (f.minClose != null && s.close != null && s.close < f.minClose) return false;
   if (f.maxClose != null && s.close != null && s.close > f.maxClose) return false;
   if (f.minRs != null && s.rs != null && s.rs < f.minRs) return false;
   if (f.minScore != null && s.total_score != null && s.total_score < f.minScore) return false;
   if (f.minMcap != null && s.market_cap_oku != null && s.market_cap_oku < f.minMcap) return false;
   if (f.maxMcap != null && s.market_cap_oku != null && s.market_cap_oku > f.maxMcap) return false;
-  if (f.excludeSegments && f.excludeSegments.length && s.market_segment != null &&
-      f.excludeSegments.includes(s.market_segment)) return false;
+  // showSegments=表示する市場。全チェック(=全表示)のときは絞り込みなし。
+  // 一部だけ表示のとき、市場区分が判明していてリストに無い銘柄を除外。
+  const seg = f.showSegments;
+  if (seg && seg.length < LIST_FILTER_SEGMENTS.length && s.market_segment != null &&
+      !seg.includes(s.market_segment)) return false;
   return true;
 }
 
@@ -1414,6 +1421,80 @@ function currentListTier() {
   return (active && active.dataset.panel) || "confirmed";
 }
 
+// 指定ティアの「リスト画面に表示されているのと同じ並び順」の銘柄コード配列を返す。
+// フィルタ(恒久+一時)適用後、renderTier/renderPriorityTier と同じグループ順・
+// ソートで並べる。個別株画面の前後ナビ(＜/＞)が辿る順序に使う。
+// チャート未生成(has_chart===false)の銘柄は詳細ページに行けないので除外する。
+function orderedTierCodes(tier) {
+  const report = reportCache && reportCache.data;
+  if (!report || !tier) return [];
+  const sortKey = getCardSortKey(tier);
+  const sortVal = CARD_SORTS[sortKey] || CARD_SORTS.total_score;
+  const sortDesc = (arr) =>
+    [...arr].sort((a, b) => {
+      const av = sortVal(a);
+      const bv = sortVal(b);
+      return av === bv ? 0 : av > bv ? -1 : 1;
+    });
+
+  let ordered = [];
+  if (tier === "watchlist") {
+    const all = report.stocks.filter(
+      (s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null)
+    );
+    const { kept } = applyListFilter(all);
+    if (!kept.some((s) => s.setup_stage)) {
+      ordered = sortDesc(kept);
+    } else {
+      const byGroup = new Map(SETUP_STAGE_GROUPS.map((g) => [g.key, []]));
+      for (const s of kept) {
+        byGroup.get(setupStageGroupKey(s) || "inactive").push(s);
+      }
+      for (const g of SETUP_STAGE_GROUPS) {
+        ordered = ordered.concat(sortDesc(byGroup.get(g.key)));
+      }
+    }
+  } else {
+    const all = report.stocks.filter((s) => s.tier === tier);
+    const { kept } = applyListFilter(all);
+    for (const status of STATUS_ORDER) {
+      ordered = ordered.concat(sortDesc(kept.filter((s) => s.status === status)));
+    }
+  }
+  return ordered.filter((s) => s.has_chart !== false).map((s) => s.code);
+}
+
+// 個別株画面の前後ナビ(＜=次へ / ＞=前へ)。listNavTier のフィルタ済み並び順で
+// 現在銘柄の前後を割り出し、ボタンの遷移先(dataset.target)と有効/無効を更新。
+function updateStockNav(code) {
+  const nextBtn = document.getElementById("stock-nav-next"); // ＜ = 次へ(index+1)
+  const prevBtn = document.getElementById("stock-nav-prev"); // ＞ = 前へ(index-1)
+  if (!nextBtn || !prevBtn) return;
+  const codes = orderedTierCodes(listNavTier);
+  const idx = codes.indexOf(code);
+  const nextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
+  const prevCode = idx > 0 ? codes[idx - 1] : null;
+  nextBtn.dataset.target = nextCode || "";
+  nextBtn.disabled = !nextCode;
+  prevBtn.dataset.target = prevCode || "";
+  prevBtn.disabled = !prevCode;
+}
+
+// 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。
+function initStockNav() {
+  const wire = (id) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.target;
+      if (target) window.location.hash = `stock/${encodeURIComponent(target)}`;
+    });
+  };
+  wire("stock-nav-next");
+  wire("stock-nav-prev");
+}
+
 // ソートボタンのラベルを、今のティアの並び替えキーに合わせて更新。
 function updateListSortLabel() {
   const el = document.getElementById("list-sort-label");
@@ -1466,9 +1547,9 @@ function initListTools() {
   document.querySelectorAll("#view-stocklist .sheet-close").forEach((b) => {
     b.addEventListener("click", closeSheets);
   });
-  // 永続フィルタ設定へのリンクはビュー遷移するのでシートを閉じておく。
-  const permlink = document.querySelector("#filter-sheet .adhoc-filter-permlink");
-  if (permlink) permlink.addEventListener("click", closeSheets);
+  // 「適用」ボタン: フォームの内容を一時フィルタへ反映してシートを閉じる。
+  const applyBtn = document.getElementById("alf-apply-btn");
+  if (applyBtn) applyBtn.addEventListener("click", () => { applyAdhocFilterFromForm(); closeSheets(); });
 
   const opts = document.getElementById("list-sort-options");
   if (opts) {
@@ -1519,6 +1600,7 @@ function renderCardList(stocks, tier, options = {}) {
     // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
     if (s.has_chart !== false) {
       const go = () => {
+        listNavTier = tier; // 前後ナビはこのティアのフィルタ済み並び順を辿る
         window.location.hash = `stock/${encodeURIComponent(s.code)}`;
       };
       // キーボード操作対応: divのままフォーカス可能+Enter/Spaceで遷移。
@@ -1719,6 +1801,8 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
   setupYahooFinanceLink(code);
+  initStockNav();
+  updateStockNav(code);
   setupStockPanels();
   renderStockSummary(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);

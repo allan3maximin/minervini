@@ -1377,6 +1377,37 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
 }
 .stock-tabs::-webkit-scrollbar, .list-tabs::-webkit-scrollbar, .market-tabs::-webkit-scrollbar { display: none; }
+
+/* 個別株のタブバー: ＜(次へ) タブ群 ＞(前へ) を横一列に。タブ群は中央維持。 */
+.stock-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.stock-tabs-bar .stock-tabs { margin: 8px 0 2px; }
+.stock-nav-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: rgba(19, 23, 32, 0.88);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: color 0.18s, opacity 0.18s;
+}
+.stock-nav-btn:active { color: var(--text); }
+.stock-nav-btn:disabled { opacity: 0.3; cursor: default; }
+.stock-nav-btn .bi { line-height: 1; }
 .stock-tab, .list-tab, .market-tab {
   flex: 1 0 auto;
   min-height: 30px;
@@ -1692,6 +1723,8 @@ a.nav-btn:hover { border-color: var(--link); }
   color: #05130b;
   font-weight: 600;
 }
+/* 下部配置版: 各サブパネルの下に置くので上に余白を取り、下余白は詰める。 */
+.settings-subtabs-bottom { margin: 20px 0 0; }
 .settings-subpanel { display: none; }
 .settings-subpanel.active { display: block; }
 

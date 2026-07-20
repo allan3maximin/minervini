@@ -2,6 +2,49 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (83): フィルタUI微調整 + 個別株の前後銘柄ナビ + テンプレ統合
+
+### 要望(ユーザー原文)
+> フィルターモーダルに 適用ボタンを追加して。永続フィルタの表示は不要。
+> 本命 候補 監視 RSなど フィルター の表示順にして
+> 単元価格は不要なので削除して 株価上限・下限があれば十分
+> 市場区分を除外 じゃなくて 表示している市場をチェック入れている状態にして。デフォルトは全てチェック済みで。
+> 設定の バッチ実行履歴 フィルター設定 投資法 は下部に配置して欲しい。
+> 個別株画面をリストの前後の項目に移動したい。フィルタをかけた株リストを個別株画面で次へ前へで移動したい。
+> 次へは＜ 前へは＞ の表記で ＜ サマリー グラフ ファンダ ロット ＞ として ＜＞のアイコンはいい感じのやつにして。
+> テンプレはサマリーに移動する。
+
+### 変更内容
+1. **`docs/index.html`**
+   - フィルタボトムシート: 単元価格フィールド削除。市場区分を「表示している市場」
+     (id `alf-show-segments`、デフォルト全チェック)に変更。`.adhoc-filter-permlink`
+     削除、代わりに「適用」ボタン(`#alf-apply-btn`)追加。
+   - `.list-tools`: ソートボタンをフィルタボタンより前へ(タブ→RSソート→フィルター)。
+   - 設定永続フォーム: 単元価格削除、市場区分→`lf-show-segments`(全チェック)。
+     `.settings-subtabs` を画面**下部**へ移動(`.settings-subtabs-bottom`)。
+   - 個別株: テンプレ(must)タブ・パネルを削除しMUST条件チェックリストをサマリーへ移設。
+     stock-tabsを `.stock-tabs-bar`(＜next + 4タブ + ＞prev)で包む。矢印は
+     bi-chevron-left(次へ)/bi-chevron-right(前へ)。
+   - asset版数 app.js=46979d61 / style.css=c4916314。
+2. **`docs/assets/app.js`**
+   - フィルタ形状変更: `maxUnitCost`/`SHARES_PER_UNIT`削除、`excludeSegments`→
+     `showSegments`(表示する市場、初期=全市場)。`loadListFilters`は旧`excludeSegments`を
+     反転して読む後方互換あり。`stockPassesListFilter`/`listFilterActive`/
+     `updateAdhocFilterBadge`を反転ロジックに。
+   - 一時フィルタは入力都度反映をやめ、`applyAdhocFilterFromForm()`(適用ボタンから
+     initListToolsで配線)でのみ反映。クリアはフォーム見た目リセットのみ(全チェックに戻す)。
+   - 前後ナビ: `listNavTier`(カードクリック時に記録)、`orderedTierCodes(tier)`
+     (renderTier/renderPriorityTierと同じグループ順・ソートでコード列を再現、
+     has_chart===false除外)、`updateStockNav(code)`/`initStockNav()`。initStockPageで呼ぶ。
+     ＜=次へ(index+1)/＞=前へ(index-1)のユーザー指定マッピング。
+3. **`docs/assets/style.css`**
+   - `.stock-tabs-bar`/`.stock-nav-btn`(丸ピル・無効時opacity 0.3)、
+     `.settings-subtabs-bottom`(margin上余白)。
+
+### 動作確認
+- `node --check app.js` OK。stock-panel=4/must参照はサマリー内1件のみ/前後ナビ・適用
+  ボタン等のマーカー存在をgrep確認。
+
 ## 2026-07-20 (82): タブ横にフィルタ/ソート(ボトムシート)+設定サブタブ化
 
 ### 要望(ユーザー原文)

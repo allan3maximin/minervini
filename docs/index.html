@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=6c6aff53">
+<link rel="stylesheet" href="assets/style.css?v=c4916314">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -126,13 +126,13 @@
       <button type="button" class="list-tab" data-panel="watchlist" role="tab">監視</button>
     </div>
     <div class="list-tools">
-      <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="フィルタ">
-        <i class="bi bi-funnel"></i>
-        <span id="adhoc-filter-badge" class="adhoc-filter-badge" hidden></span>
-      </button>
       <button type="button" class="list-tool-btn" id="list-sort-btn" aria-label="並び替え">
         <i class="bi bi-sort-down"></i>
         <span id="list-sort-label" class="list-sort-label">スコア</span>
+      </button>
+      <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="フィルタ">
+        <i class="bi bi-funnel"></i>
+        <span id="adhoc-filter-badge" class="adhoc-filter-badge" hidden></span>
       </button>
     </div>
   </div>
@@ -146,10 +146,6 @@
       <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="sheet-body list-filter-form" id="adhoc-filter-form">
-      <label class="lf-field lf-field-wide">
-        <span class="lf-label">単元価格の上限(円) <small>株価×100株の最低購入代金</small></span>
-        <input type="number" id="alf-max-unit-cost" min="0" step="10000" inputmode="numeric" placeholder="例: 1000000(=100万円超を除外)">
-      </label>
       <div class="lf-row">
         <label class="lf-field">
           <span class="lf-label">株価の下限(円)</span>
@@ -181,16 +177,16 @@
         </label>
       </div>
       <div class="lf-field">
-        <span class="lf-label">市場区分を除外</span>
-        <div class="lf-checks" id="alf-exclude-segments">
-          <label class="lf-check"><input type="checkbox" value="プライム"> プライム</label>
-          <label class="lf-check"><input type="checkbox" value="スタンダード"> スタンダード</label>
-          <label class="lf-check"><input type="checkbox" value="グロース"> グロース</label>
+        <span class="lf-label">表示している市場</span>
+        <div class="lf-checks" id="alf-show-segments">
+          <label class="lf-check"><input type="checkbox" value="プライム" checked> プライム</label>
+          <label class="lf-check"><input type="checkbox" value="スタンダード" checked> スタンダード</label>
+          <label class="lf-check"><input type="checkbox" value="グロース" checked> グロース</label>
         </div>
       </div>
       <div class="lf-actions">
         <button type="button" id="alf-clear-btn" class="secondary">クリア</button>
-        <a href="#batch" class="adhoc-filter-permlink">永続フィルタの設定へ</a>
+        <button type="button" id="alf-apply-btn" class="primary">適用</button>
       </div>
     </div>
   </div>
@@ -280,12 +276,6 @@
 <section id="view-batch" class="view-section" hidden>
   <h2>設定</h2>
 
-  <div class="settings-subtabs" id="settings-subtabs" role="tablist">
-    <button type="button" class="settings-subtab active" data-subtab="batch" role="tab">バッチ実行/履歴</button>
-    <button type="button" class="settings-subtab" data-subtab="filter" role="tab">フィルター設定</button>
-    <button type="button" class="settings-subtab" data-subtab="invest" role="tab">投資法</button>
-  </div>
-
   <div class="settings-subpanels">
   <div class="settings-subpanel active" data-subpanel="batch">
   <section class="settings-section">
@@ -307,12 +297,8 @@
   <div class="settings-subpanel" data-subpanel="filter">
   <section class="settings-section">
     <h3>銘柄リストのフィルタ</h3>
-    <p class="tier-note">ここで設定した条件は、次に変更するまで銘柄リスト(本命/候補/監視)に永続で適用されます。空欄の項目は無視します。単元価格=株価×100株(最低購入代金)。指標データが無い銘柄はそのフィルタでは除外しません。</p>
+    <p class="tier-note">ここで設定した条件は、次に変更するまで銘柄リスト(本命/候補/監視)に永続で適用されます。空欄の項目は無視します。指標データが無い銘柄はそのフィルタでは除外しません。</p>
     <div class="list-filter-form" id="list-filter-form">
-      <label class="lf-field lf-field-wide">
-        <span class="lf-label">単元価格の上限(円) <small>株価×100株の最低購入代金</small></span>
-        <input type="number" id="lf-max-unit-cost" min="0" step="10000" inputmode="numeric" placeholder="例: 1000000(=100万円超を除外)">
-      </label>
       <div class="lf-row">
         <label class="lf-field">
           <span class="lf-label">株価の下限(円)</span>
@@ -344,11 +330,11 @@
         </label>
       </div>
       <div class="lf-field">
-        <span class="lf-label">市場区分を除外</span>
-        <div class="lf-checks" id="lf-exclude-segments">
-          <label class="lf-check"><input type="checkbox" value="プライム"> プライム</label>
-          <label class="lf-check"><input type="checkbox" value="スタンダード"> スタンダード</label>
-          <label class="lf-check"><input type="checkbox" value="グロース"> グロース</label>
+        <span class="lf-label">表示している市場</span>
+        <div class="lf-checks" id="lf-show-segments">
+          <label class="lf-check"><input type="checkbox" value="プライム" checked> プライム</label>
+          <label class="lf-check"><input type="checkbox" value="スタンダード" checked> スタンダード</label>
+          <label class="lf-check"><input type="checkbox" value="グロース" checked> グロース</label>
         </div>
       </div>
       <div class="lf-actions">
@@ -373,6 +359,12 @@
   </section>
   </div>
   </div>
+
+  <div class="settings-subtabs settings-subtabs-bottom" id="settings-subtabs" role="tablist">
+    <button type="button" class="settings-subtab active" data-subtab="batch" role="tab">バッチ実行/履歴</button>
+    <button type="button" class="settings-subtab" data-subtab="filter" role="tab">フィルター設定</button>
+    <button type="button" class="settings-subtab" data-subtab="invest" role="tab">投資法</button>
+  </div>
 </section>
 
 <section id="view-stock" class="view-section stock-view" hidden>
@@ -391,6 +383,10 @@
       <section class="detail-card">
         <h2>スコア内訳</h2>
         <div id="score-breakdown"></div>
+      </section>
+      <section class="detail-card">
+        <h2>MUST条件チェックリスト</h2>
+        <div id="must-checklist"></div>
       </section>
     </div>
 
@@ -440,13 +436,6 @@
       </section>
     </div>
 
-    <div class="stock-panel" data-panel="must">
-      <section class="detail-card">
-        <h2>MUST条件チェックリスト</h2>
-        <div id="must-checklist"></div>
-      </section>
-    </div>
-
     <div class="stock-panel" data-panel="sizing">
       <section class="detail-card" id="sizing-card">
         <h2>ポジションサイジング</h2>
@@ -470,12 +459,15 @@
     </div>
   </div>
 
-  <div class="stock-tabs" id="stock-tabs" role="tablist">
-    <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
-    <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
-    <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
-    <button type="button" class="stock-tab" data-panel="must" role="tab">テンプレ</button>
-    <button type="button" class="stock-tab" data-panel="sizing" role="tab">ロット</button>
+  <div class="stock-tabs-bar">
+    <button type="button" class="stock-nav-btn" id="stock-nav-next" aria-label="次の銘柄へ"><i class="bi bi-chevron-left"></i></button>
+    <div class="stock-tabs" id="stock-tabs" role="tablist">
+      <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
+      <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
+      <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
+      <button type="button" class="stock-tab" data-panel="sizing" role="tab">ロット</button>
+    </div>
+    <button type="button" class="stock-nav-btn" id="stock-nav-prev" aria-label="前の銘柄へ"><i class="bi bi-chevron-right"></i></button>
   </div>
 </section>
 
@@ -496,6 +488,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=029c5dfe"></script>
+<script src="assets/app.js?v=46979d61"></script>
 </body>
 </html>
