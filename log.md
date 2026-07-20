@@ -2,6 +2,20 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (88): 本命/候補タブもステータス単位で枠分け
+
+### 要望(ユーザー原文)
+> 候補タブにも適用されてるんかな? 監視Aやそれ以外でセクション分けされるように
+
+### 対応
+- 本命/候補タブは renderTier→renderStatusSection でステータス(監視A/ブレイクアウト等)
+  ごとに `.status-section` を出しているが枠が無かった。監視タブの `.stage-section` と
+  同じ背景枠(--panel-2+border+radius+padding)を `.status-section` に付与。
+  BREAKOUT/BREAKOUT_WEAK は枠線をアクセント色に(stage-nearと同じ扱い)。
+  h3のtopマージンを0に。外側 tier-section の透明化ルールを watchlist限定から
+  `.list-panel .tier-section` へ拡張(全タブで二重枠回避)。
+- cache-buster: style.css aa088dc2→c89272fc (HTML/JS実体変更なし)。
+
 ## 2026-07-20 (87): 監視タブのステージ枠分け / ティア見出しの文字拡大
 
 ### 要望(ユーザー原文)

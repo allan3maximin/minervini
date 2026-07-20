@@ -264,8 +264,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .tier-note { color: var(--text-dim); font-size: 12px; margin: 0 0 12px; }
 
-.status-section { margin-bottom: 14px; }
+/* 本命/候補タブ: ステータス(監視A/ブレイクアウト等)ごとに背景枠で分離。
+   監視タブの stage-section と同じ見た目に揃える。 */
+.status-section {
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+}
 .status-section:last-child { margin-bottom: 0; }
+.status-BREAKOUT, .status-BREAKOUT_WEAK { border-color: var(--accent); }
 
 /* 監視タブ: セットアップ進行度グループ(2026-07-17)。<details>で折りたたみ可。
    あと一歩/ベース形成中/… の単位ごとに背景枠を持たせて視覚的に分ける。 */
@@ -311,7 +320,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .status-section h3 {
   display: inline-block;
-  margin: 6px 0 8px;
+  margin: 0 0 8px;
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--panel-2);
@@ -1592,9 +1601,9 @@ a.nav-btn:hover { border-color: var(--link); }
   margin: 0 0 8px;
 }
 .tier-head-title { font-size: 16px; font-weight: 700; color: var(--text); }
-/* 監視タブは中の stage-section 各自が枠を持つので、外側の tier-section は
-   二重枠を避けるため背景・枠なしの透明コンテナにする。 */
-.list-panel[data-panel="watchlist"] .tier-section {
+/* 全タブとも、中の status-section / stage-section が各自枠を持つので、外側の
+   tier-section は二重枠を避けるため背景・枠なしの透明コンテナにする。 */
+.list-panel .tier-section {
   background: transparent;
   border: none;
   padding: 0;
