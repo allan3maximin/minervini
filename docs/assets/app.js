@@ -1474,10 +1474,12 @@ function updateStockNav(code) {
   const idx = codes.indexOf(code);
   const nextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
   const prevCode = idx > 0 ? codes[idx - 1] : null;
+  // 参照先(前後の銘柄)が無いボタンは無効化ではなく非表示にする。
+  // リスト外から直接開いた(idx<0)場合は両方消える。
   nextBtn.dataset.target = nextCode || "";
-  nextBtn.disabled = !nextCode;
+  nextBtn.hidden = !nextCode;
   prevBtn.dataset.target = prevCode || "";
-  prevBtn.disabled = !prevCode;
+  prevBtn.hidden = !prevCode;
 }
 
 // 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。

@@ -22,6 +22,11 @@
   見え方を補正。x=0 が価格軸72pxを除いた描画域左端に一致。cache-buster: style.css
   3911c51c→b8f9e4da, app.js 46979d61→54b08678。ローカルは暗号化report.jsonで描画不可のため
   push後にiPhoneミラーで目視確認 → top% を微調整する。
+- **前後ナビ ＜＞ を非表示化**: 参照先(前後の銘柄)が無い場合、従来は disabled(グレー表示)
+  だったのを `hidden` で非表示に変更(updateStockNav)。`.stock-nav-btn` の
+  `display:inline-flex` がUAの `[hidden]` に勝つため `.stock-nav-btn[hidden]{display:none}`
+  をCSSに追加。リスト外から直接開いた(idx<0)場合は両方消える。
+  cache-buster: style.css b8f9e4da→0c367476, app.js 54b08678→1ae45e42。
 
 ## 2026-07-20 (83): フィルタUI微調整 + 個別株の前後銘柄ナビ + テンプレ統合
 

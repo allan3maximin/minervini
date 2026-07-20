@@ -1419,6 +1419,8 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .stock-nav-btn:active { color: var(--text); }
 .stock-nav-btn:disabled { opacity: 0.3; cursor: default; }
+/* 参照先が無いナビは非表示。display:inline-flex がUAの[hidden]に勝つため明示的に潰す */
+.stock-nav-btn[hidden] { display: none; }
 .stock-nav-btn .bi { line-height: 1; }
 .stock-tab, .list-tab, .market-tab {
   flex: 1 0 auto;
