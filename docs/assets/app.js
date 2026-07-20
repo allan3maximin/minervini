@@ -423,7 +423,6 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
-  initCardSortChips();
   startLiveIndices();
 }
 
@@ -1392,9 +1391,11 @@ function renderStatusSection(status, stocks, tier, sortKey) {
 }
 
 // ---------------------------------------------------------------------------
-// リスト画面の並び替えチップ(スコア/RS/前日比)。クリックで該当ティアの
-// カードリストを再描画し、選択はlocalStorageへ保存する。initDashboardの
-// 描画後に呼ばれ、再描画はreportCache(復号済みreport.json)を使う。
+// リスト画面の並び替え/フィルタ(タブ横のツールボタン + ボトムシート)。
+// 並び替えは「今開いているタブ(ティア)」のカードを対象に、スコア/RS/前日比で
+// 実行。選択はティアごとlocalStorage(CARD_SORT_STORAGE_KEY)に保存するので、
+// リロードや個別株画面からの復帰後も維持される。フィルタ(その時用)はメモリ保持
+// (adhocListFilter)のためSPA内では維持、リロードで解除。
 // ---------------------------------------------------------------------------
 
 function rerenderTierBody(tier) {
@@ -1407,31 +1408,84 @@ function rerenderTierBody(tier) {
   }
 }
 
-function initCardSortChips() {
-  document.querySelectorAll(".card-sort-chips").forEach((chips) => {
-    const tier = chips.dataset.tier;
-    const sync = () => {
-      const key = getCardSortKey(tier);
-      chips.querySelectorAll("button[data-sort]").forEach((b) => {
-        b.classList.toggle("active", b.dataset.sort === key);
-      });
-    };
-    sync(); // 保存済みの選択をHTMLの初期activeへ反映
+// 今アクティブなリストのティア(タブ)。ソートシートはこのティアを対象にする。
+function currentListTier() {
+  const active = document.querySelector("#list-tabs .list-tab.active");
+  return (active && active.dataset.panel) || "confirmed";
+}
 
-    if (chips.dataset.wired) return;
-    chips.dataset.wired = "1";
+// ソートボタンのラベルを、今のティアの並び替えキーに合わせて更新。
+function updateListSortLabel() {
+  const el = document.getElementById("list-sort-label");
+  if (!el) return;
+  el.textContent = CARD_SORT_LABELS[getCardSortKey(currentListTier())] || "スコア";
+}
+
+// ソートシートの選択状態を、今のティアの並び替えキーに同期。
+function syncSortSheet() {
+  const opts = document.getElementById("list-sort-options");
+  if (!opts) return;
+  const key = getCardSortKey(currentListTier());
+  opts.querySelectorAll("button[data-sort]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.sort === key);
+  });
+}
+
+// タブ横のフィルタ/並び替えボタン + ボトムシートの配線。initListView から毎回
+// 呼ばれるが、イベント登録は初回のみ(dataset.wired)。ラベル/バッジ同期は毎回。
+function initListTools() {
+  const filterBtn = document.getElementById("list-filter-btn");
+  const sortBtn = document.getElementById("list-sort-btn");
+  const backdrop = document.getElementById("list-sheet-backdrop");
+  const filterSheet = document.getElementById("filter-sheet");
+  const sortSheet = document.getElementById("sort-sheet");
+  if (!filterBtn || !sortBtn || !backdrop) return;
+
+  const closeSheets = () => {
+    backdrop.hidden = true;
+    if (filterSheet) { filterSheet.classList.remove("open"); filterSheet.hidden = true; }
+    if (sortSheet) { sortSheet.classList.remove("open"); sortSheet.hidden = true; }
+  };
+  const openSheet = (sheet) => {
+    if (!sheet) return;
+    sheet.hidden = false;
+    backdrop.hidden = false;
+    // 表示直後にopenを付けてスライドイン(transitionを効かせる)。
+    requestAnimationFrame(() => sheet.classList.add("open"));
+  };
+
+  // 毎回: ラベル/選択状態を最新へ同期。
+  updateListSortLabel();
+
+  if (filterBtn.dataset.wired) return;
+  filterBtn.dataset.wired = "1";
+
+  filterBtn.addEventListener("click", () => openSheet(filterSheet));
+  sortBtn.addEventListener("click", () => { syncSortSheet(); openSheet(sortSheet); });
+  backdrop.addEventListener("click", closeSheets);
+  document.querySelectorAll("#view-stocklist .sheet-close").forEach((b) => {
+    b.addEventListener("click", closeSheets);
+  });
+  // 永続フィルタ設定へのリンクはビュー遷移するのでシートを閉じておく。
+  const permlink = document.querySelector("#filter-sheet .adhoc-filter-permlink");
+  if (permlink) permlink.addEventListener("click", closeSheets);
+
+  const opts = document.getElementById("list-sort-options");
+  if (opts) {
     const applySort = (btn) => {
-      if (!CARD_SORTS[btn.dataset.sort]) return;
+      if (!btn || !CARD_SORTS[btn.dataset.sort]) return;
+      const tier = currentListTier();
       setCardSortKey(tier, btn.dataset.sort);
-      sync();
+      syncSortSheet();
+      updateListSortLabel();
       rerenderTierBody(tier);
+      closeSheets();
     };
-    chips.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-sort]");
-      if (!btn) return;
-      applySort(btn);
-    });
-    wireTabSlide(chips, "button[data-sort]", applySort);
+    opts.addEventListener("click", (e) => applySort(e.target.closest("button[data-sort]")));
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSheets();
   });
 }
 
@@ -1832,6 +1886,7 @@ function initListView() {
   if (!panels || !tabs) return;
 
   initAdhocFilter();
+  initListTools();
 
   const setActive = (name) => {
     tabs.querySelectorAll(".list-tab").forEach((b) => {
@@ -1842,6 +1897,8 @@ function initListView() {
       p.classList.toggle("active", on);
       if (on) p.scrollTop = 0; // 切替のたびに先頭へ
     });
+    // 並び替えはティアごとに保存するため、タブ切替でボタンのラベルも更新。
+    updateListSortLabel();
   };
 
   // 初期表示は本命(既にactiveなタブがあればそれを尊重)。
@@ -1857,6 +1914,32 @@ function initListView() {
     setActive(btn.dataset.panel);
   });
   wireTabSlide(tabs, ".list-tab", (btn) => setActive(btn.dataset.panel));
+}
+
+// 設定画面のサブタブ切替(バッチ実行/履歴・フィルター設定・投資法)。
+// batchビュー表示のたびに呼ばれる。イベント登録は初回のみ(dataset.wired)。
+function initSettingsSubtabs() {
+  const tabs = document.getElementById("settings-subtabs");
+  if (!tabs) return;
+  const panels = document.querySelectorAll("#view-batch .settings-subpanel");
+
+  const setActive = (name) => {
+    tabs.querySelectorAll(".settings-subtab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.subtab === name);
+    });
+    panels.forEach((p) => p.classList.toggle("active", p.dataset.subpanel === name));
+  };
+
+  const initial = tabs.querySelector(".settings-subtab.active") || tabs.querySelector(".settings-subtab");
+  setActive(initial ? initial.dataset.subtab : "batch");
+
+  if (tabs.dataset.wired) return;
+  tabs.dataset.wired = "1";
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".settings-subtab");
+    if (!btn) return;
+    setActive(btn.dataset.subtab);
+  });
 }
 
 // 市況画面(市況データ/市況分析)のタブ切替。initListView と同じパターン
@@ -3286,6 +3369,7 @@ function showView(hash) {
     window.MinerviniBatch.initBatchView();
   }
   if (name === "batch") {
+    initSettingsSubtabs();
     initListFilterSettings();
   }
   if (name === "positions") {

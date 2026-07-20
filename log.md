@@ -2,6 +2,66 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (82): タブ横にフィルタ/ソート(ボトムシート)+設定サブタブ化
+
+### 要望(ユーザー原文)
+> 株リスト画面の表記は フィルターマーク を 本命 候補 監視 の横に追加でOK。
+> 同様にソートボタンも追加して スコア RS 前日比 もソート要素として追加して。
+> フィルターとソートは 個別株画面から戻ってきた時も維持されているようにしたい。
+> フィルターの維持条件と実装を見直して欲しい。
+> 設定画面は バッチ実行/履歴 フィルター設定 投資法 で分けて。
+(AskUserQuestion回答: 開き方=ボトムシート / ティア内ソートチップ=タブ横に一本化 /
+ 一時フィルタ維持=SPA内維持・リロードで解除 / 設定=サブタブで分割)
+
+### 設計
+- 一時フィルタ(セッション81の `<details class="adhoc-filter">` トップバー)を廃止し、
+  **タブ行(本命/候補/監視)の右のフィルタアイコン**から開く**ボトムシート**へ移設。
+- 各ティア内にあったソートチップ(スコア/RS/前日比)を廃止し、**タブ行の並び替え
+  ボタン**に一本化。ソートは「今開いているタブ(ティア)」を対象に実行。
+- 維持条件: ソートはティアごと localStorage(`minervini-card-sort`)保存 → リロード・
+  個別株往復とも維持。一時フィルタはメモリ(`adhocListFilter`)保持 → SPA内は維持、
+  リロードで解除。どちらもDOMに描画済みのままなので個別株画面から戻っても保たれる。
+- 設定画面(#view-batch)を **3サブタブ**に再編: バッチ実行/履歴(アクセス解錠を内包)、
+  フィルター設定、投資法。
+
+### 変更内容
+1. **`docs/index.html`**
+   - #view-stocklist: `adhoc-filter` details と各ティアの `.card-sort-chips` を削除。
+     タブを `.list-tabs-bar`(タブ + `.list-tools`: フィルタ/並び替えボタン)で包む。
+     フィルタボタンに件数バッジ(`#adhoc-filter-badge`)、並び替えボタンに現在キー
+     ラベル(`#list-sort-label`)。共有バックドロップ + `#filter-sheet`(alf-*フォームを
+     移設)+ `#sort-sheet`(スコア/RS/前日比)を追加。
+   - #view-batch: `.settings-subtabs` + 3つの `.settings-subpanel`(batch/filter/invest)に
+     再編。アクセス+バッチ実行=batch、銘柄リストのフィルタ=filter、投資法リンク=invest。
+   - asset版数 app.js=029c5dfe / style.css=6c6aff53 に更新。
+2. **`docs/assets/app.js`**
+   - `initCardSortChips()` を削除(initDashboardの呼び出しも削除)。代わりに
+     `currentListTier()` / `updateListSortLabel()` / `syncSortSheet()` / `initListTools()`
+     を追加。initListTools がフィルタ/ソートシートの開閉、アクティブティアへのソート
+     適用(`setCardSortKey`→`rerenderTierBody`)、ラベル/バッジ同期を担う。
+   - `initListView`: 先頭で `initListTools()` を呼び、`setActive` 内で
+     `updateListSortLabel()`(タブ切替でラベル追従)。
+   - `initSettingsSubtabs()` を追加し、showViewの `name==="batch"` で呼ぶ。
+3. **`docs/assets/style.css`**
+   - `.card-sort-chips` 削除。`.list-tabs-bar`/`.list-tools`/`.list-tool-btn`
+     (+バッジ重ね)/ `.sheet-backdrop`/`.bottom-sheet`(下からスライドイン)/
+     `.sheet-head`/`.sheet-title`/`.sheet-close`/`.sheet-hint`/`.sort-options` を追加。
+   - `.settings-subtabs`/`.settings-subtab`/`.settings-subpanel` を追加。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- getElementById参照ID(list-filter-btn/list-sort-btn/filter-sheet/sort-sheet/
+  list-sort-label/list-sort-options/settings-subtabs 他)が全てindex.htmlに存在。
+- 旧構造の残存参照(card-sort-chips/initCardSortChips/adhoc-filter details)なし。
+- HTMLParserでタグ入れ子バランスOK。
+- **git add 済み**。ユーザーは commit & push するだけ(旧セッションはcommit済みだが
+  push待ちのため、本セッション分も含めてまとめてpush可)。
+- 実機確認待ち: シート開閉/バックドロップ・Escで閉じる、ソートのティア別維持、
+  個別株往復での維持、設定サブタブ切替。
+
+### 次にやること
+- 実機確認 → 問題なければ push。
+
 ## 2026-07-20 (81): リスト画面に一時フィルタバーを追加(恒久フィルタとAND合成)
 
 ### 要望(ユーザー原文)
