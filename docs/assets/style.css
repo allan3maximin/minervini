@@ -1731,6 +1731,46 @@ a.nav-btn:hover { border-color: var(--link); }
 
 /* ------------------------------------------------------- 投資法ページ */
 
+/* 一覧→詳細方式。invest-menu(項目一覧)とinvest-detail(戻る+セクション1枚)を
+   initInvestView がハッシュ(#invest / #invest/<id>)で出し分ける。 */
+.invest-menu > h2 { margin: 0 0 4px; }
+.invest-menu > .tier-note { margin: 0 0 12px; }
+.invest-menu-list { display: flex; flex-direction: column; gap: 8px; }
+.invest-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+.invest-menu-item:hover,
+.invest-menu-item:focus-visible { border-color: var(--border-strong); }
+.imi-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.imi-text > strong { font-size: 14px; }
+.imi-text > .tier-note { margin: 0; }
+.imi-chevron { color: var(--text-dim); font-size: 14px; flex: 0 0 auto; }
+
+/* 詳細ヘッダの戻るリンク。個別株の前後ナビ等と同じトーンで控えめに。 */
+.invest-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: none;
+}
+.invest-back:hover,
+.invest-back:focus-visible { border-color: var(--border-strong); color: var(--text); }
+
 /* 外側は透明コンテナ。各テーマは .invest-section が個別に枠を持つ
    (監視タブの stage-section と同じ考え方で二重枠を避ける)。 */
 .invest-content {

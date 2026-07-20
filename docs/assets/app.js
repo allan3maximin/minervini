@@ -3512,6 +3512,30 @@ async function initPositionsView() {
 
 const VIEWS = ["dashboard", "heatmap", "stocklist", "invest", "positions", "batch", "stock"];
 
+// 投資法ページ(view-invest)の一覧→詳細ナビ。
+// #invest        = 一覧(invest-menu)を表示。
+// #invest/<id>   = 対応する data-section の詳細1枚だけ表示(戻るリンクで #invest に戻る)。
+// ハッシュ遷移で駆動するため、ブラウザ/端末の「戻る」でも一覧に戻れる。
+function initInvestView(param) {
+  const menu = document.getElementById("invest-menu");
+  const detail = document.getElementById("invest-detail");
+  if (!menu || !detail) return;
+  const sections = detail.querySelectorAll(".invest-section");
+  let target = null;
+  sections.forEach((s) => {
+    const on = !!param && s.dataset.section === param;
+    s.hidden = !on;
+    if (on) target = param;
+  });
+  const showDetail = target !== null;
+  menu.hidden = showDetail;
+  detail.hidden = !showDetail;
+  // 前回のスクロール位置を引き継がないようリセット。
+  const body = document.getElementById("invest-detail-body");
+  if (body) body.scrollTop = 0;
+  (showDetail ? detail : menu).scrollTop = 0;
+}
+
 function showView(hash) {
   const [rawName, param] = hash.split("/");
   const name = VIEWS.includes(rawName) ? rawName : "dashboard";
@@ -3547,6 +3571,9 @@ function showView(hash) {
   if (name === "batch") {
     initSettingsSubtabs();
     initListFilterSettings();
+  }
+  if (name === "invest") {
+    initInvestView(param);
   }
   if (name === "positions") {
     initPositionsView();
