@@ -267,16 +267,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .status-section { margin-bottom: 14px; }
 .status-section:last-child { margin-bottom: 0; }
 
-/* 監視タブ: セットアップ進行度グループ(2026-07-17)。<details>で折りたたみ可。 */
-.stage-section { margin-bottom: 14px; }
+/* 監視タブ: セットアップ進行度グループ(2026-07-17)。<details>で折りたたみ可。
+   あと一歩/ベース形成中/… の単位ごとに背景枠を持たせて視覚的に分ける。 */
+.stage-section {
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+}
 .stage-section:last-child { margin-bottom: 0; }
+.stage-near { border-color: var(--accent); }
 .stage-section > summary {
   cursor: pointer;
   list-style: none;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 6px 0 8px;
+  margin: 0 0 8px;
 }
 .stage-section > summary::-webkit-details-marker { display: none; }
 .stage-section > summary::before {
@@ -1580,10 +1588,17 @@ a.nav-btn:hover { border-color: var(--link); }
 .tier-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 0 0 6px;
+  gap: 5px;
+  margin: 0 0 8px;
 }
-.tier-head-title { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+.tier-head-title { font-size: 16px; font-weight: 700; color: var(--text); }
+/* 監視タブは中の stage-section 各自が枠を持つので、外側の tier-section は
+   二重枠を避けるため背景・枠なしの透明コンテナにする。 */
+.list-panel[data-panel="watchlist"] .tier-section {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
 /* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
    横スクロール表は廃止したので縦のみ(横は明示的に禁止)。 */
 .list-panel [id$="-tier-body"] {
