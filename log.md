@@ -2,6 +2,27 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (84): 個別株タブバーの縦位置ズレ修正
+
+### 要望(ユーザー原文)
+> `＜ サマリー グラフ ファンダ ロット ＞`の＜＞がサマリー グラフ ファンダ ロットより若干上にあるのが気になる
+> あと個別株グラフの7/17の日付とホバー時の日付（いまは7/2にホバー中）の位置が若干上なのも気になる
+
+### 対応
+- **タブバーのズレ**: `.stock-tabs` に付いていた `margin: 8px 0 2px`（上下非対称）が原因。
+  flex `align-items:center` のバー内で、非対称マージンによりタブだけ約3px下にズレ、
+  相対的にナビボタン(＜＞)が上に見えていた。マージンを `.stock-tabs-bar` 側に移し、
+  `.stock-tabs { margin: 0 }` に変更して解消。cache-buster: style.css c4916314→3911c51c。
+- **チャート日付の縦位置**: 全日付を自前オーバーレイ化して対応(ユーザー判断=option2「腹くくって」)。
+  ライブラリの時間軸を全ペイン `visible:false` にし、目盛・ホバー・最新日を `#chart-date-axis`
+  というDOMストリップに描き直した。app.js: `addLatestDateLabel`/`alignLatestDateLabel` を
+  `renderDateAxis`(目盛を最新バー起点で右→左に最小間隔46pxで配置) + `setDateAxisHover`
+  (クロスヘアx位置に強調ラベル1個)に置換。makeChartは3ペインとも `showTimeAxis:false`。
+  縦位置は `.chart-date-axis .cda-label { top:52% }` の1箇所で制御でき、従来「上寄り」だった
+  見え方を補正。x=0 が価格軸72pxを除いた描画域左端に一致。cache-buster: style.css
+  3911c51c→b8f9e4da, app.js 46979d61→54b08678。ローカルは暗号化report.jsonで描画不可のため
+  push後にiPhoneミラーで目視確認 → top% を微調整する。
+
 ## 2026-07-20 (83): フィルタUI微調整 + 個別株の前後銘柄ナビ + テンプレ統合
 
 ### 要望(ユーザー原文)

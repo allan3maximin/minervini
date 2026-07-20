@@ -2860,33 +2860,56 @@ function makeChart(el, { showTimeAxis }) {
   });
 }
 
-// Pins a small "latest date" label onto the time axis (bottom-right of the
-// pane, just left of the price axis) -- Lightweight Charts' auto ticks don't
-// guarantee the newest date gets a label, so we draw our own.
-function addLatestDateLabel(el, dateStr) {
-  const label = document.createElement("span");
-  label.className = "latest-date-label";
-  label.textContent = dateStr;
-  el.appendChild(label);
-  alignLatestDateLabel(el, label);
-  return label;
+// ---- 自前の日付軸 (#chart-date-axis) -----------------------------------
+// ライブラリの時間軸(visible:false)の代わりに、目盛・ホバー・最新日の全日付を
+// 1本のstripにDOMで描画する。縦位置はCSS(.chart-date-axis .cda-label の top)で
+// 完全に制御できるため、ライブラリ内部の固定オフセットに縛られず微調整できる。
+const DATE_AXIS_MIN_GAP = 46; // 静的ラベル同士の最小間隔(px)
+
+// 静的な目盛ラベル群を再描画。最新バーを起点に右→左へ、最小間隔を空けて配置する
+// (fixRightEdgeで最新が右端に固定されるため、この並びが自然)。
+function renderDateAxis(axisEl, chart, candles, formatFn) {
+  if (!axisEl || !chart) return;
+  axisEl.querySelectorAll(".cda-label:not(.cda-hover)").forEach((n) => n.remove());
+  const width = axisEl.clientWidth;
+  if (!candles || !candles.length || width <= 0) return;
+  const ts = chart.timeScale();
+  const placed = [];
+  let lastX = Infinity;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    const t = candles[i].time;
+    const x = ts.timeToCoordinate(t);
+    if (x == null || x < 0 || x > width) continue;
+    if (lastX - x < DATE_AXIS_MIN_GAP) continue;
+    placed.push({ x, t });
+    lastX = x;
+  }
+  for (const { x, t } of placed) {
+    const el = document.createElement("span");
+    el.className = "cda-label";
+    el.textContent = formatFn(t);
+    el.style.left = `${x}px`;
+    axisEl.appendChild(el);
+  }
 }
 
-// Lightweight Chartsは日付目盛を専用の細いcanvas帯として最下部に描画する。
-// このオーバーレイは決め打ちのpx値(以前は bottom:2px 固定)ではなく、その
-// canvas帯の実際の高さ・位置を毎回計測して合わせる。これによりライブラリの
-// デフォルト(フォントサイズ/パディング)が変わっても他パネルの目盛と常に
-// 揃う(以前は下にズレて見えていた)。
-function alignLatestDateLabel(el, label) {
-  const canvases = el.querySelectorAll("canvas");
-  if (!canvases.length) return;
-  const axisCanvas = canvases[canvases.length - 1];
-  const axisRect = axisCanvas.getBoundingClientRect();
-  if (axisRect.height <= 0 || axisRect.height > 60) return; // 想定外のDOM構造ならCSSの既定値のまま
-  const containerRect = el.getBoundingClientRect();
-  const bottomOffset = Math.max(0, containerRect.bottom - axisRect.bottom);
-  label.style.bottom = `${bottomOffset}px`;
-  label.style.height = `${axisRect.height}px`;
+// ホバー中の日付を強調ラベルとしてstrip上に表示(ライブラリのクロスヘア日付の代替)。
+// time が null のときは消す。静的ラベルより前面・太字で、重なっても上に乗る。
+function setDateAxisHover(axisEl, chart, time, formatFn) {
+  if (!axisEl || !chart) return;
+  let hover = axisEl.querySelector(".cda-hover");
+  const x = time != null ? chart.timeScale().timeToCoordinate(time) : null;
+  if (x == null) {
+    if (hover) hover.remove();
+    return;
+  }
+  if (!hover) {
+    hover = document.createElement("span");
+    hover.className = "cda-label cda-hover";
+    axisEl.appendChild(hover);
+  }
+  hover.textContent = formatFn(time);
+  hover.style.left = `${x}px`;
 }
 
 // Two-way pan/zoom sync so dragging any pane moves the others in lockstep.
@@ -2915,10 +2938,10 @@ let stockChartState = null;
 
 function teardownCharts() {
   if (!stockChartState) return;
-  const { charts, resizeHandler, dateLabels } = stockChartState;
+  const { charts, resizeHandler, dateAxisEl } = stockChartState;
   window.removeEventListener("resize", resizeHandler);
   for (const c of charts) c.remove();
-  for (const { label } of dateLabels) label.remove();
+  if (dateAxisEl) dateAxisEl.innerHTML = "";
   stockChartState = null;
 }
 
@@ -2938,9 +2961,13 @@ function renderCharts(chart) {
   // 日付軸は最下段のペイン(RSがあればRS、無ければ出来高)だけに表示する。
   // 3ペイン全部に出すと同じ日付が重複するため。パン/ズームはtimeScale.visible
   // と独立してsyncTimeScales()で同期されるので、表示を1つに絞っても連動は保たれる。
+  // ライブラリの時間軸は全ペインで非表示にし、日付は下部の自前strip
+  // (#chart-date-axis)にDOMで描く。ライブラリの軸テキストは strip 上端からの
+  // 固定オフセットで縦位置が決まり動かせないため、縦位置を自前で制御できるよう
+  // にした(目盛/ホバー/最新日をすべて renderDateAxis / setDateAxisHover が描画)。
   const priceChart = makeChart(priceEl, { showTimeAxis: false });
-  const volChart = makeChart(volEl, { showTimeAxis: !hasRs });
-  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: true }) : null;
+  const volChart = makeChart(volEl, { showTimeAxis: false });
+  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: false }) : null;
 
   const candleSeries = priceChart.addCandlestickSeries({
     upColor: CHART_COLORS.up,
@@ -3004,6 +3031,10 @@ function renderCharts(chart) {
   const charts = [priceChart, volChart, ...(rsChart ? [rsChart] : [])];
   syncTimeScales(charts);
   window.__minerviniCharts = charts; // debug/testing handle
+
+  // 自前日付軸の描画先と、その基準となる最下段チャート(x座標の変換元)。
+  const dateAxisEl = document.getElementById("chart-date-axis");
+  const bottomChart = rsChart || volChart;
 
   // ---- crosshair OHLCV legend -------------------------------------------
   // Lookup tables keyed by bar time so hovering ANY pane can resolve the
@@ -3097,6 +3128,7 @@ function renderCharts(chart) {
       const key = param.time != null ? timeKey(param.time) : null;
       const bar = key ? barLookup[currentTf].get(key) : null;
       updateLegend(bar || latestBar()); // fall back to the latest bar when not hovering
+      setDateAxisHover(dateAxisEl, bottomChart, param.time, formatChartDate);
       if (syncingCross) return; // setCrosshairPositionの再入を防ぐ
       syncingCross = true;
       for (const other of charts) {
@@ -3139,16 +3171,14 @@ function renderCharts(chart) {
 
   setTimeframe(String(DEFAULT_DAILY_BARS));
 
-  // 最新日付は日付軸を表示している最下段ペインにのみ表示する
-  // (オートticksは最新日を保証しないため自前で描画。表示は年なしの「月/日」形式)。
-  const lastDate = chart.candles.length ? chart.candles[chart.candles.length - 1].time : null;
-  let dateLabels = [];
-  if (lastDate) {
-    // 軸目盛・ホバー時と同じ formatChartDate を通し、3表示の形式を1関数に集約
-    // (ゼロ埋めMM/DD。独自フォーマットを持たせると再びズレる)。
-    const shortDate = formatChartDate(lastDate);
-    const bottomEl = rsChart ? rsEl : volEl;
-    dateLabels = [{ el: bottomEl, label: addLatestDateLabel(bottomEl, shortDate) }];
+  // 自前日付軸: 現在の期間(日足/月足)に応じた目盛ラベルを描画し、パン/ズーム・
+  // 期間変更(setVisibleLogicalRange/fitContent)で発火する範囲変更イベントに
+  // 合わせて再描画する。formatChartDate は目盛/ホバー/最新日で共通(MM/DD)。
+  const drawAxis = () =>
+    renderDateAxis(dateAxisEl, bottomChart, currentTf === "M" ? monthly.candles : chart.candles, formatChartDate);
+  if (bottomChart) {
+    bottomChart.timeScale().subscribeVisibleLogicalRangeChange(drawAxis);
+    requestAnimationFrame(drawAxis);
   }
 
   const toggleOld = document.getElementById("timeframe-toggle");
@@ -3177,11 +3207,11 @@ function renderCharts(chart) {
     for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
       c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     }
-    for (const { el, label } of dateLabels) alignLatestDateLabel(el, label);
+    drawAxis();
   };
   window.addEventListener("resize", resizeHandler);
 
-  stockChartState = { charts, resizeHandler, dateLabels };
+  stockChartState = { charts, resizeHandler, dateAxisEl };
 }
 
 // Japanese labels for the MUST-condition flags. Unknown keys fall back to

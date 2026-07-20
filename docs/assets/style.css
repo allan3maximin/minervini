@@ -517,25 +517,36 @@ tbody tr.row-static:hover { background: transparent; }
 .chart-box { height: 400px; position: relative; }
 .chart-box-small { height: 140px; }
 
-/* 最新日付を日付軸右端に常時表示するオーバーレイ(価格軸72pxの左隣)。
-   bottom/height はJS(alignLatestDateLabel)が時間軸canvasの実測値で上書きする。
-   下の値は計測前・失敗時のフォールバックに過ぎない。 */
-.latest-date-label {
-  position: absolute;
-  right: 76px;
-  bottom: 2px;
-  height: 17px;
-  display: flex;
-  align-items: center;
-  z-index: 3;
-  pointer-events: none;
-  /* Lightweight Chartsの自動目盛(textColor #98a2b3 / fontSize 11)と同じ見た目に
-     揃える。最新日だけ色や太さを変えると「日付UIが揃っていない」ように見えるため。 */
+/* 自前の日付軸ストリップ。ライブラリの時間軸(visible:false)の代わりに、
+   目盛・ホバー・最新日の全日付をDOMで描く。縦位置は .cda-label の top で制御でき、
+   ライブラリ内部の固定オフセット(テキストが上寄りに見える原因)に縛られない。
+   ラベルは JS が timeToCoordinate の x を left にセットし、ここで translateX(-50%)
+   で中央寄せする。x=0 がチャート描画域の左端(価格軸72pxを除く)に一致する。 */
+.chart-date-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 2px;
+  overflow: hidden;
   font-size: 11px;
   color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.chart-date-axis .cda-label {
+  position: absolute;
+  top: 52%; /* 若干下げて中央〜やや下に。上寄りだった従来の見え方を補正 */
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  line-height: 1;
+  pointer-events: none;
+}
+/* ホバー中の日付は前面・強調。静的ラベルと重なっても上に乗るよう背景を敷く。 */
+.chart-date-axis .cda-hover {
+  color: var(--text);
+  font-weight: 600;
   background: #131720;
   padding: 0 3px;
-  font-variant-numeric: tabular-nums;
+  border-radius: 2px;
+  z-index: 2;
 }
 
 .detail-card {
@@ -1385,8 +1396,9 @@ a.nav-btn:hover { border-color: var(--link); }
   justify-content: center;
   gap: 8px;
   flex: 0 0 auto;
+  margin: 8px 0 2px;
 }
-.stock-tabs-bar .stock-tabs { margin: 8px 0 2px; }
+.stock-tabs-bar .stock-tabs { margin: 0; }
 .stock-nav-btn {
   flex: 0 0 auto;
   display: inline-flex;
