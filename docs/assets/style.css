@@ -1595,6 +1595,114 @@ a.nav-btn:hover { border-color: var(--link); }
 .settings-link-text .tier-note { margin: 0; }
 .settings-link-chevron { color: var(--text-dim); font-size: 14px; }
 
+/* --------------------------------------------- 銘柄リストの永続フィルタ */
+
+.list-filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.lf-row { display: flex; flex-wrap: wrap; gap: 14px; }
+.lf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.lf-field-wide { flex-basis: 100%; }
+.lf-label { font-size: 12px; color: var(--text-dim); }
+.lf-label small { color: var(--text-dim); opacity: 0.75; font-size: 11px; }
+.lf-field input[type="number"] {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 14px;
+  width: 100%;
+}
+.lf-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 2px; }
+.lf-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+.lf-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.lf-status { font-size: 12px; color: var(--text-dim); }
+.lf-status.lf-status-active { color: var(--accent, #4ea1ff); }
+
+/* リスト画面の「N件除外中」小バナー */
+.list-filter-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-filter-note .bi-funnel-fill { font-size: 11px; }
+.list-filter-edit { color: var(--accent, #4ea1ff); text-decoration: none; margin-left: auto; }
+.list-filter-edit:hover, .list-filter-edit:focus-visible { text-decoration: underline; }
+
+/* リスト画面の一時フィルタバー(その時用・リロードで解除)。折りたたみ式で、
+   閉じている時は1行だけ。開くと本文はスクロール可能にしてリストを潰しすぎない。 */
+.adhoc-filter {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.adhoc-filter-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+}
+.adhoc-filter-summary::-webkit-details-marker { display: none; }
+.adhoc-filter-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.adhoc-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #06210f;
+  font-size: 11px;
+  font-weight: 700;
+}
+.adhoc-filter-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.adhoc-filter-chevron { color: var(--text-dim); font-size: 12px; transition: transform 0.15s; }
+.adhoc-filter[open] .adhoc-filter-chevron { transform: rotate(180deg); }
+.adhoc-filter-body {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.adhoc-filter-permlink { color: var(--accent, #4ea1ff); text-decoration: none; font-size: 12px; margin-left: auto; }
+.adhoc-filter-permlink:hover, .adhoc-filter-permlink:focus-visible { text-decoration: underline; }
+
 /* --------------------------------------------------------- バッチ実行 */
 
 .batch-cards { display: grid; gap: 10px; margin-bottom: 16px; }

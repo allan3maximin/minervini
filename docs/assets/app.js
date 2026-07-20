@@ -1064,12 +1064,313 @@ function renderP1Warning(report) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 銘柄リストの永続フィルタ (設定画面で設定 → 次に変更するまでリストに適用)
+// localStorage に保存し、本命/候補/監視の全ティアで renderTier /
+// renderPriorityTier が描画前に適用する。空欄の項目は無視。指標が欠損(null)の
+// 銘柄はそのフィルタでは除外しない(データ無しで黙って消えると気づけないため)。
+// 単元価格 = 株価 × SHARES_PER_UNIT(日本株は原則100株単位)= 最低購入代金。
+// ---------------------------------------------------------------------------
+const LIST_FILTER_SETTINGS_KEY = "minervini_list_filters";
+const SHARES_PER_UNIT = 100;
+const LIST_FILTER_SEGMENTS = ["プライム", "スタンダード", "グロース"];
+
+// 全項目が空のフィルタ(恒久・一時どちらの初期値にも使う)。
+function emptyListFilter() {
+  return {
+    maxUnitCost: null, minClose: null, maxClose: null,
+    minRs: null, minScore: null, minMcap: null, maxMcap: null,
+    excludeSegments: [],
+  };
+}
+
+// リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
+// のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
+let adhocListFilter = emptyListFilter();
+
+function loadListFilters() {
+  const def = emptyListFilter();
+  try {
+    const raw = localStorage.getItem(LIST_FILTER_SETTINGS_KEY);
+    if (!raw) return def;
+    const p = JSON.parse(raw) || {};
+    const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+    return {
+      maxUnitCost: num(p.maxUnitCost),
+      minClose: num(p.minClose),
+      maxClose: num(p.maxClose),
+      minRs: num(p.minRs),
+      minScore: num(p.minScore),
+      minMcap: num(p.minMcap),
+      maxMcap: num(p.maxMcap),
+      excludeSegments: Array.isArray(p.excludeSegments)
+        ? p.excludeSegments.filter((x) => LIST_FILTER_SEGMENTS.includes(x))
+        : [],
+    };
+  } catch (e) {
+    return def;
+  }
+}
+
+function saveListFilters(f) {
+  try {
+    localStorage.setItem(LIST_FILTER_SETTINGS_KEY, JSON.stringify(f));
+  } catch (e) {
+    // 永続化不可(プライベートモード等)でも致命的ではない
+  }
+}
+
+// 設定画面「銘柄リストのフィルタ」フォームの初期化。batchビュー表示のたびに
+// 呼ばれ、保存値をフォームへ反映する。入力の変更で即保存し、リスト全ティアを
+// 裏で再描画しておく(リストが非表示でも次に開いた時点で反映済み)。
+function initListFilterSettings() {
+  const form = document.getElementById("list-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("lf-exclude-segments");
+
+  const f = loadListFilters();
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? "" : v;
+  };
+  setVal("lf-max-unit-cost", f.maxUnitCost);
+  setVal("lf-min-close", f.minClose);
+  setVal("lf-max-close", f.maxClose);
+  setVal("lf-min-rs", f.minRs);
+  setVal("lf-min-score", f.minScore);
+  setVal("lf-min-mcap", f.minMcap);
+  setVal("lf-max-mcap", f.maxMcap);
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = f.excludeSegments.includes(cb.value);
+    });
+  }
+  updateListFilterStatus();
+
+  if (form.dataset.wired) return;
+  form.dataset.wired = "1";
+
+  const readForm = () => {
+    const num = (id) => {
+      const el = document.getElementById(id);
+      if (!el || el.value === "") return null;
+      const n = Number(el.value);
+      return isFinite(n) && n >= 0 ? n : null;
+    };
+    const segs = [];
+    if (segWrap) {
+      segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
+    }
+    return {
+      maxUnitCost: num("lf-max-unit-cost"),
+      minClose: num("lf-min-close"),
+      maxClose: num("lf-max-close"),
+      minRs: num("lf-min-rs"),
+      minScore: num("lf-min-score"),
+      minMcap: num("lf-min-mcap"),
+      maxMcap: num("lf-max-mcap"),
+      excludeSegments: segs,
+    };
+  };
+
+  const persistAndRerender = () => {
+    saveListFilters(readForm());
+    updateListFilterStatus();
+    // 全ティアを再描画(reportCacheがあれば)。リスト非表示中でも裏で更新。
+    if (reportCache && reportCache.data) {
+      rerenderTierBody("confirmed");
+      rerenderTierBody("pool");
+      rerenderTierBody("watchlist");
+    }
+  };
+
+  form.addEventListener("change", persistAndRerender);
+  form.addEventListener("input", (e) => {
+    if (e.target && e.target.tagName === "INPUT" && e.target.type === "number") {
+      persistAndRerender();
+    }
+  });
+
+  const clearBtn = document.getElementById("lf-clear-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
+      if (segWrap) {
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+      }
+      persistAndRerender();
+    });
+  }
+}
+
+function updateListFilterStatus() {
+  const el = document.getElementById("lf-status");
+  if (!el) return;
+  const active = listFilterActive(loadListFilters());
+  el.textContent = active ? "● フィルタ適用中" : "フィルタなし";
+  el.classList.toggle("lf-status-active", active);
+}
+
+// リスト画面の一時フィルタ(alf-*)。initListView から毎回呼ばれる。
+// 値はメモリ(adhocListFilter)にだけ持ち、リロードで消える=「その時用」。
+// ビューを離れて戻っても保持されるよう、フォームは毎回 adhocListFilter から同期。
+function initAdhocFilter() {
+  const form = document.getElementById("adhoc-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("alf-exclude-segments");
+
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? "" : v;
+  };
+  setVal("alf-max-unit-cost", adhocListFilter.maxUnitCost);
+  setVal("alf-min-close", adhocListFilter.minClose);
+  setVal("alf-max-close", adhocListFilter.maxClose);
+  setVal("alf-min-rs", adhocListFilter.minRs);
+  setVal("alf-min-score", adhocListFilter.minScore);
+  setVal("alf-min-mcap", adhocListFilter.minMcap);
+  setVal("alf-max-mcap", adhocListFilter.maxMcap);
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = adhocListFilter.excludeSegments.includes(cb.value);
+    });
+  }
+  updateAdhocFilterBadge();
+
+  if (form.dataset.wired) return;
+  form.dataset.wired = "1";
+
+  const readForm = () => {
+    const num = (id) => {
+      const el = document.getElementById(id);
+      if (!el || el.value === "") return null;
+      const n = Number(el.value);
+      return isFinite(n) && n >= 0 ? n : null;
+    };
+    const segs = [];
+    if (segWrap) {
+      segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
+    }
+    return {
+      maxUnitCost: num("alf-max-unit-cost"),
+      minClose: num("alf-min-close"),
+      maxClose: num("alf-max-close"),
+      minRs: num("alf-min-rs"),
+      minScore: num("alf-min-score"),
+      minMcap: num("alf-min-mcap"),
+      maxMcap: num("alf-max-mcap"),
+      excludeSegments: segs,
+    };
+  };
+
+  const applyAndRerender = () => {
+    adhocListFilter = readForm();
+    updateAdhocFilterBadge();
+    if (reportCache && reportCache.data) {
+      rerenderTierBody("confirmed");
+      rerenderTierBody("pool");
+      rerenderTierBody("watchlist");
+    }
+  };
+
+  form.addEventListener("change", applyAndRerender);
+  form.addEventListener("input", (e) => {
+    if (e.target && e.target.tagName === "INPUT" && e.target.type === "number") {
+      applyAndRerender();
+    }
+  });
+
+  const clearBtn = document.getElementById("alf-clear-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
+      if (segWrap) {
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+      }
+      applyAndRerender();
+    });
+  }
+}
+
+// フィルタバーのsummaryに出す「適用中」バッジ。有効な項目数を数字で出す。
+function updateAdhocFilterBadge() {
+  const badge = document.getElementById("adhoc-filter-badge");
+  if (!badge) return;
+  const f = adhocListFilter;
+  let n = 0;
+  ["maxUnitCost", "minClose", "maxClose", "minRs", "minScore", "minMcap", "maxMcap"].forEach((k) => {
+    if (f[k] != null) n++;
+  });
+  n += (f.excludeSegments ? f.excludeSegments.length : 0);
+  if (n > 0) {
+    badge.textContent = n;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+// 何かしらフィルタが有効か(件数表示やステータス文言の要否判定に使う)
+function listFilterActive(f) {
+  return (
+    f.maxUnitCost != null || f.minClose != null || f.maxClose != null ||
+    f.minRs != null || f.minScore != null || f.minMcap != null ||
+    f.maxMcap != null || (f.excludeSegments && f.excludeSegments.length > 0)
+  );
+}
+
+function stockPassesListFilter(s, f) {
+  // 単元価格(最低購入代金 = 株価×100株)の上限
+  if (f.maxUnitCost != null && s.close != null && s.close * SHARES_PER_UNIT > f.maxUnitCost) return false;
+  if (f.minClose != null && s.close != null && s.close < f.minClose) return false;
+  if (f.maxClose != null && s.close != null && s.close > f.maxClose) return false;
+  if (f.minRs != null && s.rs != null && s.rs < f.minRs) return false;
+  if (f.minScore != null && s.total_score != null && s.total_score < f.minScore) return false;
+  if (f.minMcap != null && s.market_cap_oku != null && s.market_cap_oku < f.minMcap) return false;
+  if (f.maxMcap != null && s.market_cap_oku != null && s.market_cap_oku > f.maxMcap) return false;
+  if (f.excludeSegments && f.excludeSegments.length && s.market_segment != null &&
+      f.excludeSegments.includes(s.market_segment)) return false;
+  return true;
+}
+
+// 与えられた銘柄配列にフィルタを適用し、通過分と除外件数を返す。
+// 恒久フィルタ(設定画面/localStorage)と一時フィルタ(リスト画面/メモリ)の
+// 両方を満たした銘柄だけ通す(AND合成)。
+function applyListFilter(stocks) {
+  const perm = loadListFilters();
+  const adhoc = adhocListFilter;
+  if (!listFilterActive(perm) && !listFilterActive(adhoc)) {
+    return { kept: stocks, excluded: 0 };
+  }
+  const kept = stocks.filter(
+    (s) => stockPassesListFilter(s, perm) && stockPassesListFilter(s, adhoc)
+  );
+  return { kept, excluded: stocks.length - kept.length };
+}
+
+// 除外件数の小さな告知バナー(除外>0のときだけ返す。設定画面へのリンク付き)。
+function listFilterNoteEl(excluded) {
+  if (!excluded) return null;
+  const p = document.createElement("p");
+  p.className = "tier-note list-filter-note";
+  p.innerHTML =
+    `<i class="bi bi-funnel-fill"></i> フィルタで${excluded}件を除外中` +
+    ` <a href="#batch" class="list-filter-edit">設定</a>`;
+  return p;
+}
+
 function renderTier(report, tier, containerId) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
-  const stocks = report.stocks.filter((s) => s.tier === tier);
+  const all = report.stocks.filter((s) => s.tier === tier);
+  const { kept: stocks, excluded } = applyListFilter(all);
+  const note = listFilterNoteEl(excluded);
+  if (note) container.appendChild(note);
   if (!stocks.length) {
-    container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
+    const empty = document.createElement("p");
+    empty.className = "tier-note";
+    empty.textContent = excluded ? "フィルタ条件に合う銘柄なし" : "該当銘柄なし";
+    container.appendChild(empty);
     return;
   }
   const sortKey = getCardSortKey(tier);
@@ -1254,10 +1555,16 @@ function renderPriorityTier(report, containerId) {
   if (!container) return;
   container.innerHTML = "";
   // 8条件合格(旧P1)のみ。priority未設定の旧データも合格扱いで拾う。
-  const stocks = report.stocks
+  const all = report.stocks
     .filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null));
+  const { kept: stocks, excluded } = applyListFilter(all);
+  const filterNote = listFilterNoteEl(excluded);
+  if (filterNote) container.appendChild(filterNote);
   if (!stocks.length) {
-    container.innerHTML = '<p class="tier-note">該当銘柄なし</p>';
+    const empty = document.createElement("p");
+    empty.className = "tier-note";
+    empty.textContent = excluded ? "フィルタ条件に合う銘柄なし" : "該当銘柄なし";
+    container.appendChild(empty);
     return;
   }
   const sortKey = getCardSortKey("watchlist");
@@ -1523,6 +1830,8 @@ function initListView() {
   const panels = document.getElementById("list-panels");
   const tabs = document.getElementById("list-tabs");
   if (!panels || !tabs) return;
+
+  initAdhocFilter();
 
   const setActive = (name) => {
     tabs.querySelectorAll(".list-tab").forEach((b) => {
@@ -2975,6 +3284,9 @@ function showView(hash) {
   }
   if (name === "batch" && window.MinerviniBatch) {
     window.MinerviniBatch.initBatchView();
+  }
+  if (name === "batch") {
+    initListFilterSettings();
   }
   if (name === "positions") {
     initPositionsView();

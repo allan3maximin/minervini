@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=a11dc150">
+<link rel="stylesheet" href="assets/style.css?v=90817044">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -92,6 +92,62 @@
 </section>
 
 <section id="view-stocklist" class="view-section list-view" hidden>
+  <details class="adhoc-filter" id="adhoc-filter">
+    <summary class="adhoc-filter-summary">
+      <span class="adhoc-filter-title"><i class="bi bi-funnel"></i> フィルタ<span id="adhoc-filter-badge" class="adhoc-filter-badge" hidden></span></span>
+      <span class="adhoc-filter-hint">その時用・リロードで解除</span>
+      <i class="bi bi-chevron-down adhoc-filter-chevron"></i>
+    </summary>
+    <div class="adhoc-filter-body list-filter-form" id="adhoc-filter-form">
+      <label class="lf-field lf-field-wide">
+        <span class="lf-label">単元価格の上限(円) <small>株価×100株の最低購入代金</small></span>
+        <input type="number" id="alf-max-unit-cost" min="0" step="10000" inputmode="numeric" placeholder="例: 1000000(=100万円超を除外)">
+      </label>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">株価の下限(円)</span>
+          <input type="number" id="alf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限なし">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">株価の上限(円)</span>
+          <input type="number" id="alf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限なし">
+        </label>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">RSレーティングの下限</span>
+          <input type="number" id="alf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">総合スコアの下限</span>
+          <input type="number" id="alf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
+        </label>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">時価総額の下限(億円)</span>
+          <input type="number" id="alf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限なし">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">時価総額の上限(億円)</span>
+          <input type="number" id="alf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限なし">
+        </label>
+      </div>
+      <div class="lf-field">
+        <span class="lf-label">市場区分を除外</span>
+        <div class="lf-checks" id="alf-exclude-segments">
+          <label class="lf-check"><input type="checkbox" value="プライム"> プライム</label>
+          <label class="lf-check"><input type="checkbox" value="スタンダード"> スタンダード</label>
+          <label class="lf-check"><input type="checkbox" value="グロース"> グロース</label>
+        </div>
+      </div>
+      <div class="lf-actions">
+        <button type="button" id="alf-clear-btn" class="secondary">クリア</button>
+        <a href="#batch" class="adhoc-filter-permlink">永続フィルタの設定へ</a>
+      </div>
+    </div>
+  </details>
+
   <div class="list-panels" id="list-panels">
     <div class="list-panel" data-panel="confirmed">
       <section class="tier-section">
@@ -222,6 +278,59 @@
     <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
     <div id="batch-cards" class="batch-cards passkey-gated"></div>
     <div id="batch-history"></div>
+  </section>
+
+  <section class="settings-section">
+    <h3>銘柄リストのフィルタ</h3>
+    <p class="tier-note">ここで設定した条件は、次に変更するまで銘柄リスト(本命/候補/監視)に永続で適用されます。空欄の項目は無視します。単元価格=株価×100株(最低購入代金)。指標データが無い銘柄はそのフィルタでは除外しません。</p>
+    <div class="list-filter-form" id="list-filter-form">
+      <label class="lf-field lf-field-wide">
+        <span class="lf-label">単元価格の上限(円) <small>株価×100株の最低購入代金</small></span>
+        <input type="number" id="lf-max-unit-cost" min="0" step="10000" inputmode="numeric" placeholder="例: 1000000(=100万円超を除外)">
+      </label>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">株価の下限(円)</span>
+          <input type="number" id="lf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限なし">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">株価の上限(円)</span>
+          <input type="number" id="lf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限なし">
+        </label>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">RSレーティングの下限</span>
+          <input type="number" id="lf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">総合スコアの下限</span>
+          <input type="number" id="lf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
+        </label>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">時価総額の下限(億円)</span>
+          <input type="number" id="lf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限なし">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">時価総額の上限(億円)</span>
+          <input type="number" id="lf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限なし">
+        </label>
+      </div>
+      <div class="lf-field">
+        <span class="lf-label">市場区分を除外</span>
+        <div class="lf-checks" id="lf-exclude-segments">
+          <label class="lf-check"><input type="checkbox" value="プライム"> プライム</label>
+          <label class="lf-check"><input type="checkbox" value="スタンダード"> スタンダード</label>
+          <label class="lf-check"><input type="checkbox" value="グロース"> グロース</label>
+        </div>
+      </div>
+      <div class="lf-actions">
+        <button type="button" id="lf-clear-btn" class="secondary">フィルタをクリア</button>
+        <span id="lf-status" class="lf-status">フィルタなし</span>
+      </div>
+    </div>
   </section>
 
   <section class="settings-section">
@@ -358,6 +467,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=f4ca4d12"></script>
+<script src="assets/app.js?v=903a92a9"></script>
 </body>
 </html>

@@ -2,6 +2,88 @@
 
 (新しい方が上。作業を再開する際は必ず先にここを読むこと)
 
+## 2026-07-20 (81): リスト画面に一時フィルタバーを追加(恒久フィルタとAND合成)
+
+### 要望(ユーザー原文)
+> 永続フィルタは設定画面に。その時フィルタは株リスト画面にもつけて欲しい。
+> 実装したらPUSHするだけの状態にしておいて
+(AskUserQuestion回答: 持続=「リロードでリセット」/ 項目=「設定と同じ全項目」)
+
+### 設計
+- 恒久フィルタ(セッション80、localStorage `minervini_list_filters`)はそのまま。
+- リスト画面に**一時フィルタ**(「その時用」)を追加。localStorageには保存せず
+  メモリ変数 `adhocListFilter` にのみ保持 → **リロードで自動リセット**。
+- 両者は **AND合成**: 恒久・一時の両方を満たした銘柄だけ表示。
+
+### 変更内容
+1. **`docs/assets/app.js`**
+   - `emptyListFilter()` 追加(全項目null。恒久・一時どちらの初期値にも使う)。
+     `loadListFilters` の既定もこれに置換。
+   - `let adhocListFilter = emptyListFilter();`(メモリ保持・非永続)。
+   - `applyListFilter` を恒久AND一時に変更(`stockPassesListFilter(s,perm) &&
+     stockPassesListFilter(s,adhoc)`)。両方無効なら素通し。
+   - `initAdhocFilter()`/`updateAdhocFilterBadge()` 追加。alf-*フォームを配線し、
+     入力即時に adhocListFilter 更新→全ティア再描画。summaryに有効項目数バッジ。
+     フォームは毎回 adhocListFilter から同期(ビュー往復でも値維持)。
+   - `initListView` の先頭で `initAdhocFilter()` を呼ぶ(リスト表示のたび)。
+2. **`docs/index.html`**
+   - #view-stocklist の .list-panels 直前に `<details class="adhoc-filter">` を追加。
+     summary=「フィルタ [件数バッジ] その時用・リロードで解除」。本文は設定画面と
+     同じ全項目(id接頭辞 `alf-`)+クリア+「永続フィルタの設定へ」(#batch)リンク。
+   - asset版数を app.js=903a92a9 / style.css=90817044 に更新。
+3. **`docs/assets/style.css`**
+   - `.adhoc-filter`系(折りたたみ式・閉時1行・開時 max-height:46vh で本文スクロール、
+     chevron回転、バッジ)。本文は既存 `.list-filter-form` を流用。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- AND合成をnodeで単体確認: 恒久(単元≤100万) AND 一時(RS≥80)→Aのみ / 一時空→恒久単独 /
+  両方空→全通過、いずれもOK。
+- alf-* 参照ID と index.html 定義IDの全一致を確認。
+- **git add 済み**(docs/ + log.md)。ユーザーは commit & push するだけの状態。
+- 実機確認待ち: リスト画面のフィルタ開閉・入力即時反映・リロードでの一時解除。
+
+### 次にやること
+- 実機確認 → 問題なければ push。
+
+## 2026-07-20 (80): 銘柄リストの永続フィルタ(設定画面で設定)
+
+### 要望(ユーザー原文)
+> 株リスト画面をフィルタリングしたい。例えば単元100万円は買えないから除外したい。
+> リスト画面にその都度入れるんじゃなくて、設定画面から永久(次変更するまで)で
+> 入れておけるようにしたい。フィルタ項目は株価だけでなく追加できるものは追加して。
+(AskUserQuestion回答: 項目=「おすすめ全部」/ 除外表示=「件数を小さく表示」)
+
+### 変更内容
+1. **`docs/assets/app.js`** — 永続フィルタのロジック追加(renderTierの直前)。
+   - localStorageキー `minervini_list_filters`。load/save/判定/適用を実装。
+   - フィルタ項目: 単元価格上限(=close×100株=最低購入代金)/株価下限・上限/
+     RS下限/総合スコア下限/時価総額(億円)下限・上限/市場区分除外
+     (プライム・スタンダード・グロース、market_segmentで判定)。
+   - `stockPassesListFilter`: 空欄項目は無視。**指標がnullの銘柄はそのフィルタでは
+     除外しない**(データ無しで黙って消えると気づけないため)。
+   - `renderTier`/`renderPriorityTier` が描画前に `applyListFilter` を適用。除外>0の
+     とき `listFilterNoteEl` で「フィルタでN件を除外中 [設定]」の小バナーを各ティア
+     先頭に出す(→#batchへリンク)。全件除外時は「フィルタ条件に合う銘柄なし」。
+   - `initListFilterSettings`/`updateListFilterStatus`: 設定フォームの初期化・即保存・
+     変更時に全ティア(confirmed/pool/watchlist)を裏で再描画。showViewのbatch分岐で呼ぶ。
+2. **`docs/index.html`** — #view-batch に「銘柄リストのフィルタ」settings-section追加
+   (バッチ実行と投資法の間)。number入力群+市場区分チェック+クリアボタン+状態表示。
+   asset版数を app.js=59202c4a / style.css=1e5b5341 に更新。
+3. **`docs/assets/style.css`** — `.list-filter-form`系・`.list-filter-note`系を既存
+   トーン(--panel/--border/--accent)で追加。
+
+### 検証
+- `node --check docs/assets/app.js` OK。
+- `stockPassesListFilter` 相当をnodeで単体確認: 単元120万→除外 / グロース&RS低→除外 /
+  全指標欠損→通過 / 単元90万→通過、いずれもOK。
+- JS参照ID(lf-*)とindex.html定義IDの全一致を確認。
+- 実機確認待ち: 設定画面のフォーム表示・入力保存の永続性・リストの除外バナー/件数。
+  (report.jsonは暗号化+鍵未所持のためローカル実データ描画は不可)
+
+### 次にやること
+- 実機で設定→リスト反映を確認。必要なら単元株数100固定の例外(1株単位ETF等)の扱い検討。
+
 ## 2026-07-20 (79): 市況分析UI改善(寄与度方式 + 地合い詳細セクション再構成)
 
 ### 要望(ユーザー原文)
