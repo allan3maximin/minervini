@@ -21,6 +21,29 @@
 
 ---
 
+## 2026-07-21 (96): 投資法ページャのナビ位置固定解除 + 読み物の可読性向上
+
+投資法タブの「前へ/次に/n/10」ナビが画面下部に fixed 相当(内側スクロール+下端固定)で
+表示領域が狭く見づらかったのを解消。あわせて本文をWEB記事っぽく読みやすくした。
+
+**変更点**(`docs/assets/style.css` の投資法ブロックのみ)
+- **内側二重スクロール撤去**: `.invest-view { display:flex; overflow:hidden }` と
+  `.invest-content` の `flex/overflow-y/overscroll` を削除。スクロールはビュー全体
+  (`.view-section` の overflow-y:auto)に一本化。**ナビは本文末尾に自然に流れる**
+  (`.invest-pager-nav` の `flex:0 0 auto` も削除)ので画面下固定ではなくなった。
+- **可読性向上**: 本文を `max-width:760px; margin:0 auto` で中央寄せ・横幅制限。
+  `font-size:15px`, `line-height:1.85`、段落 `margin-bottom:14px`、見出し h3 を 21px に
+  拡大し階層を明確化(h4=16px も追加)、リスト行間広げ、note を角丸+行間調整。
+- HTML/JS は無変更(構造・ページャ挙動そのまま)。
+
+**キャッシュバスター再計算**: style.css `d5e1d490`→`db89f38d`。index.html のタグ更新済み。
+app.js は無変更。
+
+**コミット対象**(触ったソースのみ): `docs/index.html` `docs/assets/style.css` `log.md`。
+data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-21 (95): 需給タブ再構成(需給カード上・推移カード下、グラフ/表切替)
 
 需給タブのデザイン変更。カード順を入れ替え、推移に表ビューと時間軸を追加した。
