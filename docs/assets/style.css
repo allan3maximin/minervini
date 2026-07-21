@@ -1420,13 +1420,12 @@ a.nav-btn:hover { border-color: var(--link); }
   justify-content: center;
   gap: 4px;
   flex: 0 0 auto;
-  width: var(--dock-w); /* メインDockと同じ横幅に固定。＜タブ群＞をこの中に収める */
   max-width: 100%;
   margin: 8px auto 2px;
 }
-/* バー全体をDock幅に固定するため、内側のタブ群は残り幅いっぱいに広げる。
-   各タブは flex:1 1 0 なので均等に縮んで＜＞のぶんも収まる */
-.stock-tabs-bar .stock-tabs { margin: 0; flex: 1 1 auto; min-width: 0; }
+/* タブ群(ドック本体)だけをメインDockと同じ幅に固定。＜＞はこの外側に並ぶ。
+   各タブは flex:1 1 0 なので300px内で均等割りされ、メインDockと横幅が揃う。 */
+.stock-tabs-bar .stock-tabs { margin: 0; width: var(--dock-w); max-width: 100%; flex: 0 0 auto; }
 .stock-nav-btn {
   flex: 0 0 auto;
   display: inline-flex;

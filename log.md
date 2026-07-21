@@ -28,9 +28,12 @@
 1. **株ドック(個別株タブバー)の幅をメインDockに合わせた。**
    - `:root` に `--dock-w: 300px`(メインDock実幅=ボタン56×5+gap2×4+padding5×2+border2)
      を追加。モバイルは `--dock-w: 258px`。
-   - `.stock-tabs-bar` を `width: var(--dock-w); max-width: 100%; margin: 8px auto 2px`
-     で中央固定、gap を 8→4px、`.stock-tabs` を `flex:1 1 auto; min-width:0` にして
-     ＜タブ群＞をこの幅に収めた。
+   - **仕様確定**: ＜＞はドック幅に含めない。幅指定は `.stock-tabs`(ドック本体=
+     サマリー/グラフ/需給/ファンダ/ロットの5タブ)に置き、
+     `.stock-tabs-bar .stock-tabs { width: var(--dock-w); flex:0 0 auto }`。
+     ＜＞ナビはその外側に並ぶ。バー自体は中央寄せ(margin:8px auto 2px, gap 4px)。
+     各タブ flex:1 1 0 で300px内を均等割り→メインDockと横幅一致。
+     → style.css cache-buster `160c878a`。
 
 2. **過去の需給データ半年分を J-Quants でバックフィルできるようにした。**
    - JPXの週末残PDF(05.html)は直近5週しか残らず過去に遡れない。J-Quants
