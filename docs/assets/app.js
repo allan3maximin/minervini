@@ -3447,6 +3447,19 @@ function renderCharts(chart) {
   const ma150 = priceChart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   const ma200 = priceChart.addLineSeries({ color: "#c084fc", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
 
+  // 決算発表(カタリスト)マーカー: ローソク下に「その日は決算開示があった」ことを
+  // 示す。値動きが純粋なものか決算ドリブンかを一目で見分けるための目印。
+  // chart.earnings は build_chart_data がバー日付にスナップ済み(time昇順・ユニーク)。
+  // "2026Q1" → "26Q1" と短縮してマーカー文字に使う。日足のみで表示し、月足では
+  // 日付軸がバーと噛み合わないので setTimeframe 側でクリアする。
+  const earningsMarkers = (chart.earnings || []).map((e) => ({
+    time: e.time,
+    position: "belowBar",
+    color: "#f59e0b",
+    shape: "circle",
+    text: e.quarter ? `決算 ${String(e.quarter).replace(/^\d{2}/, "")}` : "決算",
+  }));
+
   const volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" } });
   // Pin the histogram base to the pane's bottom edge so the auto-scaled
   // axis never extends into negative territory.
@@ -3623,6 +3636,8 @@ function renderCharts(chart) {
     ma50.setData(isMonthly ? [] : chart.ma50 || []);
     ma150.setData(isMonthly ? [] : chart.ma150 || []);
     ma200.setData(isMonthly ? [] : chart.ma200 || []);
+    // 決算マーカーは日足のバー日付基準。月足では噛み合わないのでクリアする。
+    candleSeries.setMarkers(isMonthly ? [] : earningsMarkers);
     if (isMonthly) {
       for (const c of charts) c.timeScale().fitContent();
     } else {

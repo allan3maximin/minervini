@@ -86,9 +86,9 @@ def test_derive_quarters_diffs_ytd():
     points = [_point(1, 10.0, 100.0), _point(2, 25.0, 220.0), _point(3, 45.0, 360.0)]
     out = jq.derive_quarters(points)
     assert out == [
-        {"fiscal_quarter": "2025Q1", "eps": 10.0, "revenue": 100.0},
-        {"fiscal_quarter": "2025Q2", "eps": 15.0, "revenue": 120.0},
-        {"fiscal_quarter": "2025Q3", "eps": 20.0, "revenue": 140.0},
+        {"fiscal_quarter": "2025Q1", "eps": 10.0, "revenue": 100.0, "disc_date": "2025-08-01"},
+        {"fiscal_quarter": "2025Q2", "eps": 15.0, "revenue": 120.0, "disc_date": "2025-08-01"},
+        {"fiscal_quarter": "2025Q3", "eps": 20.0, "revenue": 140.0, "disc_date": "2025-08-01"},
     ]
 
 
@@ -98,7 +98,7 @@ def test_derive_quarters_dedup_keeps_latest_disclosure():
         _point(1, 12.0, 110.0, disc="2025-09-15"),  # 訂正短信が勝つ
     ]
     out = jq.derive_quarters(points)
-    assert out == [{"fiscal_quarter": "2025Q1", "eps": 12.0, "revenue": 110.0}]
+    assert out == [{"fiscal_quarter": "2025Q1", "eps": 12.0, "revenue": 110.0, "disc_date": "2025-09-15"}]
 
 
 def test_derive_quarters_separates_fiscal_years():
@@ -137,7 +137,7 @@ def test_derive_quarters_gap_mid_year_still_derives_next():
 def test_derive_quarters_none_values_skip_key():
     points = [_point(1, None, 100.0), _point(2, 25.0, None)]
     out = jq.derive_quarters(points)
-    assert out[0] == {"fiscal_quarter": "2025Q1", "eps": None, "revenue": 100.0}
+    assert out[0] == {"fiscal_quarter": "2025Q1", "eps": None, "revenue": 100.0, "disc_date": "2025-08-01"}
     # 前Q点のepsがNoneなら0基準ではなくそのまま(base None -> 0扱い)
     assert out[1]["eps"] == 25.0
     assert out[1]["revenue"] is None
@@ -289,8 +289,8 @@ def test_update_success_stores_quarters_and_state(isolated_paths, monkeypatch):
 
     quarters = store["7203"]["quarters"]
     # _refetch_incompleteが1Q点を取り直しているのでQ2はYTD差分になっている
-    assert {"fiscal_quarter": "2025Q1", "eps": 10.0, "revenue": 100.0} in quarters
-    assert {"fiscal_quarter": "2025Q2", "eps": 15.0, "revenue": 120.0} in quarters
+    assert {"fiscal_quarter": "2025Q1", "eps": 10.0, "revenue": 100.0, "disc_date": "2025-08-01"} in quarters
+    assert {"fiscal_quarter": "2025Q2", "eps": 15.0, "revenue": 120.0, "disc_date": "2025-11-01"} in quarters
     assert state_path.exists()
     assert json.loads(auto_path.read_text())["7203"]["quarters"] == quarters
 

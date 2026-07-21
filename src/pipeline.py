@@ -335,7 +335,10 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         record["has_chart"] = True
         stock_records.append(record)
         if not is_snapshot:
-            chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
+            chart_data = build_site.build_chart_data(
+                code, df_ind, vcp_result, entry_result,
+                fund_entry=fundamentals_by_code.get(code),
+            )
             build_site.write_chart_data(code, chart_data)
 
     # スナップショット(前場)は status_history / dryup_log を永続化しない。途中足の

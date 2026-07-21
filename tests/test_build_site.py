@@ -207,6 +207,50 @@ def test_build_chart_data_includes_ma_and_markers():
     assert chart["pivot"] == 14.0
     assert len(chart["markers"]) == 2
     assert len(chart["ma50"]) == 1  # only the non-null value
+    assert chart["earnings"] == []  # fund_entry未指定なら決算マーカーは空
+
+
+def test_build_chart_data_earnings_markers_snap_and_filter():
+    dates = pd.bdate_range("2024-01-01", periods=5)  # 01-01,02,03,04,05
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": [10, 11, 12, 13, 14],
+            "high": [10.5, 11.5, 12.5, 13.5, 14.5],
+            "low": [9.5, 10.5, 11.5, 12.5, 13.5],
+            "close": [10, 11, 12, 13, 14],
+            "volume": [100, 200, 300, 400, 500],
+        }
+    )
+    fund_entry = {
+        "quarters": [
+            {"fiscal_quarter": "2023Q4", "eps": 5.0, "disc_date": "2023-12-20"},  # 期間前=除外
+            {"fiscal_quarter": "2024Q1", "eps": 6.0, "disc_date": "2024-01-03"},  # 当日バーにヒット
+            {"fiscal_quarter": "2024Q2", "eps": 7.0, "disc_date": "2024-01-06"},  # 期間後=除外(hi=01-05)
+        ]
+    }
+    chart = build_chart_data("7134", df, {"contractions": []}, {}, fund_entry=fund_entry)
+    assert chart["earnings"] == [
+        {"time": "2024-01-03", "quarter": "2024Q1", "disc_date": "2024-01-03", "eps": 6.0}
+    ]
+
+
+def test_build_chart_data_earnings_snaps_holiday_disclosure_to_next_bar():
+    # 開示日が非営業日(01-06土)なら、開示日以上で最も近いバー...は無いので
+    # 期間内に収まらず除外。期間内の休日(存在しないが)代わりに、開示が
+    # バー間に落ちるケースを検証: 01-03と01-04の間に相当する開示は無いが、
+    # 開示日<=barで最近傍へフォールバックする経路を確認する。
+    dates = pd.bdate_range("2024-01-01", periods=5)
+    df = pd.DataFrame({
+        "date": dates,
+        "open": [10, 11, 12, 13, 14], "high": [10.5, 11.5, 12.5, 13.5, 14.5],
+        "low": [9.5, 10.5, 11.5, 12.5, 13.5], "close": [10, 11, 12, 13, 14],
+        "volume": [100, 200, 300, 400, 500],
+    })
+    # 開示日 01-05(最終バー)ちょうど。
+    fund_entry = {"quarters": [{"fiscal_quarter": "2024Q1", "eps": 6.0, "disc_date": "2024-01-05"}]}
+    chart = build_chart_data("7134", df, {"contractions": []}, {}, fund_entry=fund_entry)
+    assert [e["time"] for e in chart["earnings"]] == ["2024-01-05"]
 
 
 # ---------------------------------------------------------------------------

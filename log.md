@@ -21,6 +21,45 @@
 
 ---
 
+## 2026-07-21 (99): 個別チャートに決算発表(カタリスト)マーカー
+
+値動きが純粋なものか決算ドリブンかを見分けられるよう、個別銘柄チャートの
+ローソク下に「決算発表があった日」のマーカーを出せるようにした。
+
+**変更点**
+- **開示日の永続化(バックエンド)** `src/data/jquants.py` `derive_quarters`:
+  四半期レコードに `disc_date`(J-Quants開示日 = その四半期のYTD点を報告した短信の
+  開示日)を追加。空文字はNone正規化しキーごと省く(存在時のみ付与=後方互換)。
+- **マージで持ち越し** `src/data/fundamentals.py` `merge_fundamentals`: 四半期を
+  スリム化する内部 `_slim()` を新設し、eps/revenueに加え `disc_date` があれば残す。
+  無い場合はキーを付けない(既存の3キー辞書アサーションと一致=テスト無改修)。
+- **チャートJSON** `src/report/build_site.py`: `_earnings_markers(recent, fund_entry)`
+  を新設。表示中のローソク期間 [最古, 最新] に入る disc_date だけを対象に、開示日
+  以上で最も近いバー(=反応日)へスナップ(無ければ以下で最近傍)。同一バーに複数
+  四半期が重なれば開示日が新しい方を残す。`build_chart_data(..., fund_entry=)` の
+  戻り値に `earnings`(time昇順・ユニーク: {time, quarter, disc_date, eps})を追加。
+  `pipeline.py` は `fundamentals_by_code.get(code)` を fund_entry として渡す。
+- **フロント** `docs/assets/app.js` `renderCharts`: `chart.earnings` から
+  lightweight-charts の belowBar マーカー(circle / amber #f59e0b / text "決算 26Q1")を
+  生成。`setTimeframe` で日足のみ `candleSeries.setMarkers()`、月足はクリア
+  (バー日付が噛み合わないため)。`chart.earnings` 欠損(旧キャッシュ)でも `||[]` で安全。
+  cache-buster app.js `18d2a760`→`105b68ac`。
+
+**注意**: disc_date は次回の J-Quants バッチで四半期を再取得したタイミングから
+ストアに乗る(既存の保存済み四半期には disc_date が無いので、それが表示期間に
+残っている間はマーカーが出ない場合がある)。時間経過で自然に解消。
+
+**検証**: `pytest`(pyarrow導入後)372 passed。derive_quarters/merge/build_chart_data
+のテストを更新・追加(開示日スナップ/期間フィルタ)。`node --check app.js` OK。
+マーカー変換ロジックをnodeで確認("2026Q1"→"決算 24Q1"風の短縮・null四半期・
+earnings欠損の安全性)。
+
+**コミット対象**(触ったソースのみ): `src/data/jquants.py` `src/data/fundamentals.py`
+`src/report/build_site.py` `src/pipeline.py` `docs/assets/app.js` `docs/index.html`
+`tests/test_jquants.py` `tests/test_build_site.py` `log.md`。data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-21 (98): 前場スナップショット方式化 + ザラ場前ボタン + 地合い/ウォッチ予測観点
 
 (97) のフィードバック対応。前場版と後場版が同一 report.json を読んで中身が完全一致

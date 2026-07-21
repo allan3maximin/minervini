@@ -234,6 +234,11 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
                 prev = p
                 continue
             rec = {"fiscal_quarter": p["label"], "eps": None, "revenue": None}
+            # 決算開示日(その四半期のYTD点を報告した短信の開示日)。チャートの
+            # 決算カタリストマーカー用。空文字はNoneに正規化(下流でfalsy判定)。
+            disc = p.get("disc_date") or None
+            if disc:
+                rec["disc_date"] = disc
             for key in ("eps", "revenue"):
                 cur = p.get(key)
                 if cur is None:

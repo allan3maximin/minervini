@@ -483,7 +483,48 @@ def _series_points(df: pd.DataFrame, col: str) -> list[dict]:
     return out
 
 
-def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result: dict, lookback_days: int = 260) -> dict:
+def _earnings_markers(recent: pd.DataFrame, fund_entry: dict | None) -> list[dict]:
+    """表示期間内に収まる決算発表(開示日)を、チャートのバー日付にスナップして返す。
+
+    fund_entry["quarters"] の disc_date(J-Quants開示日)のうち、表示中のローソク
+    期間 [最古日, 最新日] に入るものだけを対象にする。開示は場中/引け後どちらも
+    あり得るが値動きの反応は開示日当日〜翌営業日なので、開示日以上で最も近い
+    バー日付(=反応日)にスナップする。該当が無ければ開示日以下で最も近いバーに
+    フォールバック。売買日でない開示(休日発表等)でもマーカーが宙に浮かない。
+    戻り値は time 昇順でユニーク(同一営業日に複数開示が重なっても1本)。
+    """
+    if not fund_entry:
+        return []
+    quarters = fund_entry.get("quarters") or []
+    if len(recent) == 0:
+        return []
+    bar_dates = [row.date.strftime("%Y-%m-%d") for row in recent.itertuples(index=False)]
+    lo, hi = bar_dates[0], bar_dates[-1]
+    by_time: dict[str, dict] = {}
+    for q in quarters:
+        disc = q.get("disc_date")
+        if not disc or disc < lo or disc > hi:
+            continue
+        # 開示日以上で最も近いバー(反応日)。無ければ以下で最も近いバー。
+        snapped = next((d for d in bar_dates if d >= disc), None)
+        if snapped is None:
+            snapped = next((d for d in reversed(bar_dates) if d <= disc), None)
+        if snapped is None:
+            continue
+        # 同一バーに複数四半期が重なったら開示日が新しい方を残す。
+        prev = by_time.get(snapped)
+        if prev is None or (q.get("disc_date") or "") >= (prev.get("disc_date") or ""):
+            by_time[snapped] = {
+                "time": snapped,
+                "quarter": q.get("fiscal_quarter"),
+                "disc_date": disc,
+                "eps": q.get("eps"),
+            }
+    return [by_time[t] for t in sorted(by_time)]
+
+
+def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result: dict,
+                     lookback_days: int = 260, fund_entry: dict | None = None) -> dict:
     recent = df.tail(lookback_days).reset_index(drop=True)
 
     candles = [
@@ -517,6 +558,7 @@ def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result
         "pivot": entry_result.get("pivot"),
         "stop_loss": entry_result.get("stop_loss"),
         "markers": markers,
+        "earnings": _earnings_markers(recent, fund_entry),
     }
 
 

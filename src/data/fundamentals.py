@@ -165,15 +165,25 @@ def merge_fundamentals(auto_by_code: dict, manual_by_code: dict,
                             f"が20%超乖離 (jquants値を採用)"
                         )
 
+        def _slim(q: dict) -> dict:
+            # eps/revenueに加え、決算開示日(disc_date)があればチャートの決算
+            # マーカー用に持ち越す。無い場合はキー自体を付けない(後方互換のため
+            # 従来の3キー辞書と一致させる)。
+            r = {"fiscal_quarter": q.get("fiscal_quarter"), "eps": q.get("eps"), "revenue": q.get("revenue")}
+            dd = q.get("disc_date")
+            if dd:
+                r["disc_date"] = dd
+            return r
+
         by_label: dict[str, dict] = {}
         for q in tanshin.get("quarters", []):
             fq = q.get("fiscal_quarter")
             if fq:
-                by_label[fq] = {"fiscal_quarter": fq, "eps": q.get("eps"), "revenue": q.get("revenue")}
+                by_label[fq] = _slim(q)
         for q in auto.get("quarters", []):
             fq = q.get("fiscal_quarter")
             if fq:
-                by_label[fq] = {"fiscal_quarter": fq, "eps": q.get("eps"), "revenue": q.get("revenue")}
+                by_label[fq] = _slim(q)
         for q in manual.get("quarters", []):
             fq = q.get("fiscal_quarter")
             if fq:
