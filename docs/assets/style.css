@@ -1467,6 +1467,27 @@ a.nav-btn:hover { border-color: var(--link); }
   color: #05130b;
   font-weight: 600;
 }
+
+/* 個別株タブはメインDock(.dock-btn)と同じアイコン+文字の縦積みにする。
+   タブが5枚に増えても横幅が肥大しないよう、各タブは等幅・小さめに。 */
+.stock-tabs .stock-tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+}
+.stock-tabs .stock-tab .st-icon { font-size: 15px; line-height: 1; }
+.stock-tabs .stock-tab .st-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
+.stock-tabs .stock-tab.active .st-label { font-weight: 600; }
+
+/* 信用倍率の推移グラフ枠(LightweightChartsが幅/高さを実測して描画する) */
+.margin-chart-box { width: 100%; height: 168px; }
 /* スライド中に指の下にあるタブのプレビュー(離すとここに切り替わる合図) */
 .stock-tab.slide-target, .list-tab.slide-target, .market-tab.slide-target {
   background: rgba(52, 211, 153, 0.22);

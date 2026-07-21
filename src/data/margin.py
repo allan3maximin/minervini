@@ -426,6 +426,20 @@ def build_margin_metrics(code: str, latest_row: dict | None, store: dict | None 
     vol_ma50 = (latest_row or {}).get("vol_ma50")
     days_to_cover = round(buy / vol_ma50, 2) if vol_ma50 else None
 
+    # 信用倍率の週次推移(遍歴グラフ用)。storeにある全週のうち、当該コードが
+    # 収録されている週だけを日付昇順で {date, ratio} にする。売残0でratio不能な
+    # 週は ratio=None(グラフ側で欠損として扱う)。表示専用・スコアには使わない。
+    trend = []
+    for h in history:
+        e = (h.get("by_code") or {}).get(code)
+        if not e:
+            continue
+        hb = e.get("buy")
+        hs = e.get("sell")
+        if hb is None or hs is None:
+            continue
+        trend.append({"date": h.get("date"), "ratio": round(hb / hs, 3) if hs else None})
+
     return {
         "ratio": ratio,
         "buy": buy,
@@ -433,4 +447,5 @@ def build_margin_metrics(code: str, latest_row: dict | None, store: dict | None 
         "date": latest.get("date"),
         "buy_wow_pct": buy_wow_pct,
         "days_to_cover": days_to_cover,
+        "history": trend,
     }

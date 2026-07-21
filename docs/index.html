@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=f0ef9bff">
+<link rel="stylesheet" href="assets/style.css?v=4e3a61e5">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -637,14 +637,22 @@
       </div>
     </div>
 
-    <div class="stock-panel" data-panel="fund">
+    <div class="stock-panel" data-panel="margin">
       <section class="detail-card">
-        <h2>ファンダメンタルズ</h2>
-        <div id="fund-detail-body"></div>
+        <h2>信用倍率の推移</h2>
+        <div id="margin-ratio-chart" class="margin-chart-box"></div>
+        <p id="margin-chart-empty" class="tier-note" hidden>推移グラフに必要な履歴データがありません</p>
       </section>
       <section class="detail-card">
         <h2>需給(信用取引)</h2>
         <div id="margin-detail-body"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="fund">
+      <section class="detail-card">
+        <h2>ファンダメンタルズ</h2>
+        <div id="fund-detail-body"></div>
       </section>
     </div>
 
@@ -674,10 +682,11 @@
   <div class="stock-tabs-bar">
     <button type="button" class="stock-nav-btn" id="stock-nav-next" aria-label="次の銘柄へ"><i class="bi bi-chevron-left"></i></button>
     <div class="stock-tabs" id="stock-tabs" role="tablist">
-      <button type="button" class="stock-tab active" data-panel="summary" role="tab">サマリー</button>
-      <button type="button" class="stock-tab" data-panel="chart" role="tab">グラフ</button>
-      <button type="button" class="stock-tab" data-panel="fund" role="tab">ファンダ</button>
-      <button type="button" class="stock-tab" data-panel="sizing" role="tab">ロット</button>
+      <button type="button" class="stock-tab active" data-panel="summary" role="tab" aria-label="サマリー"><i class="bi bi-card-text st-icon"></i><span class="st-label">サマリー</span></button>
+      <button type="button" class="stock-tab" data-panel="chart" role="tab" aria-label="グラフ"><i class="bi bi-graph-up st-icon"></i><span class="st-label">グラフ</span></button>
+      <button type="button" class="stock-tab" data-panel="margin" role="tab" aria-label="需給"><i class="bi bi-bar-chart-line st-icon"></i><span class="st-label">需給</span></button>
+      <button type="button" class="stock-tab" data-panel="fund" role="tab" aria-label="ファンダ"><i class="bi bi-clipboard-data st-icon"></i><span class="st-label">ファンダ</span></button>
+      <button type="button" class="stock-tab" data-panel="sizing" role="tab" aria-label="ロット"><i class="bi bi-calculator st-icon"></i><span class="st-label">ロット</span></button>
     </div>
     <button type="button" class="stock-nav-btn" id="stock-nav-prev" aria-label="前の銘柄へ"><i class="bi bi-chevron-right"></i></button>
   </div>
@@ -700,6 +709,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=926d13ab"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=553ca1d9"></script>
+<script src="assets/app.js?v=db193a9d"></script>
 </body>
 </html>

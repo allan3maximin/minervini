@@ -1823,6 +1823,7 @@ async function initStockPage(codeOverride) {
   // 前の銘柄のチャート・イベントリスナーを必ず片付けてから描画し直す
   // (teardownしないと銘柄を切り替えるたびにチャート/リスナーが積み上がる)。
   teardownCharts();
+  teardownMarginChart();
 
   const titleEl = document.getElementById("stock-title");
   const metaEl = document.getElementById("stock-meta");
@@ -1901,8 +1902,14 @@ function setupYahooFinanceLink(code) {
 // 個別画面のパネル高さはCSSのapp shell(flex)が決める(JSでの実測上書きは廃止)。
 // bodyがスクロールしない前提で .stock-panels{flex:1;min-height:0} が残り高さを埋める。
 
-// アクティブなタブ表示を切り替える。
+// 現在表示中のタブ(パネル)名。銘柄を切り替えても同じタブを維持するため、
+// 個別画面の外(モジュールスコープ)で覚えておく。既定はサマリー。
+let currentStockPanel = "summary";
+
+// アクティブなタブ表示を切り替える。切替のたびに currentStockPanel も更新し、
+// 次に別銘柄を開いたときに同じタブへ復元できるようにする。
 function updateStockActiveTab(panelName) {
+  currentStockPanel = panelName;
   const tabs = document.getElementById("stock-tabs");
   if (!tabs) return;
   tabs.querySelectorAll(".stock-tab").forEach((b) => {
@@ -1917,8 +1924,20 @@ function setupStockPanels() {
   const tabs = document.getElementById("stock-tabs");
   if (!panels || !tabs) return;
 
-  panels.scrollLeft = 0; // 常にサマリーから開始
-  updateStockActiveTab("summary");
+  // 銘柄を切り替えても直前に見ていたタブを維持する(例: A株のグラフから
+  // ＞でB株へ移ってもグラフタブのまま)。currentStockPanel の位置へ即座に
+  // スクロール(アニメ無し)し、そのタブをアクティブにする。
+  const tabItems = Array.from(tabs.querySelectorAll(".stock-tab"));
+  let restoreIdx = tabItems.findIndex((b) => b.dataset.panel === currentStockPanel);
+  if (restoreIdx < 0) restoreIdx = 0;
+  const restorePanel = tabItems[restoreIdx] ? tabItems[restoreIdx].dataset.panel : "summary";
+  const applyRestore = () => {
+    panels.scrollLeft = restoreIdx * panels.clientWidth;
+  };
+  applyRestore();
+  // 画面表示直後は clientWidth が確定していないことがあるため次フレームでも再適用。
+  requestAnimationFrame(applyRestore);
+  updateStockActiveTab(restorePanel);
 
   if (panels.dataset.wired) return;
   panels.dataset.wired = "1";
@@ -2421,10 +2440,76 @@ function formatMarginDate(dateStr) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// 信用倍率の推移グラフ(需給タブ)。LightweightChartsのライン1本。
+// 個別チャート(renderCharts)とは別インスタンスなので専用stateで破棄管理する。
+let marginChartState = null;
+
+function teardownMarginChart() {
+  if (!marginChartState) return;
+  const { chart, resizeHandler } = marginChartState;
+  window.removeEventListener("resize", resizeHandler);
+  try { chart.remove(); } catch (_) {}
+  marginChartState = null;
+}
+
+function renderMarginRatioChart(history) {
+  teardownMarginChart();
+  const el = document.getElementById("margin-ratio-chart");
+  const emptyEl = document.getElementById("margin-chart-empty");
+  if (!el) return;
+  el.innerHTML = "";
+  // ratioが取れる週(売残0でない週)だけを昇順で使う。2点未満なら線が引けない
+  // のでグラフ枠を隠して注記を出す。
+  const pts = (history || [])
+    .filter((h) => h && h.ratio != null && h.date)
+    .map((h) => ({ time: h.date, value: Number(h.ratio) }))
+    .filter((p) => Number.isFinite(p.value));
+  if (pts.length < 2) {
+    el.hidden = true;
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  el.hidden = false;
+  if (emptyEl) emptyEl.hidden = true;
+
+  const chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth,
+    height: el.clientHeight,
+    layout: { background: { color: CHART_COLORS.bg }, textColor: CHART_COLORS.text, fontSize: 11 },
+    grid: { vertLines: { color: CHART_COLORS.grid }, horzLines: { color: CHART_COLORS.grid } },
+    rightPriceScale: { minimumWidth: 52, borderColor: CHART_COLORS.grid },
+    localization: CHART_LOCALIZATION,
+    timeScale: { ...CHART_TIME_SCALE, visible: true, borderColor: CHART_COLORS.grid, fixRightEdge: true, fixLeftEdge: true, rightOffset: 0 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScale: false,
+    handleScroll: false,
+  });
+  const series = chart.addLineSeries({
+    color: "#f59e0b",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerVisible: true,
+  });
+  series.setData(pts);
+  chart.timeScale().fitContent();
+
+  const resizeHandler = () => {
+    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    chart.timeScale().fitContent();
+  };
+  window.addEventListener("resize", resizeHandler);
+  // 需給タブが初期表示で画面外(横スクロール先)にあると生成時に幅が0になりうる
+  // ため、次フレームで実寸に合わせ直す。
+  requestAnimationFrame(resizeHandler);
+  marginChartState = { chart, resizeHandler };
+}
+
 function renderStockMargin(stock) {
   const container = document.getElementById("margin-detail-body");
-  if (!container) return;
   const m = stock && stock.margin;
+  renderMarginRatioChart(m && m.history);
+  if (!container) return;
   if (!m) {
     container.innerHTML = '<p class="tier-note">信用残データなし</p>';
     return;

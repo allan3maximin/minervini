@@ -21,6 +21,37 @@
 
 ---
 
+## 2026-07-21 (93): 個別株に需給タブ追加 + ドックをアイコン+文字化 + 信用倍率推移グラフ
+
+### 要望(ユーザー原文)
+> 個別株画面に信用データ用のタブ(需給タブ)を追加して。個別株ドックが肥大化しちゃうので
+> メインドックみたいにアイコン+文字方式にして。サマリー グラフ 需給 ファンダ ロット にして。
+> 信用倍率は グラフ表示で遍歴がわかるようにして。個別株の株移動時はタブは同じものを維持して
+> (例えばA株のグラフを開いていて>ボタンでB株に移動してもB株のグラフタブ表示のまま)。
+
+### やったこと
+1. **バックエンド `src/data/margin.py`**: `build_margin_metrics` の返り値に `history`
+   (信用倍率の週次推移 `[{date, ratio}]`)を追加。store の全週から当該コード収録週だけを
+   日付昇順で拾う。売残0で ratio 不能な週は `ratio=None`(グラフ側で欠損扱い)。表示専用・
+   スコアには不使用。既存テスト29件は個別キー検証なので history 追加で壊れず、全passを確認。
+2. **`docs/index.html`**: 個別株ビューにグラフ/ファンダの間に `data-panel="margin"` パネルを
+   新設(信用倍率推移チャート `#margin-ratio-chart` + 需給明細 `#margin-detail-body`)。
+   タブバーを5つのアイコン+文字タブに再構成: サマリー/グラフ/需給/ファンダ/ロット。
+3. **`docs/assets/style.css`**: `.stock-tabs .stock-tab` を縦アイコン+文字レイアウトに。
+   `.margin-chart-box` (height 168px) 追加。
+4. **`docs/assets/app.js`**: `currentStockPanel` 変数で選択タブを保持。`setupStockPanels` で
+   前回タブを復元(株移動時に同タブ維持)。`renderMarginRatioChart(history)` を追加
+   (LightweightCharts の amber line series、2点未満なら非表示+注記)。`teardownMarginChart`
+   を initStockPage に組み込み。
+5. cache-buster 更新: style.css `?v=4e3a61e5` / app.js `?v=db193a9d`。
+
+### 検証
+- `python3 -m pytest tests/test_margin.py` → 29 passed。
+- `node --check docs/assets/app.js` → OK。
+- ローカルは暗号化 report.json のため描画確認不可 → ユーザーが iPhone ミラーで確認。
+
+---
+
 ## 2026-07-21 (92): 設定→投資法を全トピック一覧に + 解説に図(SVG)追加
 
 ### 要望(ユーザー原文)
