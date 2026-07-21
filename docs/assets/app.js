@@ -5,6 +5,7 @@ const STATUS_LABELS = {
   WATCH_A: "監視A(ピボット待ち)",
   WATCH_B: "監視B(ベース形成中)",
   EXTENDED: "伸びすぎ(追いかけ禁止)",
+  STALE: "ブレイク鮮度切れ(追いかけ禁止)",
   REJECTED: "ベース不合格",
   IMMATURE: "ベース形成中(日数不足)",
   TOO_RECENT: "高値更新中(ベース未形成)",
@@ -17,6 +18,7 @@ const STATUS_ORDER = [
   "WATCH_A",
   "WATCH_B",
   "EXTENDED",
+  "STALE",
   "REJECTED",
   "IMMATURE",
   "TOO_RECENT",
@@ -2830,7 +2832,7 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
 
 // エントリーステータスのうち「当日見るべき」アクション対象。バックエンドの
 // pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
-const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED"]);
+const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED", "STALE"]);
 
 // ピックアップ銘柄の一覧テーブル(市場サマリー用の共通フォーマット)。
 function reviewStockTable(stocks, limit) {

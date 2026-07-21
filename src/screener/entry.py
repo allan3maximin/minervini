@@ -11,10 +11,31 @@ doc's own description of EXTENDED as an automatic downgrade.
 """
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from src.config import REPO_ROOT, load_config
 from src.utils_io import atomic_write_json, safe_load_json
 
 STATUS_HISTORY_PATH = REPO_ROOT / "data" / "status_history.json"
+
+# 「終値がピボットより上」を意味するステータス群。ブレイク鮮度(breakout_age_days)と
+# クールダウン(extended_cooldown_ready)の判定で共有する。
+POST_BREAKOUT_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "EXTENDED", "STALE"}
+
+
+def _parse_date(value) -> date | None:
+    """history/latest_row の日付表現(ISO文字列 / date / datetime / pandas Timestamp)を
+    date に正規化する。パース不能なら None(呼び出し側は鮮度チェックをスキップ)。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -134,18 +155,93 @@ def is_new_breakout(history: dict, code: str, today_status: str) -> bool:
     return previous_status(history, code) == "WATCH_A" and today_status == "BREAKOUT"
 
 
+def _current_pivot_streak(history: dict, code: str) -> list[dict]:
+    """現在ロック中のピボット値を共有する末尾連続エントリ群(古い順)。
+    ピボット値が変わった/無い所でストリークは切れる。"""
+    entries = history.get(code, [])
+    locked = None
+    for e in reversed(entries):
+        if e.get("pivot") is not None:
+            locked = e["pivot"]
+            break
+    if locked is None:
+        return []
+    streak: list[dict] = []
+    for e in reversed(entries):
+        if e.get("pivot") != locked:
+            break
+        streak.append(e)
+    streak.reverse()
+    return streak
+
+
+def breakout_age_days(history: dict, code: str, today: date | None) -> int | None:
+    """現在のピボットストリーク内で「最初にピボットを上抜けた日」から today までの
+    経過日数(暦日)。当該ピボットで一度もブレイクしていなければ None。
+
+    ブレイク鮮度チェック(2026-07-21): locked_pivot は status_history_days(90日)
+    生き続けるため、これが無いと何週間も前のブレイクの残骸ピボットに対して毎日
+    BREAKOUT/BREAKOUT_WEAK を出し続ける(ゾンビピボット問題)。ミネルヴィニの
+    買いチャンスはピボット突破から数日以内であり、それを逃したら次のベース待ち。"""
+    if today is None:
+        return None
+    for e in _current_pivot_streak(history, code):
+        if e.get("status") in POST_BREAKOUT_STATUSES:
+            first = _parse_date(e.get("date"))
+            if first is not None:
+                return (today - first).days
+    return None
+
+
 def extended_cooldown_ready(history: dict, code: str, config: dict | None = None) -> bool:
-    """True once a stock has been continuously EXTENDED for >= cooldown days,
-    signaling it's eligible to be re-scanned from Phase 2 for a new base."""
+    """True once a stock has been continuously EXTENDED/STALE for >= cooldown
+    days, signaling the locked pivot should be dropped so the stock is
+    re-scanned from Phase 2 for a new base. STALE(ブレイク鮮度切れ)もEXTENDEDと
+    同じ「追いかけ禁止・新ベース待ち」状態なのでカウントに含める。"""
     config = config or load_config()
     cooldown = config["entry"]["extended_cooldown_days"]
     count = 0
     for entry in reversed(history.get(code, [])):
-        if entry["status"] == "EXTENDED":
+        if entry["status"] in ("EXTENDED", "STALE"):
             count += 1
         else:
             break
     return count >= cooldown
+
+
+def lock_drop_reason(
+    history: dict, code: str, close: float, locked: dict, today: date | None,
+    config: dict | None = None,
+) -> str | None:
+    """ロック済みピボットを無効化すべきなら理由文字列を返す(有効なら None)。
+
+    - "cooldown":    EXTENDED/STALE が extended_cooldown_days 日連続 → 新ベース待ち。
+      (2026-07-21まで extended_cooldown_ready はどこからも呼ばれない死にコードで、
+      ロックが90日間無条件に生き続けていた)
+    - "base_failed": 終値がロック時の水準から計算した損切りラインを下回った。
+      ブレイク失敗/ベース崩壊であり「WATCH_A(突破待ち)」を出し続けるのは誤り。
+    - "gap":         最後の記録から pivot_lock_max_gap_days 暦日超の空白。P1落ち等で
+      追跡が途切れた古いピボットの資源化(復活)を防ぐ。"""
+    e = (config or load_config())["entry"]
+
+    if extended_cooldown_ready(history, code, config):
+        return "cooldown"
+
+    levels = compute_pivot_levels(locked["pivot"], locked.get("stop_ref_low"), config)
+    stop = levels.get("stop_loss")
+    if stop is None:
+        stop = locked["pivot"] * (1 - e["stop_loss_pct"])
+    if close < stop:
+        return "base_failed"
+
+    max_gap = e.get("pivot_lock_max_gap_days")
+    if max_gap is not None and today is not None:
+        entries = history.get(code, [])
+        last_date = _parse_date(entries[-1].get("date")) if entries else None
+        if last_date is not None and (today - last_date).days > max_gap:
+            return "gap"
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +259,11 @@ def evaluate_entry(
     close = latest_row["close"]
     volume = latest_row["volume"]
     vol_ma50 = latest_row.get("vol_ma50")
+    today = _parse_date(latest_row.get("date"))
 
     pivot = None
     stop_ref_low = None
+    from_lock = False
 
     if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
         last_c = vcp_result["contractions"][-1]
@@ -174,14 +272,34 @@ def evaluate_entry(
     else:
         locked = locked_pivot(history, code)
         if locked:
+            reason = lock_drop_reason(history, code, close, locked, today, config)
+            if reason:
+                return {
+                    "status": vcp_result.get("status", "NO_SETUP"),
+                    "pivot": None,
+                    "lock_dropped": reason,
+                }
             pivot = locked["pivot"]
             stop_ref_low = locked["stop_ref_low"]
+            from_lock = True
 
     if pivot is None:
         return {"status": vcp_result.get("status", "NO_SETUP"), "pivot": None}
 
     status_info = determine_entry_status(close, volume, vol_ma50, pivot, config)
     levels = compute_pivot_levels(pivot, stop_ref_low, config)
+
+    # ブレイク鮮度チェック(ゾンビピボット対策): ロック済みピボットの初回ブレイクから
+    # breakout_stale_days 暦日を超えたら、BREAKOUT/BREAKOUT_WEAK/WATCH_A を STALE に
+    # 落とす(EXTENDED は価格ベースの追いかけ禁止としてそのまま)。STALE は
+    # extended_cooldown_ready のカウント対象なので、cooldown 日数後にロック自体が
+    # 破棄され、新しいベース形成(WATCH_A)を待つ状態に戻る。フレッシュなVCPスキャンが
+    # WATCH_A を返した場合(from_lock=False)は新ベースなので対象外。
+    if from_lock and status_info["status"] != "EXTENDED":
+        stale_days = config["entry"].get("breakout_stale_days")
+        age = breakout_age_days(history, code, today)
+        if stale_days is not None and age is not None and age >= stale_days:
+            status_info = {**status_info, "status": "STALE", "breakout_age_days": age}
 
     return {
         **status_info,

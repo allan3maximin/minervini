@@ -332,6 +332,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .status-WATCH_A h3 { border-color: var(--link); color: var(--link); }
 .status-WATCH_B h3 { color: var(--text-dim); }
 .status-EXTENDED h3 { border-color: var(--danger); color: var(--danger); }
+/* STALE(ブレイク鮮度切れ、2026-07-21): EXTENDEDと同じ追いかけ禁止枠の配色 */
+.status-STALE h3 { border-color: var(--danger); color: var(--danger); }
 
 /* --------------------------------------------------------------- tables */
 

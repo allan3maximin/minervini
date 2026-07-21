@@ -21,6 +21,54 @@
 
 ---
 
+## 2026-07-21 (100): ゾンビピボット修正(STALE導入) + ロック失効の横展開FIX
+
+ユーザー指摘: 8418 が初回ブレイクから約3週間後もピボット未更新のまま
+BREAKOUT_WEAK を出し続けた。原因は `locked_pivot()` が `status_history_days: 90`
+の間ピボットを持ち越し、日次ステータスを古いピボットに対して再計算するため。
+ミネルヴィニ的には買いチャンスは突破後数日以内なので設計上の穴。横展開で
+類似の「古い状態の持ち越し」バグも監査してまとめて修正。
+
+**変更点**
+- **STALE ステータス新設** `src/screener/entry.py`:
+  `breakout_age_days()`(現ピボット連続区間の最初のブレイク系ステータスからの
+  暦日数)を新設。ロック由来(from_lock)で age >= `entry.breakout_stale_days`(7)
+  なら WATCH_A/BREAKOUT/BREAKOUT_WEAK を STALE に変換(鮮度切れ・追いかけ禁止)。
+  EXTENDED は価格ベースの追いかけ禁止なのでそのまま。fresh VCP 由来の
+  WATCH_A(from_lock=False)は対象外。
+- **ロック失効 `lock_drop_reason()`** 3条件でピボットロックを破棄し
+  ウォッチリストに戻す(`lock_dropped` にreason記録):
+  - `cooldown`: EXTENDED/STALE が14日連続(死んでいた `extended_cooldown_ready`
+    を STALE 込みでカウントするよう改修して本番配線)
+  - `base_failed`: 終値がロック時ストップ割れ(ベース崩壊なのにWATCH_Aで
+    居座るゾンビの排除)
+  - `gap`: 履歴最終エントリから `entry.pivot_lock_max_gap_days`(7暦日)超の
+    追跡ギャップ(P1落ち→復帰でのピボット復活を防止)
+- **config.yaml**: `entry.breakout_stale_days: 7` / `entry.pivot_lock_max_gap_days: 7`。
+- **成功率プロキシ** `src/report/build_site.py` `compute_breakout_success_rate`:
+  STALE は上下不定(ピボット上でも下でも発生)なので分子・分母から除外。
+  STATUS_ORDER に STALE(5)を挿入。`assemble_stock_record` に
+  `breakout_age_days` を追加。
+- **表示系**: `src/pipeline.py` ACTIONABLE_ENTRY_STATUSES に STALE。
+  `src/report/summary.py` ラベル「ブレイク鮮度切れ(追いかけ禁止)」+
+  ヘッドライン分岐。`docs/assets/app.js` STATUS_LABELS/STATUS_ORDER/
+  REVIEW_ACTIONABLE に STALE。`docs/assets/style.css` `.status-STALE`(danger色)。
+  cache-buster style `3657b329` / app.js `b3098ae6`。
+  `skills/minervini-analysis/SKILL.md` に STALE の説明を追記。
+- **横展開監査**: `dryup_log.py` は冪等・同日dedup・atomic writeで問題なし。
+
+**検証**: `pytest` 377 passed(新規12テスト: breakout_age計算/ピボット変更で
+リセット/STALE変換/EXTENDED据え置き/fresh WATCH_A除外/gap・base_failed・
+cooldownの各ロック失効/クールダウンのSTALE計上)。`node --check app.js` OK。
+
+**コミット対象**: `src/screener/entry.py` `src/pipeline.py`
+`src/report/build_site.py` `src/report/summary.py` `config.yaml`
+`docs/assets/app.js` `docs/assets/style.css` `docs/index.html`
+`skills/minervini-analysis/SKILL.md` `tests/test_entry.py` `log.md`。
+data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-21 (99): 個別チャートに決算発表(カタリスト)マーカー
 
 値動きが純粋なものか決算ドリブンかを見分けられるよう、個別銘柄チャートの

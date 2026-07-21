@@ -47,7 +47,9 @@ DEBUG_PATH = REPO_ROOT / "data" / "trend_template_debug.json"
 
 # Statuses worth surfacing on the dashboard: an active setup, or a stock
 # that's already broken out of one (tracked via the locked historical pivot).
-ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED"}
+# STALE (2026-07-21追加) = ブレイク鮮度切れ。表示・履歴記録は続ける(cooldownの
+# カウントに必要)が、EXTENDEDと同じ「追いかけ禁止」扱い。
+ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED", "STALE"}
 
 
 def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int:

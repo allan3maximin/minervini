@@ -26,6 +26,7 @@ STATUS_LABELS_JA = {
     "WATCH_A": "監視A(ピボット待ち)",
     "WATCH_B": "監視B(ベース形成中)",
     "EXTENDED": "伸びすぎ(追いかけ禁止)",
+    "STALE": "ブレイク鮮度切れ(追いかけ禁止)",
     "REJECTED": "ベース不合格",
     "IMMATURE": "ベース形成中(日数不足)",
     "TOO_RECENT": "高値更新中(ベース未形成)",
@@ -249,6 +250,13 @@ def _build_headline(record: dict, config: dict) -> str:
     if status == "EXTENDED":
         ext = config["entry"]["extended_pct"] * 100
         return f"ピボットから{ext:.0f}%超上放れており追いかけ買いは禁止。次のベース形成まで待機。"
+
+    if status == "STALE":
+        stale_days = config["entry"].get("breakout_stale_days")
+        age = record.get("breakout_age_days")
+        age_part = f"初回ブレイクから{age}日経過。" if age is not None else ""
+        return (f"ピボット{_num(pivot)}円のブレイクは鮮度切れ({age_part}"
+                f"買いチャンスは突破後{stale_days}日以内)。追いかけ買いは禁止、次のベース形成まで待機。")
 
     if status == "REJECTED":
         flags = (record.get("must_flags") or {}).get("vcp") or {}

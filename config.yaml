@@ -111,6 +111,14 @@ entry:
   market_guard_pct: -0.015
   extended_cooldown_days: 14
   status_history_days: 90
+  # 2026-07-21新規(ゾンビピボット対策): ロック済みピボットの初回ブレイクから
+  # この暦日数を超えたら BREAKOUT/BREAKOUT_WEAK/WATCH_A を STALE(追いかけ禁止・
+  # 新ベース待ち)へ落とす。7暦日 ≒ 5営業日(ミネルヴィニの「買いはブレイクから
+  # 数日以内」に対応)。
+  breakout_stale_days: 7
+  # 2026-07-21新規: status_history の最終記録からこの暦日数を超える空白があったら
+  # ロック済みピボットを破棄(P1落ち等で追跡が途切れた古いピボットの復活防止)。
+  pivot_lock_max_gap_days: 7
   # Simplified JPX tick-size table (regular stocks, not the finer TOPIX100
   # increments -- see design doc 5.1 note). Each row is [price_upper_bound, tick].
   tick_table:

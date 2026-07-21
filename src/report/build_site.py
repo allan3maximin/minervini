@@ -52,13 +52,14 @@ STATUS_ORDER = {
     "WATCH_A": 2,
     "WATCH_B": 3,
     "EXTENDED": 4,
+    "STALE": 5,  # ブレイク鮮度切れ(2026-07-21追加)。EXTENDEDと同じ追いかけ禁止枠
     # Watchlist tier: trend template passed, but VCP hasn't produced an
     # actionable setup yet. Ordered roughly by "how close to a real base".
-    "REJECTED": 5,
-    "IMMATURE": 6,
-    "TOO_RECENT": 7,
-    "TOO_VOLATILE": 8,
-    "NO_BASE": 9,
+    "REJECTED": 6,
+    "IMMATURE": 7,
+    "TOO_RECENT": 8,
+    "TOO_VOLATILE": 9,
+    "NO_BASE": 10,
 }
 TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2}
 
@@ -124,6 +125,8 @@ def assemble_stock_record(
         "stop_loss": entry_result.get("stop_loss"),
         "risk_pct": entry_result.get("risk_pct"),
         "dist_to_pivot": entry_result.get("dist_to_pivot"),
+        # STALE時のみ入る初回ブレイクからの経過暦日(summary.pyの文言・個別画面用)。
+        "breakout_age_days": entry_result.get("breakout_age_days"),
         "fund_coverage": fund_info.get("fund_coverage"),
         "fund_strong": fund_info.get("fund_strong"),
         "fund_eps_yoy": fund_info.get("fund_eps_yoy"),
@@ -384,8 +387,10 @@ def compute_breakout_success_rate(
     """Share of BREAKOUT events (in the trailing `lookback_days` entries per
     code) that were still above their pivot `hold_days` trading days later.
 
-    Uses status alone as a proxy: BREAKOUT/BREAKOUT_WEAK/EXTENDED all imply
+    Uses status alone as a proxy: BREAKOUT/BREAKOUT_WEAK/EXTENDED imply
     close > pivot, while WATCH_A implies the stock fell back below pivot.
+    STALE(2026-07-21追加)はピボットの上下どちらでも付き得る(鮮度切れは終値位置に
+    依らない)ため上下の代理情報を持たない → 母数に数えず判定不能としてスキップする。
     """
     successes = 0
     total = 0
@@ -394,8 +399,10 @@ def compute_breakout_success_rate(
         start = max(0, n - lookback_days - hold_days)
         for i in range(start, n - hold_days):
             if entries[i]["status"] == "BREAKOUT":
-                total += 1
                 later_status = entries[i + hold_days]["status"]
+                if later_status == "STALE":
+                    continue  # 上下不定: 成功にも失敗にも数えない
+                total += 1
                 if later_status in ("BREAKOUT", "BREAKOUT_WEAK", "EXTENDED"):
                     successes += 1
     if total == 0:
