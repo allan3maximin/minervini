@@ -1,16 +1,21 @@
 name: Maezyou (morning session) screener run
 
-# 前場終了(11:30 JST)タイミングのフルスクリーニング再実行。
-# 日次バッチ(daily.yml, 16時以降)とは別枠で、前場の値動きを反映した
-# report.json / breadth.json / heatmap 等を生成する。フロントの
-# 「前場情報をコピー」ボタンがこのスナップショットを読む前提。
+# 前場終了(11:30 JST)タイミングのフルスクリーニング再実行(スナップショット方式)。
+# 日次バッチ(daily.yml, 16時以降)とは別枠で、前場の値動きを反映した前場断面を
+# 生成する。env SCREENER_SNAPSHOT=maezyou を渡すことで pipeline は canonical の
+# report.json/breadth.json/positions.json を上書きせず、report_maezyou.json /
+# breadth_maezyou.json / positions_maezyou.json / indices_maezyou.json という
+# 独立ファイルへ書き出す。さらに status_history / dryup_log / per-stock charts など
+# フォワード検証の永続状態も一切触らない。これでフロントの「前場情報をコピー」ボタンが
+# 読む前場断面が、EOD の「後場情報をコピー」ボタン用データ(canonical)と混ざらない。
 #
 # データソース: 価格は yfinance(場中は当日足=前場終了時点の途中足を返す)。
-# その途中足は当日夕方の daily.yml が RECHECK_DAYS=30 で上書き再取得するため、
-# 引け後には確定値へ自然に更新される(前場スナップショットの副作用は一時的)。
+# 価格ストア(data/prices/*)への途中足書き込みは当日夕方の daily.yml が
+# RECHECK_DAYS=30 で上書き再取得するため、引け後には確定値へ自然に更新される。
+# indices.json / heatmap.json も intraday 更新扱いで日次バッチが自己修復する。
 #
 # セッションラベル: pipeline は実行時刻(JST)から market_session() で自動判定
-# するので、この時間帯の実行は report.json に "market_session": "前場" が入る。
+# するので、この時間帯の実行は report_maezyou.json に "market_session": "前場" が入る。
 on:
   schedule:
     # GitHub Actions の cron は高負荷時に遅延・ドロップし得るので、前場ウィンドウ
@@ -68,12 +73,14 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
-      - name: Run screener pipeline (morning session)
+      - name: Run screener pipeline (morning session, snapshot)
         if: steps.check.outputs.skip != 'true'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}
           DASHBOARD_DATA_KEY: ${{ secrets.DASHBOARD_DATA_KEY }}
+          # スナップショット方式: canonical を上書きせず docs/data/*_maezyou.json を生成。
+          SCREENER_SNAPSHOT: maezyou
         run: python -m src.pipeline
 
       - name: Commit results

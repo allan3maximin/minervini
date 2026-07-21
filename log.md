@@ -21,6 +21,42 @@
 
 ---
 
+## 2026-07-21 (98): 前場スナップショット方式化 + ザラ場前ボタン + 地合い/ウォッチ予測観点
+
+(97) のフィードバック対応。前場版と後場版が同一 report.json を読んで中身が完全一致
+してしまう問題を「スナップショット方式」で解消し、寄り前の作戦用に「ザラ場前」ボタンを
+追加、3ボタンすべてに「地合い予測」「ウォッチ銘柄予測」の観点を持たせた。
+
+**変更点**
+- **スナップショット方式(バックエンド)** `src/pipeline.py` / `src/report/build_site.py`:
+  env `SCREENER_SNAPSHOT`(例 `maezyou`)が入っていると `is_snapshot` モードになり、
+  `report`/`breadth`/`positions`/`indices` を `_maezyou` 接尾辞の独立ファイルへ書き出す。
+  canonical(EOD)の report.json / breadth.json / positions.json は一切上書きしない。
+  - `build_report(..., snapshot_suffix=)` → `report_maezyou.json`。
+  - `update_breadth(..., snapshot_suffix=)` → canonical 履歴をベースに当日エントリを
+    足した断面を `breadth_maezyou.json` へ(canonical breadth.json は無変更)。
+  - `snapshot_docs_json("indices", suffix)` を新設し `indices.json`→`indices_maezyou.json`
+    を暗号化封筒を保ったまま複製(intraday-indices.yml が更新する canonical を断面化)。
+  - positions は snapshot時のみ `positions_maezyou.json` へ path 指定で書き出し。
+  - フォワード検証の永続状態を汚さないため、snapshot時は `save_status_history` /
+    dryup `log_and_resolve` / per-stock chart 書き出しをスキップ。価格ストア・heatmap 等の
+    途中足汚染は従来どおり夕方の daily.yml(RECHECK_DAYS=30)が自己修復。
+- **ワークフロー** `.github/workflows/maezyou.yml`: `SCREENER_SNAPSHOT: maezyou` を追加。
+  ヘッダコメントをスナップショット方式の説明へ更新。
+- **フロント** `docs/index.html` / `docs/assets/app.js`:
+  - 「ザラ場前情報をコピー」ボタンを新設(計3ボタン: ザラ場前/前場/後場)。
+  - `buildSessionReviewMarkdown` を `SESSION_MODES`(ザラ場前/前場/後場)駆動に刷新。
+    各モードで「データ断面」表示と締めの指示文を出し分け、**全モードに 1.地合い予測 /
+    2.ウォッチ銘柄予測 の2観点**を必ず含める。mismatch 警告は expectedSession 比較に変更。
+  - `wireSessionReview` を刷新: ザラ場前/後場は canonical(=寄り前は前営業日EOD)を使用、
+    前場だけ `loadMaezyouSnapshot()` で `_maezyou` 束を都度フェッチ(未生成なら canonical
+    フォールバック+mismatch警告)。app.js cache-buster `?v=18d2a760`。
+- **検証**: `pytest tests/test_build_site.py` 24 passed、node/py 構文チェックOK、
+  一時ディレクトリで snapshot方式の書き分け(canonical不変・接尾辞ファイル生成・
+  breadth履歴合成・indices複製)を実挙動で確認。
+
+---
+
 ## 2026-07-21 (97): 前場終了バッチ + 前場/後場 振り返りコピーボタン
 
 前場終了(11:30 JST)タイミングでもフルスクリーニングを回し、その市場サマリーを

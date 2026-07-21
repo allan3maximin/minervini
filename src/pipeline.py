@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from datetime import datetime
@@ -52,6 +53,16 @@ ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", 
 def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int:
     config = config or load_config()
     today = datetime.now().date()
+
+    # スナップショット方式(前場終了バッチ用、2026-07-21): env SCREENER_SNAPSHOT に
+    # ラベル(例 "maezyou")が入っていると、report/breadth/positions/indices を
+    # _<label>.json へ書き出し、canonical(EOD)ファイルとフォワード検証の永続状態
+    # (status_history / dryup_log / per-stock charts)を一切上書きしない。これで
+    # 前場断面が EOD の後場ボタン用データと独立に残る。価格ストア・指数・ヒートマップ
+    # 等の途中足汚染は夕方の日次バッチ(RECHECK_DAYS=30)が自己修復する既存設計に従う。
+    snapshot_label = (os.environ.get("SCREENER_SNAPSHOT") or "").strip()
+    snapshot_suffix = f"_{snapshot_label}" if snapshot_label else ""
+    is_snapshot = bool(snapshot_suffix)
 
     if jpholiday.is_holiday(today):
         print(f"{today} is a JP holiday; skipping.")
@@ -196,7 +207,11 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
             positions, indicator_by_code, name_by_code, margin_store=margin_store, config=config
         )
         positions_report["warnings"] = positions_csv_warnings + positions_report["warnings"]
-        positions_mod.write_positions_json(positions_report)
+        positions_path = (
+            build_site.DOCS_DATA_DIR / f"positions{snapshot_suffix}.json"
+            if is_snapshot else None
+        )
+        positions_mod.write_positions_json(positions_report, path=positions_path)
     except Exception as e:
         print(f"Positions report update failed (ignored): {e}")
 
@@ -299,6 +314,8 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
                 margin_store=margin_store,
             )
 
+        # スナップショット(前場)は canonical チャートを途中足で上書きしないよう
+        # per-stock chart 書き出しをスキップ(前場ボタンの市場サマリーはチャート不使用)。
         build_site.attach_priority(record, pr_eval)
         record["momentum"] = summary_mod.compute_momentum(df_ind)
         # リスト画面カード用の前日比%。終値2本から素直に計算(旧データ・上場直後
@@ -317,21 +334,25 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         record["next_earnings_date"] = next_earnings_by_code.get(code)
         record["has_chart"] = True
         stock_records.append(record)
-        chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
-        build_site.write_chart_data(code, chart_data)
+        if not is_snapshot:
+            chart_data = build_site.build_chart_data(code, df_ind, vcp_result, entry_result)
+            build_site.write_chart_data(code, chart_data)
 
-    entry_mod.save_status_history(history)
+    # スナップショット(前場)は status_history / dryup_log を永続化しない。途中足の
+    # ピボットロックやフォワード検証レコードで EOD の確定データを汚さないため。
+    if not is_snapshot:
+        entry_mod.save_status_history(history)
 
-    # 本番フォワード検証: 既存レコードの outcome を解決 → 当日の WATCH_A/B を追記。
-    # 失敗してもスクリーナー本体は止めない(検証用の副次成果物)。
-    try:
-        dryup_stat = dryup_log_mod.log_and_resolve(dryup_records, indicator_by_code, config)
-        print(
-            f"Dry-up log: appended {dryup_stat['appended']}, "
-            f"resolved {dryup_stat['resolved']}, total {dryup_stat['total']}."
-        )
-    except Exception as e:
-        print(f"Dry-up log update failed (ignored): {e}")
+        # 本番フォワード検証: 既存レコードの outcome を解決 → 当日の WATCH_A/B を追記。
+        # 失敗してもスクリーナー本体は止めない(検証用の副次成果物)。
+        try:
+            dryup_stat = dryup_log_mod.log_and_resolve(dryup_records, indicator_by_code, config)
+            print(
+                f"Dry-up log: appended {dryup_stat['appended']}, "
+                f"resolved {dryup_stat['resolved']}, total {dryup_stat['total']}."
+            )
+        except Exception as e:
+            print(f"Dry-up log update failed (ignored): {e}")
 
     # 機能B: セクターヒートマップ生成 + セクター強度属性の付与。
     # 失敗してもスクリーナー本体は止めない。
@@ -406,12 +427,18 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         priority_counts=pr_counts,
         p1_scarce=p1_scarce,
         source_freshness=source_freshness,
+        snapshot_suffix=snapshot_suffix,
     )
     build_site.update_breadth(
         today_str, len(codes), template_pass, watch_count, history,
         priority_counts=pr_counts, market_signal=signal_result,
         vcp_funnel=dict(vcp_status_counts),
+        snapshot_suffix=snapshot_suffix,
     )
+    # スナップショットは indices.json を直接生成しない(intraday-indices.yml が
+    # 15分間隔で更新している canonical をそのまま断面として複製する)。
+    if is_snapshot:
+        build_site.snapshot_docs_json("indices", snapshot_suffix)
 
     watchlist_count = len(stock_records) - actionable_count
     print(

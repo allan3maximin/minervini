@@ -2856,15 +2856,55 @@ function reviewStockTable(stocks, limit) {
   return L.join("\n");
 }
 
+// セッション別のヘッダ/期待データセッション/締めの指示文。3ボタン(ザラ場前/前場/
+// 後場)いずれも「地合い予測」「ウォッチ銘柄予測」の2観点を必ず含める。
+const SESSION_MODES = {
+  "ザラ場前": {
+    title: "ザラ場前 作戦データ",
+    expectedSession: "引け後",
+    dataDesc: "前営業日 大引け時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前営業日 大引け時点**の出力データです。寄り付き前の作戦立案用に、以下2つの観点で予測してください。",
+      "",
+      "1. **地合い予測**: 主要指数・地合いシグナル・MA200上回り率・トレンドテンプレート合格率・直近ブレイクアウト成功率から、本日の地合いがどちらに振れやすいか(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、本日ブレイクアウトまたは押し目形成が期待できる銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+  "前場": {
+    title: "前場振り返り",
+    expectedSession: "前場",
+    dataDesc: "前場終了時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前場終了時点**の出力データ(前場スナップショット)です。前場の値動き・地合い・保有ポジションを踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づき、後場に向けて以下2つの観点で分析してください。",
+      "",
+      "1. **地合い予測**: 前場の指数・地合いシグナル・値動きから、後場の地合いがどう振れそうか(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、後場にブレイクアウトまたは押し目形成が期待できる監視銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+  "後場": {
+    title: "後場振り返り",
+    expectedSession: "引け後",
+    dataDesc: "本日 大引け時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**本日 大引け時点(EOD)**の出力データです。本日の値動き・地合い・保有ポジションを踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づき、本日の総括に加えて翌営業日に向けて以下2つの観点で分析してください。",
+      "",
+      "1. **地合い予測**: 本日の指数・地合いシグナル・MA200上回り率・トレンドテンプレート合格率の推移から、翌営業日の地合い見通し(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、翌営業日にブレイクアウトまたは押し目形成が期待できる監視銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+};
+
 function buildSessionReviewMarkdown(session, report, indices, breadth, positionsData) {
-  const isMorning = session === "前場";
+  const mode = SESSION_MODES[session] || SESSION_MODES["後場"];
   const L = [];
-  L.push(`# ${session}振り返り — ミネルヴィニ式スクリーナー 市場サマリー`);
+  L.push(`# ${mode.title} — ミネルヴィニ式スクリーナー 市場サマリー`);
   L.push("");
   L.push(`- 生成日時: ${report.generated_at ? new Date(report.generated_at).toLocaleString("ja-JP") : "-"}`);
   const dataSession = report.market_session;
-  const mismatch = dataSession && dataSession !== session;
-  L.push(`- データのセッション: ${dataSession ?? "-"}${mismatch ? ` ⚠️(${session}ボタンを押しましたが、report.jsonは「${dataSession}」時点のスナップショットです)` : ""}`);
+  // 期待セッションと実データのセッションが食い違う時だけ警告(例: 前場ボタンなのに
+  // 前場スナップショット未生成で EOD データを読んでいる、等)。
+  const mismatch = dataSession && dataSession !== mode.expectedSession;
+  L.push(`- データ断面: ${mode.dataDesc}(データのセッション: ${dataSession ?? "-"})${mismatch ? ` ⚠️(${session}ボタンですが、読み込んだデータは「${dataSession}」時点です。想定は「${mode.expectedSession}」)` : ""}`);
   L.push(`- ユニバース: ${report.universe_size ?? "-"}銘柄 / トレンドテンプレート通過: ${report.template_pass ?? "-"}件`);
   L.push("");
 
@@ -2946,11 +2986,9 @@ function buildSessionReviewMarkdown(session, report, indices, breadth, positions
   L.push("");
 
   L.push("---");
-  if (isMorning) {
-    L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前場終了時点**の出力データです。前場の値動き・地合い・保有ポジションの状況を踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づいて後場に向けた振り返りと戦略を分析してください。");
-  } else {
-    L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの出力データです。本日の値動き・地合い・保有ポジションの状況を踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づいて本日の総括と翌営業日に向けた作戦を分析してください。");
-  }
+  L.push("## 分析してほしい観点");
+  L.push("");
+  for (const line of mode.closing) L.push(line);
   return L.join("\n");
 }
 
@@ -2959,26 +2997,50 @@ function buildSessionReviewMarkdown(session, report, indices, breadth, positions
 // なくonclick代入にして二重配線を防ぐ。
 function wireSessionReview(report, indices, breadth, positionsData) {
   const statusEl = document.getElementById("session-review-status");
-  const bind = (id, session) => {
+  // canonical = initDashboardで読み込み済みのデータ。ザラ場前(寄り前=前営業日EOD)と
+  // 後場(当日EOD)はこれをそのまま使う。前場だけ _maezyou スナップショットを都度フェッチ。
+  const canonical = { report, indices, breadth, positionsData };
+
+  const run = async (btn, session, getData) => {
+    const original = btn.textContent;
+    btn.textContent = "取得中...";
+    try {
+      const d = await getData();
+      const md = buildSessionReviewMarkdown(session, d.report, d.indices, d.breadth, d.positionsData);
+      await copyTextToClipboard(md);
+      btn.textContent = "コピーしました";
+      if (statusEl) statusEl.textContent = `${session}情報をコピーしました。Claudeに貼り付けてください。`;
+    } catch (e) {
+      btn.textContent = "コピー失敗";
+      if (statusEl) statusEl.textContent = `コピーに失敗しました: ${e.message || e}`;
+    } finally {
+      setTimeout(() => { btn.textContent = original; }, 2000);
+    }
+  };
+
+  const bind = (id, session, getData) => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.onclick = async () => {
-      const original = btn.textContent;
-      try {
-        const md = buildSessionReviewMarkdown(session, report, indices, breadth, positionsData);
-        await copyTextToClipboard(md);
-        btn.textContent = "コピーしました";
-        if (statusEl) statusEl.textContent = `${session}情報をコピーしました。Claudeに貼り付けてください。`;
-      } catch (e) {
-        btn.textContent = "コピー失敗";
-        if (statusEl) statusEl.textContent = `コピーに失敗しました: ${e.message || e}`;
-      } finally {
-        setTimeout(() => { btn.textContent = original; }, 2000);
-      }
-    };
+    btn.onclick = () => run(btn, session, getData);
   };
-  bind("copy-maezyou-btn", "前場");
-  bind("copy-goba-btn", "後場");
+
+  bind("copy-zaraba-mae-btn", "ザラ場前", async () => canonical);
+  bind("copy-goba-btn", "後場", async () => canonical);
+  bind("copy-maezyou-btn", "前場", async () => (await loadMaezyouSnapshot()) || canonical);
+}
+
+// 前場スナップショット束(report/breadth/indices/positions の _maezyou.json)を
+// フェッチする。report_maezyou.json が未生成(前場バッチ未実行)なら null を返し、
+// 呼び出し側は canonical へフォールバックする(Markdown側にmismatch警告が出る)。
+async function loadMaezyouSnapshot() {
+  const report = await window.MinerviniData.fetchJson("data/report_maezyou.json", { optional: true });
+  if (!report) return null;
+  const [breadth, indices, positionsData] = await Promise.all([
+    window.MinerviniData.fetchJson("data/breadth_maezyou.json", { optional: true }).then((b) => b || { history: [] }),
+    window.MinerviniData.fetchJson("data/indices_maezyou.json", { optional: true }),
+    window.MinerviniData.fetchJson("data/positions_maezyou.json", { optional: true }),
+  ]);
+  return { report, breadth, indices, positionsData };
 }
 
 async function copyTextToClipboard(text) {

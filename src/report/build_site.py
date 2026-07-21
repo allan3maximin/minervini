@@ -333,6 +333,7 @@ def build_report(
     p1_scarce: bool | None = None,
     source_freshness: dict | None = None,
     session: str | None = None,
+    snapshot_suffix: str = "",
 ) -> dict:
     """report.json を組み立てて書き出す。
 
@@ -344,6 +345,10 @@ def build_report(
     前場終了バッチと日次バッチのどちらが生成したスナップショットかをフロントの
     前場/後場コピーボタンが表示するための表示専用ラベル。未指定なら実行時刻(JST)
     から market_session() で自動判定する。
+
+    snapshot_suffix (2026-07-21追加、省略可): "" 以外なら canonical report.json では
+    なく report{suffix}.json へ書き出す(スナップショット方式)。前場終了バッチが
+    EOD の report.json を上書きせず、前場断面を独立ファイルとして残すために使う。
     """
     ordered = sorted(stocks, key=_sort_key)
     report = {
@@ -360,7 +365,8 @@ def build_report(
         "source_freshness": source_freshness,
         "stocks": ordered,
     }
-    write_docs_json(REPORT_PATH, report)
+    path = REPORT_PATH if not snapshot_suffix else DOCS_DATA_DIR / f"report{snapshot_suffix}.json"
+    write_docs_json(path, report)
     return report
 
 
@@ -407,7 +413,11 @@ def update_breadth(
     priority_counts: dict | None = None,
     market_signal: dict | None = None,
     vcp_funnel: dict | None = None,
+    snapshot_suffix: str = "",
 ) -> dict:
+    # snapshot_suffix 指定時は canonical breadth.json の履歴をベースに当日エントリを
+    # 足した断面を breadth{suffix}.json へ書くだけで、canonical breadth.json は触らない
+    # (前場スナップショットが EOD の地合い履歴を汚さないようにするため)。
     breadth = load_breadth()
     entry = {
         "date": date_str,
@@ -436,8 +446,25 @@ def update_breadth(
     breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
     breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]
-    write_docs_json(BREADTH_PATH, breadth)
+    path = BREADTH_PATH if not snapshot_suffix else DOCS_DATA_DIR / f"breadth{snapshot_suffix}.json"
+    write_docs_json(path, breadth)
     return breadth
+
+
+def snapshot_docs_json(name: str, snapshot_suffix: str) -> None:
+    """docs/data/{name}.json を {name}{suffix}.json へ複製する(暗号化封筒を保つ)。
+
+    前場スナップショット方式で、パイプライン内で個別書き出し口を持たない
+    docs/data ファイル(例: indices.json)を断面として固定するために使う。
+    read_docs_json→write_docs_json を経由するので、鍵ありなら再暗号化される。
+    """
+    if not snapshot_suffix:
+        return
+    src = DOCS_DATA_DIR / f"{name}.json"
+    obj = read_docs_json(src, default=None)
+    if obj is None:
+        return
+    write_docs_json(DOCS_DATA_DIR / f"{name}{snapshot_suffix}.json", obj)
 
 
 # ---------------------------------------------------------------------------
