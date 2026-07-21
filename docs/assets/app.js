@@ -443,6 +443,7 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
+  wireSessionReview(report, indices, breadth, positionsData);
   startLiveIndices();
 }
 
@@ -2816,6 +2817,168 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
   L.push("---");
   L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの出力データです。SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理基準)に基づいて分析してください。");
   return L.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// ダッシュボード: 前場/後場 振り返りデータのコピー
+// 市場全体のコンテキスト(指数/地合い/保有ポジション/ピックアップ銘柄)を
+// 自己完結のMarkdownに整形してクリップボードへ。スマホでClaudeに貼り付けて
+// 前場・後場の振り返り相談に使う想定(個別株の「分析用データをコピー」の
+// 市場サマリー版)。データはinitDashboardで読み込み済みの report/indices/
+// breadth/positions を使う(再フェッチしない)。
+// ---------------------------------------------------------------------------
+
+// エントリーステータスのうち「当日見るべき」アクション対象。バックエンドの
+// pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
+const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED"]);
+
+// ピックアップ銘柄の一覧テーブル(市場サマリー用の共通フォーマット)。
+function reviewStockTable(stocks, limit) {
+  if (!stocks.length) return "- 該当銘柄なし";
+  const rows = limit ? stocks.slice(0, limit) : stocks;
+  const L = [];
+  L.push("| コード | 銘柄名 | 終値 | 前日比 | RS | 総合SC | ステータス | ピボット | ピボットまで | リスク% | セクター(強度/方向) |");
+  L.push("|---|---|---|---|---|---|---|---|---|---|---|");
+  for (const s of rows) {
+    const statusTxt = s.status
+      ? `${s.status}${STATUS_LABELS[s.status] ? `(${STATUS_LABELS[s.status]})` : ""}`
+      : "-";
+    const sector = s.sector33
+      ? `${s.sector33}${s.sector_strength != null ? `(強${s.sector_strength}${s.sector_direction ? "/" + s.sector_direction : ""})` : ""}`
+      : "-";
+    L.push(
+      `| ${s.code} | ${s.name ?? "-"} | ${formatClose(s.close)} | ${s.change_pct != null ? copySignedPct(s.change_pct) : "-"} | ${s.rs ?? "-"} | ${s.total_score ?? "-"} | ${statusTxt} | ${copyNum(s.pivot, 1)} | ${s.dist_to_pivot != null ? copySignedPct(s.dist_to_pivot) : "-"} | ${s.risk_pct != null ? copyNum(s.risk_pct) + "%" : "-"} | ${sector} |`
+    );
+  }
+  if (limit && stocks.length > limit) {
+    L.push(`- ほか${stocks.length - limit}件(総合スコア上位${limit}件のみ表示)`);
+  }
+  return L.join("\n");
+}
+
+function buildSessionReviewMarkdown(session, report, indices, breadth, positionsData) {
+  const isMorning = session === "前場";
+  const L = [];
+  L.push(`# ${session}振り返り — ミネルヴィニ式スクリーナー 市場サマリー`);
+  L.push("");
+  L.push(`- 生成日時: ${report.generated_at ? new Date(report.generated_at).toLocaleString("ja-JP") : "-"}`);
+  const dataSession = report.market_session;
+  const mismatch = dataSession && dataSession !== session;
+  L.push(`- データのセッション: ${dataSession ?? "-"}${mismatch ? ` ⚠️(${session}ボタンを押しましたが、report.jsonは「${dataSession}」時点のスナップショットです)` : ""}`);
+  L.push(`- ユニバース: ${report.universe_size ?? "-"}銘柄 / トレンドテンプレート通過: ${report.template_pass ?? "-"}件`);
+  L.push("");
+
+  // --- 市況コンテキスト ---
+  L.push("## 市況コンテキスト");
+  L.push("");
+  const ixList = (indices && indices.indices) || [];
+  if (ixList.length) {
+    L.push("### 主要指数");
+    L.push("");
+    L.push("| 指数 | 値 | 前日比 |");
+    L.push("|---|---|---|");
+    for (const ix of ixList) {
+      L.push(`| ${ix.name} | ${copyNum(ix.last)} | ${ix.change_pct != null ? copySignedPct(ix.change_pct) : "-"} |`);
+    }
+    L.push("");
+  }
+  const bh = (breadth && breadth.history) || [];
+  const latest = bh.length ? bh[bh.length - 1] : null;
+  if (latest) {
+    L.push("### 地合い");
+    L.push("");
+    const sigMeta = MARKET_SIGNAL_META[latest.signal];
+    if (sigMeta) L.push(`- 地合いシグナル: ${sigMeta.label}${latest.market_score != null ? ` (地合いスコア ${latest.market_score})` : ""}`);
+    if (latest.pct_above_ma200 != null) L.push(`- MA200上回り率: ${(latest.pct_above_ma200 * 100).toFixed(1)}%`);
+    L.push(`- トレンドテンプレート合格率: ${latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-"} (${latest.template_pass ?? "-"}/${latest.universe_size ?? "-"})`);
+    if (latest.watch_count != null) L.push(`- セットアップ形成数: ${latest.watch_count}`);
+    if (latest.breakout_success_rate != null) L.push(`- 直近ブレイクアウト成功率: ${(latest.breakout_success_rate * 100).toFixed(0)}%`);
+    L.push("");
+  }
+  if (report.p1_scarce) {
+    L.push("- ⚠️ 警告: 8条件完全一致の候補銘柄が極端に少なく、地合いが弱い可能性あり");
+    L.push("");
+  }
+
+  // --- 保有ポジション ---
+  const positions = (positionsData && Array.isArray(positionsData.positions)) ? positionsData.positions : [];
+  L.push("## 保有ポジション");
+  L.push("");
+  if (positions.length) {
+    L.push("| コード | 銘柄名 | 建値 | 現在値 | 損益% | R | ストップ | ストップまで% | 保有日数 | シグナル |");
+    L.push("|---|---|---|---|---|---|---|---|---|---|");
+    for (const p of positions) {
+      const sig = (p.sell_signals || []).map((s) => (SELL_SIGNAL_LABELS[s] || { label: s }).label).join("・") || "-";
+      L.push(
+        `| ${p.code} | ${p.name ?? "-"} | ${formatClose(p.entry_price)} | ${p.close != null ? formatClose(p.close) : "-"} | ${p.pl_pct != null ? p.pl_pct.toFixed(2) + "%" : "-"} | ${p.r_multiple != null ? p.r_multiple.toFixed(2) : "-"} | ${formatClose(p.current_stop)} | ${p.dist_to_stop_pct != null ? p.dist_to_stop_pct.toFixed(2) + "%" : "-"} | ${p.days_held ?? "-"} | ${sig} |`
+      );
+    }
+  } else {
+    L.push("- 保有ポジションなし");
+  }
+  L.push("");
+
+  // --- ピックアップ銘柄 ---
+  const stocks = Array.isArray(report.stocks) ? report.stocks : [];
+  const byScore = (a, b) => (b.total_score ?? -Infinity) - (a.total_score ?? -Infinity);
+  const confirmed = stocks.filter((s) => s.tier === "confirmed").sort(byScore);
+  const actionable = stocks.filter((s) => REVIEW_ACTIONABLE.has(s.status)).sort(byScore);
+  const pool = stocks.filter((s) => s.tier === "pool").sort(byScore);
+  const watchlist = stocks.filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null)).sort(byScore);
+
+  L.push("## ピックアップ銘柄");
+  L.push("");
+  L.push("### アクション対象(ブレイクアウト/監視) — 全ティア横断");
+  L.push("");
+  L.push(reviewStockTable(actionable));
+  L.push("");
+  L.push("### 本命(ファンダ強度確認済み)");
+  L.push("");
+  L.push(reviewStockTable(confirmed));
+  L.push("");
+  L.push("### 候補プール(VCPセットアップあり・ファンダ未確認/基準未達)");
+  L.push("");
+  L.push(reviewStockTable(pool, 20));
+  L.push("");
+  L.push("### ウォッチリスト(トレンドテンプレート8条件合格・セットアップ形成待ち)");
+  L.push("");
+  L.push(reviewStockTable(watchlist, 20));
+  L.push("");
+
+  L.push("---");
+  if (isMorning) {
+    L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前場終了時点**の出力データです。前場の値動き・地合い・保有ポジションの状況を踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づいて後場に向けた振り返りと戦略を分析してください。");
+  } else {
+    L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの出力データです。本日の値動き・地合い・保有ポジションの状況を踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づいて本日の総括と翌営業日に向けた作戦を分析してください。");
+  }
+  return L.join("\n");
+}
+
+// 前場/後場コピーボタンの配線。initDashboardが読み込み済みのデータを渡す。
+// initDashboardは再実行され得る(ファンダ保存後など)ので、addEventListenerで
+// なくonclick代入にして二重配線を防ぐ。
+function wireSessionReview(report, indices, breadth, positionsData) {
+  const statusEl = document.getElementById("session-review-status");
+  const bind = (id, session) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.onclick = async () => {
+      const original = btn.textContent;
+      try {
+        const md = buildSessionReviewMarkdown(session, report, indices, breadth, positionsData);
+        await copyTextToClipboard(md);
+        btn.textContent = "コピーしました";
+        if (statusEl) statusEl.textContent = `${session}情報をコピーしました。Claudeに貼り付けてください。`;
+      } catch (e) {
+        btn.textContent = "コピー失敗";
+        if (statusEl) statusEl.textContent = `コピーに失敗しました: ${e.message || e}`;
+      } finally {
+        setTimeout(() => { btn.textContent = original; }, 2000);
+      }
+    };
+  };
+  bind("copy-maezyou-btn", "前場");
+  bind("copy-goba-btn", "後場");
 }
 
 async function copyTextToClipboard(text) {

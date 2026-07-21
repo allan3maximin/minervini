@@ -2350,3 +2350,28 @@ a.nav-btn:hover { border-color: var(--link); }
   .help-popover-overlay { padding: 10px 10px 18vh; align-items: center; }
   .help-popover { padding: 14px; max-height: 74dvh; border-radius: 14px; }
 }
+
+/* ダッシュボード: 前場/後場 振り返りデータのコピー(session-review) */
+.session-review {
+  margin-top: 16px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.session-review h2 { margin: 0 0 6px; font-size: 16px; }
+.session-review-btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.session-review-btns button {
+  flex: 1 1 auto;
+  min-width: 150px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.session-review-btns button:active { transform: translateY(1px); }
+.session-review-status { margin-top: 8px; min-height: 16px; font-size: 12px; color: var(--text-dim); }

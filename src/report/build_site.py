@@ -4,7 +4,7 @@ copying the static dashboard/detail-page assets into docs/ (design doc 7).
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -12,6 +12,33 @@ import pandas as pd
 from src.config import REPO_ROOT, load_config
 from src.report.secure_io import read_docs_json, write_docs_json
 from src.screener.scoring import combined_score
+
+JST = timezone(timedelta(hours=9))
+
+
+def market_session(now: datetime | None = None) -> str:
+    """バッチ実行時刻(JST)から東証の市場セッションを判定する。
+
+    フロント(前場/後場コピーボタン)が「この report.json がどのセッションの
+    スナップショットか」を表示・警告に使うためのラベル。値そのものはスコアや
+    判定に一切影響しない表示専用フィールド。
+
+    - 前場          : 09:00〜12:30 JST (前場終了バッチ = 11:35頃の想定)
+    - 後場(ザラ場中): 12:30〜15:00 JST
+    - 引け後        : 15:00〜翌09:00 JST (日次バッチ = 16時以降の想定)
+    """
+    now = now or datetime.now(JST)
+    # tz-naive で渡された場合は JST とみなす
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=JST)
+    else:
+        now = now.astimezone(JST)
+    minutes = now.hour * 60 + now.minute
+    if 9 * 60 <= minutes < 12 * 60 + 30:
+        return "前場"
+    if 12 * 60 + 30 <= minutes < 15 * 60:
+        return "後場(ザラ場中)"
+    return "引け後"
 
 DOCS_DIR = REPO_ROOT / "docs"
 DOCS_DATA_DIR = DOCS_DIR / "data"
@@ -305,16 +332,23 @@ def build_report(
     priority_counts: dict | None = None,
     p1_scarce: bool | None = None,
     source_freshness: dict | None = None,
+    session: str | None = None,
 ) -> dict:
     """report.json を組み立てて書き出す。
 
     source_freshness (2026-07-17追加、省略可=後方互換): データソースごとの
     最終成功日 {"jquants": {"last_success": ...}, "edinetdb": {...}, "prices": {...}}。
     パイプライン側 (pipeline.run_daily) が state ファイルから組み立てて渡す。
+
+    session (2026-07-21追加、省略可): "前場"/"後場(ザラ場中)"/"引け後"。
+    前場終了バッチと日次バッチのどちらが生成したスナップショットかをフロントの
+    前場/後場コピーボタンが表示するための表示専用ラベル。未指定なら実行時刻(JST)
+    から market_session() で自動判定する。
     """
     ordered = sorted(stocks, key=_sort_key)
     report = {
         "generated_at": generated_at or datetime.now().astimezone().isoformat(),
+        "market_session": session or market_session(),
         "universe_size": universe_size,
         "template_pass": template_pass,
         "priority_counts": priority_counts,

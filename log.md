@@ -21,6 +21,45 @@
 
 ---
 
+## 2026-07-21 (97): 前場終了バッチ + 前場/後場 振り返りコピーボタン
+
+前場終了(11:30 JST)タイミングでもフルスクリーニングを回し、その市場サマリーを
+スマホのClaudeに手動で喰わせて「前場振り返り/後場振り返り」ができるようにした。
+
+**変更点**
+- **前場バッチ** `.github/workflows/maezyou.yml`(新規): cron 02:35/03:05 UTC
+  (JST 11:35/12:05、前場ウィンドウ内で2回リトライ)+ workflow_dispatch。daily.yml を
+  踏襲し `python -m src.pipeline` を実行。concurrency は別枠 `minervini-maezyou`、
+  当日実行済みガードは `"chore: maezyou screener run YYYY-MM-DD"`(TZ=Asia/Tokyo)で判定。
+  push は daily と同じ `pull --rebase -X theirs`。価格は yfinance の場中途中足を使い、
+  夕方の daily.yml が RECHECK_DAYS=30 で確定値に上書きするので副作用は一時的。
+- **セッションラベル** `src/report/build_site.py`: `market_session(now)` を追加し
+  JST時刻から 前場/後場(ザラ場中)/引け後 を判定。`build_report` に `session` 引数を
+  追加し report.json に `"market_session"` フィールドを出力(未指定なら実行時刻から自動)。
+  スコア・判定には不使用の表示専用フィールド。pipeline側は無変更(自動判定に委ねる)。
+- **フロント** ダッシュボード市況データパネルに「振り返りデータ」セクションを新設
+  (`docs/index.html` #session-review、📋前場情報をコピー / 📋後場情報をコピー)。
+  `docs/assets/app.js` に `buildSessionReviewMarkdown(session, report, indices, breadth,
+  positions)` を追加。市場サマリーMarkdown(指数/地合い/保有ポジション/ピックアップ銘柄=
+  アクション対象・本命confirmed・候補poolトップ20・ウォッチリストトップ20)を生成し
+  クリップボードへ。`report.market_session` と押したボタンが食い違う場合は警告文を挿入。
+  配線は `wireSessionReview()`(onclick代入で再init時の二重配線防止)を initDashboard から呼ぶ。
+  CSS `.session-review` を style.css 末尾に追加。
+
+**検証**: `pytest tests/test_build_site.py` → 24 passed。`node --check app.js` OK。
+`market_session()` を各時刻で確認(11:35→前場 / 13:00→後場ザラ場中 / 16:00→引け後)。
+buildSessionReviewMarkdown をnodeでスタブ実行し出力Markdown+セッション不一致警告を確認。
+YAML構文チェックOK。
+
+**キャッシュバスター**: app.js `d90bd065`→`ea6602f8`、style.css `d1e735ac`→`87946185`。
+index.html の両タグ更新済み。
+
+**コミット対象**(触ったソースのみ): `.github/workflows/maezyou.yml` `src/report/build_site.py`
+`docs/index.html` `docs/assets/app.js` `docs/assets/style.css` `log.md`。
+data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-21 (96): 投資法ページャのナビ位置固定解除 + 読み物の可読性向上
 
 投資法タブの「前へ/次に/n/10」ナビが画面下部に fixed 相当(内側スクロール+下端固定)で
