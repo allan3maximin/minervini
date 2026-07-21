@@ -200,7 +200,7 @@ market_signal:
 margin:
   enabled: true
   page_url: "https://www.jpx.co.jp/markets/statistics-equities/margin/05.html"
-  keep_weeks: 13
+  keep_weeks: 26          # 約半年分(週次)を保持。J-Quantsバックフィルした過去分を日次トリムで削らないため
   high_ratio_warn: 5.0    # 信用倍率これ以上で「買い長」注意
   dtc_warn: 3.0           # days_to_cover これ以上で「買残重い」注意
   low_ratio_info: 1.0     # これ以下で「売り長」(踏み上げ余地)表示

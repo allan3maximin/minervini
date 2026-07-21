@@ -1,0 +1,62 @@
+name: Margin history backfill (J-Quants)
+
+# JPXの無料PDF(05.html)は直近5週分しかバックナンバーを残さないため、過去に遡った
+# 信用残は取れない。J-Quants /markets/margin-interest から過去週分を一括取得して
+# data/margin_weekly.json を埋める一回限りの手動ワークフロー。日次(daily.yml)とは別。
+# 実行後は日次パイプラインが従来どおり最新週を1週ずつ追記していく。
+
+on:
+  workflow_dispatch:
+    inputs:
+      weeks:
+        description: "遡る週数(既定26=約半年)。config の keep_weeks を超える分はトリムされる"
+        required: false
+        default: "26"
+
+concurrency:
+  group: minervini-margin-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run J-Quants margin backfill
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        run: python -m src.data.margin --backfill-jquants --weeks "${{ inputs.weeks }}"
+
+      - name: Commit margin store
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/margin_weekly.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore: margin history backfill via J-Quants $(date -u +%Y-%m-%d)"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull latest and push
+        if: steps.commit.outputs.has_changes == 'true'
+        run: |
+          git pull --rebase -X theirs origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}

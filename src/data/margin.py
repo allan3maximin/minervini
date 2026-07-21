@@ -27,8 +27,10 @@ PDF 1行(1銘柄)のテキスト形状(実測):
 """
 from __future__ import annotations
 
+import os
 import re
-from datetime import datetime
+import time
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from urllib.parse import urljoin
 
@@ -392,6 +394,162 @@ def backfill_margin_history(config: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# J-Quants 週次信用残(過去分バックフィル用)
+# ---------------------------------------------------------------------------
+# JPXの無料PDF(05.html)は直近5週分程度しかバックナンバーを残さないため、半年分など
+# 過去に遡った信用残は原理的に取得できない。J-Quants の /markets/margin-interest は
+# 同じ週末残高を過去分まで配信しているので、初回の「過去半年埋め」にはこちらを使う。
+# 日次運用は従来どおり update_margin_store()(JPX PDF)で1週ずつ進める。
+# フィールド: LongVol=買残, ShrtVol=売残, Date=週末基準日(通常金曜), Code=5桁。
+
+API_KEY_ENV = "JQUANTS_API_KEY"
+DEFAULT_JQUANTS_API_URL = "https://api.jquants.com/v2"
+
+
+def _jquants_api_url(config: dict) -> str:
+    return (config.get("jquants", {}) or {}).get("api_url", DEFAULT_JQUANTS_API_URL)
+
+
+def fetch_weekly_margin_by_date(api_key: str, date_str: str, config: dict) -> list[dict]:
+    """/markets/margin-interest?date= を叩き、その週末日の全銘柄レコードを返す。
+
+    レスポンスは {"data": [...], "pagination_key": ...}。全ページ辿って結合する。
+    その日付が基準日でない(祝日でFri休みの週など)なら空リスト。通信/認証エラーは
+    例外を投げず空リストにして、バックフィル全体を止めない。
+    """
+    api_url = _jquants_api_url(config)
+    params: dict = {"date": date_str}
+    records: list[dict] = []
+    while True:
+        try:
+            resp = requests.get(
+                f"{api_url}/markets/margin-interest",
+                params=params,
+                headers={"x-api-key": api_key},
+                timeout=60,
+            )
+            if resp.status_code == 429:  # レートリミット。少し待って1回だけ粘る
+                time.sleep(30)
+                resp = requests.get(
+                    f"{api_url}/markets/margin-interest",
+                    params=params,
+                    headers={"x-api-key": api_key},
+                    timeout=60,
+                )
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"WARNING: margin.fetch_weekly_margin_by_date({date_str}): {e}")
+            return []
+        body = resp.json()
+        records.extend(body.get("data") or [])
+        pk = body.get("pagination_key")
+        if not pk:
+            return records
+        params["pagination_key"] = pk
+
+
+def _jq_records_to_by_code(records: list[dict], universe_codes: set) -> dict:
+    """margin-interest レコード列を {code: {"buy": int, "sell": int}} に畳む。
+    LongVol=買残, ShrtVol=売残。5桁コードを4桁へ正規化し、universe外は捨てる
+    (JPX PDF パースと同じ扱い)。
+    """
+    by_code: dict = {}
+    for rec in records:
+        raw = str(rec.get("Code") or "")
+        if not raw:
+            continue
+        code = _normalize_code(raw)
+        if universe_codes and code not in universe_codes:
+            continue
+        buy = rec.get("LongVol")
+        sell = rec.get("ShrtVol")
+        if buy is None or sell is None:
+            continue
+        try:
+            by_code[code] = {"buy": int(buy), "sell": int(sell)}
+        except (TypeError, ValueError):
+            continue
+    return by_code
+
+
+def _recent_week_end_dates(weeks: int, today: date | None = None) -> list[str]:
+    """直近の金曜から weeks 週分の週末日(金曜基準)をISO文字列で新しい順に返す。"""
+    today = today or date.today()
+    offset = (today.weekday() - 4) % 7  # Mon=0..Fri=4。直近の金曜まで戻す
+    friday = today - timedelta(days=offset)
+    return [(friday - timedelta(days=7 * i)).isoformat() for i in range(weeks)]
+
+
+def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None) -> dict:
+    """J-Quants /markets/margin-interest から過去 weeks 週分の週末信用残を取得し、
+    store の history へ一括投入する(初回の過去半年埋め用。日次からは呼ばない)。
+
+    - 週末日は「直近金曜から7日ずつ遡る」で生成。祝日でFri休みの週に備え、
+      Friで空なら Thu, Wed も試す(最初に非空が取れた日を採用)。
+    - store に既にある日付(JPX PDF由来など)は上書きせずスキップ。
+    - 取得後 keep_weeks で新しい順にトリム。API鍵が無ければ何もしない。
+    """
+    config = config or load_config()
+    mcfg = config.get("margin", {})
+    keep_weeks = int(mcfg.get("keep_weeks", DEFAULT_KEEP_WEEKS))
+    weeks = int(weeks if weeks is not None else keep_weeks)
+
+    api_key = os.environ.get(API_KEY_ENV)
+    if not api_key:
+        print(f"margin jquants backfill: {API_KEY_ENV} not set; skipping")
+        return safe_load_json(MARGIN_STORE_PATH, {})
+
+    try:
+        from src.universe import load_universe
+
+        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
+    except Exception as e:
+        universe_codes = set()
+        print(f"WARNING: margin jquants backfill: universe load failed: {e}")
+
+    store = safe_load_json(
+        MARGIN_STORE_PATH,
+        {"updated_at": None, "last_url": None, "warnings": [], "history": []},
+    )
+    history = list(store.get("history", []))
+    existing_dates = {h.get("date") for h in history}
+    added = 0
+
+    for friday in _recent_week_end_dates(weeks):
+        if friday in existing_dates:
+            continue
+        base = date.fromisoformat(friday)
+        by_code: dict = {}
+        used_date: str | None = None
+        for back in (0, 1, 2):  # Fri→Thu→Wed(祝日シフト対策)
+            cand = (base - timedelta(days=back)).isoformat()
+            if cand in existing_dates:
+                break
+            records = fetch_weekly_margin_by_date(api_key, cand, config)
+            if records:
+                by_code = _jq_records_to_by_code(records, universe_codes)
+                used_date = cand
+                break
+        if not used_date or not by_code:
+            continue
+        history.append({"date": used_date, "by_code": by_code})
+        existing_dates.add(used_date)
+        added += 1
+
+    history.sort(key=lambda h: h["date"])
+    history = history[-keep_weeks:]
+
+    store["updated_at"] = datetime.now().astimezone().isoformat()
+    store["history"] = history
+    if added:
+        atomic_write_json(MARGIN_STORE_PATH, store)
+        print(f"margin jquants backfill: added {added} week(s), history now {len(history)} entries")
+    else:
+        print("margin jquants backfill: nothing added (all present or no data)")
+    return store
+
+
+# ---------------------------------------------------------------------------
 # メトリクス(表示専用。総合スコアには一切使わない)
 # ---------------------------------------------------------------------------
 
@@ -449,3 +607,33 @@ def build_margin_metrics(code: str, latest_row: dict | None, store: dict | None 
         "days_to_cover": days_to_cover,
         "history": trend,
     }
+
+
+# ---------------------------------------------------------------------------
+# CLI(過去分バックフィルの手動実行用。日次パイプラインからは呼ばない)
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="信用残ストアのユーティリティ")
+    parser.add_argument(
+        "--backfill-jquants",
+        action="store_true",
+        help="J-Quants /markets/margin-interest から過去週分を一括投入(要 JQUANTS_API_KEY)",
+    )
+    parser.add_argument(
+        "--weeks",
+        type=int,
+        default=None,
+        help="遡る週数(既定: config の margin.keep_weeks)",
+    )
+    args = parser.parse_args()
+    if args.backfill_jquants:
+        backfill_margin_jquants(weeks=args.weeks)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

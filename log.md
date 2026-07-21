@@ -21,6 +21,46 @@
 
 ---
 
+## 2026-07-21 (94): 株ドック幅をメインDockに統一 + 需給データ半年分バックフィル(J-Quants)
+
+**やったこと**
+
+1. **株ドック(個別株タブバー)の幅をメインDockに合わせた。**
+   - `:root` に `--dock-w: 300px`(メインDock実幅=ボタン56×5+gap2×4+padding5×2+border2)
+     を追加。モバイルは `--dock-w: 258px`。
+   - `.stock-tabs-bar` を `width: var(--dock-w); max-width: 100%; margin: 8px auto 2px`
+     で中央固定、gap を 8→4px、`.stock-tabs` を `flex:1 1 auto; min-width:0` にして
+     ＜タブ群＞をこの幅に収めた。
+
+2. **過去の需給データ半年分を J-Quants でバックフィルできるようにした。**
+   - JPXの週末残PDF(05.html)は直近5週しか残らず過去に遡れない。J-Quants
+     `/markets/margin-interest`(api.jquants.com/v2, x-api-key, `data`/`pagination_key`,
+     `LongVol`=買残 `ShrtVol`=売残)から過去週を一括取得する経路を追加。
+   - `src/data/margin.py` に `fetch_weekly_margin_by_date` / `_jq_records_to_by_code` /
+     `_recent_week_end_dates` / `backfill_margin_jquants` と CLI(`--backfill-jquants
+     --weeks`)を実装。既存日付はスキップ(JPX由来を上書きしない)、祝日でFri休みの週は
+     Thu→Wed も試す。取得後 keep_weeks でトリム。
+   - `config.yaml`: `keep_weeks 13 → 26`(半年分保持。日次トリムで過去分を消さない)。
+   - `.github/workflows/margin_backfill.yml`(新規, workflow_dispatch, 既定26週)。
+     `JQUANTS_API_KEY` secret 使用。手動1回実行用。日次(daily.yml)は従来どおりJPX。
+   - 比率(買残/売残)は単位非依存なのでJPX由来週とJ-Quants由来週が混在しても
+     グラフは問題なし。
+
+3. **テスト追加**: J-Quの新関数7本(正規化/フィルタ・週末日生成・鍵なしno-op・
+   history投入・既存日スキップ)。`pytest tests/test_margin.py` → 36 passed。
+
+**キャッシュバスタ**: style.css `4e3a61e5 → 4e1b4085`(sha256[:8])。app.js は今回未変更で
+`db193a9d` 据え置き。
+
+**コミット対象**: docs/assets/style.css, docs/index.html, src/data/margin.py, config.yaml,
+.github/workflows/margin_backfill.yml, tests/test_margin.py, log.md
+
+**次にやること**: バックフィルは GitHub Actions の "Margin history backfill (J-Quants)" を
+手動実行(weeks=26)すれば data/margin_weekly.json が過去26週で埋まる。ローカル sandbox には
+JQUANTS_API_KEY が無いので実行不可。
+
+---
+
 ## 2026-07-21 (93): 個別株に需給タブ追加 + ドックをアイコン+文字化 + 信用倍率推移グラフ
 
 ### 要望(ユーザー原文)

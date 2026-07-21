@@ -444,3 +444,98 @@ def test_build_margin_metrics_legacy_entry_missing_code_in_prior_week():
     }
     m = margin_mod.build_margin_metrics("1301", {}, store=store)
     assert m["buy_wow_pct"] is None
+
+
+# ---------------------------------------------------------------------------
+# J-Quants バックフィル(過去週の一括取得)
+# ---------------------------------------------------------------------------
+
+def test_jq_records_to_by_code_normalizes_and_filters():
+    records = [
+        {"Code": "13010", "LongVol": "20000", "ShrtVol": "10000"},  # 5桁→1301
+        {"Code": "166A0", "LongVol": 5000, "ShrtVol": 0},            # 英数字→166A
+        {"Code": "99990", "LongVol": 100, "ShrtVol": 100},          # universe外→捨てる
+    ]
+    by_code = margin_mod._jq_records_to_by_code(records, {"1301", "166A"})
+    assert by_code == {
+        "1301": {"buy": 20000, "sell": 10000},
+        "166A": {"buy": 5000, "sell": 0},
+    }
+
+
+def test_jq_records_to_by_code_skips_missing_or_bad_values():
+    records = [
+        {"Code": "13010", "LongVol": None, "ShrtVol": 100},   # buy欠損→skip
+        {"Code": "43070", "LongVol": 100, "ShrtVol": "x"},    # 変換不能→skip
+        {"LongVol": 1, "ShrtVol": 1},                          # Code欠損→skip
+    ]
+    assert margin_mod._jq_records_to_by_code(records, set()) == {}
+
+
+def test_recent_week_end_dates_from_a_friday():
+    from datetime import date
+    # 2026-07-17 は金曜。3週分を新しい順に。
+    got = margin_mod._recent_week_end_dates(3, today=date(2026, 7, 17))
+    assert got == ["2026-07-17", "2026-07-10", "2026-07-03"]
+
+
+def test_recent_week_end_dates_from_midweek_backs_to_friday():
+    from datetime import date
+    # 2026-07-21 は火曜 → 直近金曜は 2026-07-17
+    got = margin_mod._recent_week_end_dates(2, today=date(2026, 7, 21))
+    assert got == ["2026-07-17", "2026-07-10"]
+
+
+def test_backfill_jquants_no_api_key_is_noop(monkeypatch):
+    monkeypatch.delenv(margin_mod.API_KEY_ENV, raising=False)
+    called = {"n": 0}
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1) or [])
+    margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 4}}, weeks=2)
+    assert called["n"] == 0  # 鍵なしなら一切叩かない
+
+
+def test_backfill_jquants_populates_history(monkeypatch, tmp_path):
+    monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
+    store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", str(store_path))
+    # universe を固定
+    monkeypatch.setattr("src.universe.load_universe",
+                        lambda: {"stocks": [{"code": "1301"}]})
+    # 各金曜で1銘柄ぶん返す
+    def fake_fetch(api_key, date_str, config):
+        return [{"Code": "13010", "LongVol": 100 + len(date_str), "ShrtVol": 50}]
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date", fake_fetch)
+
+    from datetime import date
+    monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
+                        lambda weeks, today=None: ["2026-07-17", "2026-07-10"])
+    store = margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 26}}, weeks=2)
+    dates = [h["date"] for h in store["history"]]
+    assert dates == ["2026-07-10", "2026-07-17"]  # 昇順ソート
+    assert store["history"][-1]["by_code"]["1301"]["sell"] == 50
+
+
+def test_backfill_jquants_skips_existing_dates(monkeypatch, tmp_path):
+    monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
+    store_path = tmp_path / "margin_weekly.json"
+    import json as _json
+    store_path.write_text(_json.dumps({
+        "updated_at": None, "last_url": None, "warnings": [],
+        "history": [{"date": "2026-07-17", "by_code": {"1301": {"buy": 1, "sell": 1}}}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", str(store_path))
+    monkeypatch.setattr("src.universe.load_universe", lambda: {"stocks": [{"code": "1301"}]})
+    seen = []
+    def fake_fetch(api_key, date_str, config):
+        seen.append(date_str)
+        return [{"Code": "13010", "LongVol": 999, "ShrtVol": 9}]
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date", fake_fetch)
+    monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
+                        lambda weeks, today=None: ["2026-07-17", "2026-07-10"])
+    store = margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 26}}, weeks=2)
+    # 既存の 07-17 は上書きされず(buy=1のまま)、07-10 だけ取得
+    assert "2026-07-17" not in seen
+    by = {h["date"]: h["by_code"]["1301"]["buy"] for h in store["history"]}
+    assert by["2026-07-17"] == 1
+    assert by["2026-07-10"] == 999

@@ -13,6 +13,7 @@
   --radius: 10px;
   --radius-sm: 6px;
   --dock-h: 54px; /* メインDockの実高さ(ボタン42+padding10+border2)。mainの下余白計算用 */
+  --dock-w: 300px; /* メインDockの実幅(ボタン56×5 + gap2×4 + padding5×2 + border2)。個別株タブバーの幅をこれに合わせる */
 }
 
 * { box-sizing: border-box; }
@@ -1417,11 +1418,15 @@ a.nav-btn:hover { border-color: var(--link); }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
   flex: 0 0 auto;
-  margin: 8px 0 2px;
+  width: var(--dock-w); /* メインDockと同じ横幅に固定。＜タブ群＞をこの中に収める */
+  max-width: 100%;
+  margin: 8px auto 2px;
 }
-.stock-tabs-bar .stock-tabs { margin: 0; }
+/* バー全体をDock幅に固定するため、内側のタブ群は残り幅いっぱいに広げる。
+   各タブは flex:1 1 0 なので均等に縮んで＜＞のぶんも収まる */
+.stock-tabs-bar .stock-tabs { margin: 0; flex: 1 1 auto; min-width: 0; }
 .stock-nav-btn {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2065,7 +2070,7 @@ a.nav-btn:hover { border-color: var(--link); }
 /* --------------------------------------------------------------- mobile */
 
 @media (max-width: 600px) {
-  :root { --dock-h: 47px; } /* ボタン37+padding8+border2 */
+  :root { --dock-h: 47px; --dock-w: 258px; } /* 高さ:ボタン37+padding8+border2 / 幅:ボタン48×5+gap2×4+padding4×2+border2 */
   body { padding: 8px 10px 0; }
   h1 { font-size: 17px; }
   .page-header { margin-bottom: 6px; }
