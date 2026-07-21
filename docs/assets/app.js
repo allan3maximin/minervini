@@ -2505,10 +2505,104 @@ function renderMarginRatioChart(history) {
   marginChartState = { chart, resizeHandler };
 }
 
+// 需給タブの推移ビュー(グラフ/表)の状態。銘柄をまたいでも時間軸・ビュー種別は
+// 維持し、表の表示行数だけ銘柄切替でリセットする。
+let marginHistory = [];      // 現在銘柄の全履歴(日付昇順、{date, ratio, buy?, sell?})
+let marginView = "chart";    // "chart" | "table"
+let marginTfMonths = 1;      // グラフの表示期間(月)
+let marginTableRows = 8;     // 表の表示行数(+ボタンで増える)
+const MARGIN_TABLE_STEP = 8;
+let marginTabWired = false;
+
+// 履歴を「直近の週から N ヶ月分」に絞る。週次データなので日付基準で切る。
+function filterMarginByTf(history, months) {
+  const pts = (history || []).filter((h) => h && h.date);
+  if (!pts.length) return [];
+  const cutoff = new Date(pts[pts.length - 1].date);
+  cutoff.setMonth(cutoff.getMonth() - Number(months));
+  const cy = cutoff.toISOString().slice(0, 10);
+  return pts.filter((h) => h.date >= cy);
+}
+
+// 信用倍率の推移テーブル。上が最新・下ほど過去。+ボタンで下に行を足す。
+// buy/sell は新しいreport.jsonにのみ入るため、無ければ列ごと省く。
+function renderMarginTable() {
+  const body = document.getElementById("margin-table-body");
+  const moreBtn = document.getElementById("margin-table-more");
+  if (!body) return;
+  const rows = (marginHistory || []).filter((h) => h && h.date).slice().reverse();
+  if (!rows.length) {
+    body.innerHTML = '<p class="tier-note">履歴データがありません</p>';
+    if (moreBtn) moreBtn.hidden = true;
+    return;
+  }
+  const hasBuySell = rows.some((r) => r.buy != null || r.sell != null);
+  body.classList.toggle("margin-table-4col", hasBuySell);
+  const shown = rows.slice(0, marginTableRows);
+  const head = `<div class="margin-trow margin-thead"><span>日付</span><span>信用倍率</span>${hasBuySell ? "<span>買残</span><span>売残</span>" : ""}</div>`;
+  const trs = shown
+    .map((r) => {
+      const ratio = r.ratio != null ? `${marginNum(r.ratio, 2)}倍` : "-";
+      const bs = hasBuySell
+        ? `<span>${r.buy != null ? marginNum(r.buy, 0) : "-"}</span><span>${r.sell != null ? marginNum(r.sell, 0) : "-"}</span>`
+        : "";
+      return `<div class="margin-trow"><span>${formatMarginDate(r.date)}</span><span>${ratio}</span>${bs}</div>`;
+    })
+    .join("");
+  body.innerHTML = head + trs;
+  if (moreBtn) moreBtn.hidden = marginTableRows >= rows.length;
+}
+
+// グラフ/表のどちらを描くか。グラフは時間軸で絞ってから描画する。
+function applyMarginView() {
+  const chartWrap = document.getElementById("margin-view-chart");
+  const tableWrap = document.getElementById("margin-view-table");
+  if (chartWrap) chartWrap.hidden = marginView !== "chart";
+  if (tableWrap) tableWrap.hidden = marginView !== "table";
+  if (marginView === "chart") renderMarginRatioChart(filterMarginByTf(marginHistory, marginTfMonths));
+  else renderMarginTable();
+}
+
+// トグル群の配線は初回のみ(DOMは銘柄で作り直さないため)。
+function wireMarginTab() {
+  if (marginTabWired) return;
+  const vt = document.getElementById("margin-view-toggle");
+  const tf = document.getElementById("margin-tf-toggle");
+  const more = document.getElementById("margin-table-more");
+  if (vt) {
+    vt.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mview]");
+      if (!b) return;
+      marginView = b.dataset.mview;
+      vt.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      applyMarginView();
+    });
+  }
+  if (tf) {
+    tf.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mtf]");
+      if (!b) return;
+      marginTfMonths = Number(b.dataset.mtf);
+      tf.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      if (marginView === "chart") renderMarginRatioChart(filterMarginByTf(marginHistory, marginTfMonths));
+    });
+  }
+  if (more) {
+    more.addEventListener("click", () => {
+      marginTableRows += MARGIN_TABLE_STEP;
+      renderMarginTable();
+    });
+  }
+  marginTabWired = true;
+}
+
 function renderStockMargin(stock) {
   const container = document.getElementById("margin-detail-body");
   const m = stock && stock.margin;
-  renderMarginRatioChart(m && m.history);
+  wireMarginTab();
+  marginHistory = (m && m.history) || [];
+  marginTableRows = MARGIN_TABLE_STEP; // 銘柄切替で表示行数をリセット
+  applyMarginView();
   if (!container) return;
   if (!m) {
     container.innerHTML = '<p class="tier-note">信用残データなし</p>';

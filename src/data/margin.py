@@ -596,7 +596,7 @@ def build_margin_metrics(code: str, latest_row: dict | None, store: dict | None 
         hs = e.get("sell")
         if hb is None or hs is None:
             continue
-        trend.append({"date": h.get("date"), "ratio": round(hb / hs, 3) if hs else None})
+        trend.append({"date": h.get("date"), "ratio": round(hb / hs, 3) if hs else None, "buy": hb, "sell": hs})
 
     return {
         "ratio": ratio,

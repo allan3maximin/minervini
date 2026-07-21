@@ -21,6 +21,33 @@
 
 ---
 
+## 2026-07-21 (95): 需給タブ再構成(需給カード上・推移カード下、グラフ/表切替)
+
+需給タブのデザイン変更。カード順を入れ替え、推移に表ビューと時間軸を追加した。
+
+**変更点**
+- **カード順入れ替え**: 需給(信用取引)カードを上、信用倍率の推移カードを下に。
+- **グラフ/表トグル**(`#margin-view-toggle`, data-mview=chart|table)を推移カード見出し右に。
+- **時間軸トグル**(`#margin-tf-toggle`, data-mtf=1|3|6|12 ヶ月)をグラフ上に。株価チャート
+  同様に 1ヶ月/3ヶ月/半年/1年。`filterMarginByTf()` が直近週から N ヶ月で日付フィルタ。
+  ※ 現状ストアは5週分のみなので実データは1ヶ月相当。週次蓄積で自然に伸びる。
+- **表ビュー**(`#margin-table-body`): 上が最新・下ほど過去。`#margin-table-more`(+ボタン)で
+  8行ずつ増える。銘柄切替で表示行数リセット(`marginTableRows`)。時間軸・ビュー種別は維持。
+- **バックエンド** `margin.py` の trend に `buy`/`sell` を追加(表の4列表示用)。フロントは
+  buy/sell が無ければ2列(日付/倍率)に自動フォールバック。**旧 report.json では2列、次回
+  daily リビルド後に4列**になる。
+- 状態は app.js モジュール変数(`marginHistory`/`marginView`/`marginTfMonths`/`marginTableRows`)、
+  トグル配線は `wireMarginTab()` で初回のみ(DOMは銘柄で作り直さない)。
+
+**検証**: `pytest tests/test_margin.py` → 36 passed。
+**キャッシュバスター再計算**: app.js `db193a9d`→`d90bd065`、style.css `160c878a`→`d5e1d490`。
+index.html の両タグ更新済み。
+
+**コミット対象**(触ったソースのみ): `src/data/margin.py` `docs/index.html` `docs/assets/app.js`
+`docs/assets/style.css` `log.md`。data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-21 (94): 株ドック幅をメインDockに統一 + 需給データ半年分バックフィル(J-Quants)
 
 **やったこと**
