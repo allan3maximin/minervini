@@ -149,6 +149,32 @@ def test_stale_fundamentals_caution():
     assert any("2026-02-13" in c and "未反映" in c for c in s["cautions"])
 
 
+# ---------------------------------------------------------------------------
+# サイズ係数(fund_verdict)の注意喚起 (2026-07-22)
+# ---------------------------------------------------------------------------
+
+def test_fund_verdict_fail_caution_mentions_entry_cancel():
+    rec = _record(fund_verdict="fail", fund_multiplier=0.0)
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    text = "\n".join(s["cautions"])
+    assert "エントリー取り止め" in text and "サイズ係数0" in text
+    # 旧文言(ファンダ弱)との二重出力はしない
+    assert not any(c.startswith("ファンダ弱") for c in s["cautions"])
+
+
+def test_fund_verdict_unknown_caution_mentions_half_size():
+    rec = _record(fund_verdict="unknown", fund_multiplier=0.5, fund_strong=False,
+                  fund_eps_yoy=None, fund_rev_yoy=None)
+    s = sm.build_stock_summary(rec, config=_CFG, today=_TODAY)
+    assert any("ハーフサイズ" in c and "0.5" in c for c in s["cautions"])
+
+
+def test_old_report_without_verdict_falls_back_to_legacy_captions():
+    # fund_verdictフィールドが無い旧report.jsonでは従来の「ファンダ弱」文言。
+    s = sm.build_stock_summary(_record(), config=_CFG, today=_TODAY)
+    assert any("ファンダ弱" in c for c in s["cautions"])
+
+
 def test_earnings_proximity_caution_when_checked_date_old_but_not_stale():
     # 前回確認から75日以上・stale(120日)未満 -> 決算接近の注意のみ
     rec = _record(fund_checked_date="2026-04-20")  # 83日前

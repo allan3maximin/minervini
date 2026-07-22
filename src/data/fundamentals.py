@@ -253,7 +253,8 @@ def fund_coverage_tier(code: str, fundamentals_by_code: dict, config: dict | Non
     data = fundamentals_by_code.get(code)
     if not data or not data.get("quarters"):
         return {"fund_coverage": "none", "tier": "pool", "fund_strong": None,
-                "fund_eps_yoy": None, "fund_rev_yoy": None}
+                "fund_eps_yoy": None, "fund_rev_yoy": None,
+                **fund_verdict_and_multiplier(None, None, config)}
 
     quarters = data["quarters"]
     eps_slope = compute_accel_slope(quarters, "eps")
@@ -273,7 +274,36 @@ def fund_coverage_tier(code: str, fundamentals_by_code: dict, config: dict | Non
         "fund_strong": strong,
         "fund_eps_yoy": round(eps_yoy, 1) if eps_yoy is not None else None,
         "fund_rev_yoy": round(rev_yoy, 1) if rev_yoy is not None else None,
+        **fund_verdict_and_multiplier(eps_yoy, rev_yoy, config),
     }
+
+
+def fund_verdict_and_multiplier(
+    eps_yoy: float | None, rev_yoy: float | None, config: dict | None = None
+) -> dict:
+    """ファンダの「サイズ係数」レイヤー (2026-07-22)。
+
+    設計方針: ファンダはランキング(順位付け)からは撤去し、
+      (1) ティアバッジ(confirmed/pool、fund_coverage_tier) = 表示・注目度
+      (2) サイズ係数(本関数) = エントリー可否とロットの確信度
+    の2役に再配置する。判定基準は Code33 (confirmed_eps_yoy_min /
+    confirmed_rev_yoy_min) を fund_coverage_tier と共用し、合否ロジックの
+    二重管理を避ける。
+
+    - pass    (1.0): EPS YoY・売上YoY とも計算可能かつ両方閾値以上 → フルサイズ
+    - fail    (0.0): 計算可能な指標のどちらかが閾値未達 → エントリー取り止め
+    - unknown (0.5): 閾値未達の指標が無いが、どちらかが計算不能
+                     (データ無し/前年比較不能) → ハーフサイズ(不明≠悪)
+    """
+    config = config or load_config()
+    fcfg = config["fundamentals"]
+    eps_fail = eps_yoy is not None and eps_yoy < fcfg["confirmed_eps_yoy_min"]
+    rev_fail = rev_yoy is not None and rev_yoy < fcfg["confirmed_rev_yoy_min"]
+    if eps_fail or rev_fail:
+        return {"fund_verdict": "fail", "fund_multiplier": 0.0}
+    if eps_yoy is not None and rev_yoy is not None:
+        return {"fund_verdict": "pass", "fund_multiplier": 1.0}
+    return {"fund_verdict": "unknown", "fund_multiplier": 0.5}
 
 
 def compute_fund_stale(checked_date: str | None, today: date, config: dict | None = None) -> bool:
@@ -312,10 +342,12 @@ def score_stock(
     today: date | None = None,
     config: dict | None = None,
 ) -> dict:
-    """The two-axis scoring tie-in (design doc 3.2): every stock that passes
-    the trend template gets a tech_score (pool-tier ranking key); stocks with
-    a "confirmed" fundamentals tier additionally get a full_score (used to
-    rank the confirmed tier instead)."""
+    """Scoring tie-in: every stock that passes the trend template gets a
+    tech_score, which is the ranking key for ALL tiers (2026-07-22 改定:
+    ランキングは純セットアップ品質 tech+VCP に統一)。full_score は表示・
+    分析用の参考値として引き続き計算するが、順位付けには使わない。
+    ファンダは tier バッジと fund_verdict/fund_multiplier (サイズ係数) に
+    再配置 (fund_verdict_and_multiplier 参照)。"""
     config = config or load_config()
     info = get_fundamentals_for_code(code, fundamentals_by_code, today, config)
 
@@ -324,6 +356,8 @@ def score_stock(
         "tier": info["tier"],
         "fund_coverage": info["fund_coverage"],
         "fund_strong": info.get("fund_strong"),
+        "fund_verdict": info.get("fund_verdict"),
+        "fund_multiplier": info.get("fund_multiplier"),
         "fund_eps_yoy": info.get("fund_eps_yoy"),
         "fund_rev_yoy": info.get("fund_rev_yoy"),
         "fund_stale": info["fund_stale"],
@@ -334,9 +368,8 @@ def score_stock(
     }
 
     # full_score/加速slopeはファンダデータがあれば tier に関係なく計算する
-    # (強度基準未達で pool に落ちた銘柄でも個別株画面・コピー機能で見たいため)。
-    # confirmed のランキングにだけ full_score が使われる点は従来どおり
-    # (build_site.assemble_stock_record 側の分岐)。
+    # (個別株画面・コピー機能で見たいため)。2026-07-22以降、full_score は
+    # ランキングには一切使われない表示専用値 (build_site 側は常に tech_score)。
     if info["fund_coverage"] != "none":
         full = compute_full_score(
             latest_row,

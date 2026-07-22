@@ -11,6 +11,7 @@ from src.data.fundamentals import (
     build_fundamentals_by_code,
     compute_fund_stale,
     fund_coverage_tier,
+    fund_verdict_and_multiplier,
     get_fundamentals_for_code,
     load_fundamentals_csv,
     merge_fundamentals,
@@ -130,6 +131,64 @@ def test_few_quarters_unverifiable_strength_yields_pool_partial_tier(tmp_path):
     assert tier_info["tier"] == "pool"
     assert tier_info["fund_strong"] is False
     assert tier_info["fund_eps_yoy"] is None
+
+
+# ---------------------------------------------------------------------------
+# サイズ係数レイヤー fund_verdict_and_multiplier (2026-07-22)
+# ---------------------------------------------------------------------------
+
+
+def test_fund_verdict_pass_full_size():
+    v = fund_verdict_and_multiplier(30.0, 25.0, CONFIG)
+    assert v == {"fund_verdict": "pass", "fund_multiplier": 1.0}
+
+
+def test_fund_verdict_fail_when_any_metric_below_threshold():
+    # EPS不合格(片方でも明確未達なら取り止め)
+    assert fund_verdict_and_multiplier(-29.8, 25.0, CONFIG) == {
+        "fund_verdict": "fail", "fund_multiplier": 0.0}
+    # 売上不合格
+    assert fund_verdict_and_multiplier(30.0, 5.0, CONFIG) == {
+        "fund_verdict": "fail", "fund_multiplier": 0.0}
+    # 片方計算不能でも、計算できる方が未達なら fail
+    assert fund_verdict_and_multiplier(-10.0, None, CONFIG) == {
+        "fund_verdict": "fail", "fund_multiplier": 0.0}
+
+
+def test_fund_verdict_unknown_half_size():
+    # 両方計算不能(データ無し等) -> 不明はハーフ(不明≠悪)
+    assert fund_verdict_and_multiplier(None, None, CONFIG) == {
+        "fund_verdict": "unknown", "fund_multiplier": 0.5}
+    # 片方が合格水準・片方が計算不能 -> 未達確定ではないので unknown
+    assert fund_verdict_and_multiplier(30.0, None, CONFIG) == {
+        "fund_verdict": "unknown", "fund_multiplier": 0.5}
+
+
+def test_fund_verdict_boundary_equals_threshold_is_pass():
+    fcfg = CONFIG["fundamentals"]
+    v = fund_verdict_and_multiplier(
+        fcfg["confirmed_eps_yoy_min"], fcfg["confirmed_rev_yoy_min"], CONFIG)
+    assert v["fund_verdict"] == "pass"
+
+
+def test_score_stock_carries_verdict_and_multiplier(tmp_path):
+    # 減益銘柄(fund_strong False)は verdict=fail / multiplier=0 になり、
+    # score_stock の結果まで流れる(build_site 経由で report.json に載る前提)。
+    csv_text = "code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date\n" + _quarters_csv_rows(
+        "8418", [10, 10, 10, 10, 9, 8, 6, 5]
+    )
+    path = _write_csv(tmp_path, csv_text)
+    df, _ = load_fundamentals_csv(path)
+    fundamentals_by_code = build_fundamentals_by_code(df)
+
+    result = score_stock("8418", BASELINE_LATEST, fundamentals_by_code, today=date(2026, 7, 3), config=CONFIG)
+    assert result["fund_verdict"] == "fail"
+    assert result["fund_multiplier"] == 0.0
+
+    # データ無し銘柄は unknown/0.5
+    result_none = score_stock("no_csv_code", BASELINE_LATEST, fundamentals_by_code={}, today=date(2026, 7, 3), config=CONFIG)
+    assert result_none["fund_verdict"] == "unknown"
+    assert result_none["fund_multiplier"] == 0.5
 
 
 def test_fund_stale_true_after_120_days():

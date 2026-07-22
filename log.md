@@ -21,6 +21,46 @@
 
 ---
 
+## 2026-07-22 (101): ファンダをランキングから外しサイズ係数へ再配置(エントリー取り止め判定含む)
+
+設計議論(Opusとの会話をユーザーが持ち込み)の結論: RSが業績を織り込むため
+スコアへのファンダ加点は二重計上。「スコアは順位付け、フラグは事実」の原則で、
+ファンダはランキングから外し、**エントリー可否とロット管理**に再配置した。
+ユーザー追加要件「ロット管理のタイミングでエントリ取り止め判断もする」を実装。
+なお backtest.py はスコアを使わずセットアップ検出する(MUST+RS+VCP)ため、
+score_weights変更のA/Bバックテストは無意味と判明しスキップ(正当)。
+
+**変更点**
+- **`fund_verdict_and_multiplier`新設** `src/data/fundamentals.py`:
+  Code33基準(`fund_coverage_tier`と同一閾値を共有、ゲート重複なし)で
+  pass=1.0(フルサイズ)/unknown=0.5(ハーフ、YoY計算不能)/fail=0.0
+  (**エントリー取り止め**、いずれかのYoYが基準未達)。`score_stock`の
+  結果dictに `fund_verdict`/`fund_multiplier` を追加。
+- **ランキング統一** `src/report/build_site.py` `assemble_stock_record`:
+  total_scoreのphase1側を全ティアとも tech_score に統一(従来confirmedのみ
+  full_score)。**full_scoreは表示専用**に降格。レコードに
+  `fund_verdict`/`fund_multiplier` を追加出力。
+- **summary.py**: verdictベースの注意文言(fail=「エントリー取り止め(サイズ
+  係数0)」/unknown=「ハーフサイズ推奨」)。旧レコードは従来文言にフォールバック。
+- **フロント** `docs/assets/app.js`: 株数計算機が許容損失に乗数を適用
+  (`capital × risk% × fund_multiplier`)。係数0なら計算せず🚫取り止め表示。
+  カード一覧にFバッジ(fail=赤/unknown=黄、passは非表示)。ヘルプ3件更新+
+  `fund_multiplier`ヘルプ新設。分析用コピーに「サイズ係数」行追加。
+  旧report.json(フィールドなし)は係数1.0扱いで後方互換。
+  `docs/assets/style.css` `.fund-badge`系。cache-buster style `7a22f1c4` /
+  app.js `4c8d0e21`。
+- **資金額・リスク%はフロントのlocalStorageのみ**(公開リポジトリに金額を
+  置かない。既存の`minervini_sizing_settings`をそのまま利用)。
+- **ドキュメント**: HANDOFF.md(ティア補足・サイズ係数節・report.jsonスキーマ)、
+  `skills/minervini-analysis/SKILL.md`(入力構造にサイズ係数、エントリー計画に
+  係数反映ルール)。
+
+**検証**: `pytest tests/ -q` 386 passed(新規11テスト: verdict/乗数の
+境界値・score_stock伝搬・build_site伝搬・ランキングtech統一・summary文言)。
+`node --check docs/assets/app.js` OK。
+
+---
+
 ## 2026-07-21 (100): ゾンビピボット修正(STALE導入) + ロック失効の横展開FIX
 
 ユーザー指摘: 8418 が初回ブレイクから約3週間後もピボット未更新のまま

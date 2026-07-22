@@ -125,7 +125,8 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   YoY計算不能(前年比較対象なし/前年値≤0)は強度未確認として pool 止まり。判定は `fund_coverage_tier` (src/data/fundamentals.py)。
 - `tier: "pool"` → 〔候補プール〕VCPセットアップあり、ファンダなし **または強度基準未達** (`fund_strong: false` → フロントで「ファンダ弱」表示)
 - `tier: "watchlist"` → 〔候補〕トレンドテンプレート8条件合格 (セットアップ形成待ち)
-- 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。confirmed のランキングにのみ full_score を使う点は従来どおり。
+- 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。**2026-07-22改定: full_score は表示専用**となり、ランキング(total_score の phase1 側)は全ティアとも tech_score を使う(純セットアップ品質で順位付け。RSが業績を織り込むためスコアへのファンダ加点は二重計上、という整理)。
+- **ファンダのサイズ係数 (2026-07-22追加)**: ファンダはランキングから外した代わりに、エントリー可否とロット管理に反映する。`fund_verdict_and_multiplier` (src/data/fundamentals.py) が Code33基準(confirmed_eps_yoy_min/confirmed_rev_yoy_min、`fund_coverage_tier` と同一閾値)で判定し、`fund_verdict`("pass"|"unknown"|"fail") と `fund_multiplier`(1.0|0.5|0.0) を report.json に出力。**fail=0 はエントリー取り止め**(セットアップ完成でも見送り)、unknown=0.5 はハーフサイズ、pass=1.0 はフルサイズ。フロントの株数計算機 (app.js renderSizingResult) が許容損失に乗数を掛け、係数0なら計算せず取り止め表示。カード一覧には F バッジ(fail=赤「F不合格 取止」/unknown=黄「F未確認 ½」)。旧report.json(フィールドなし)は係数1.0扱いで後方互換。資金額・リスク%はフロントのlocalStorage(`minervini_sizing_settings`)のみでリポジトリには置かない(公開リポジトリのため)。
 
 ### P1〜P4について(重要な経緯)
 - バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
@@ -741,6 +742,7 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
     rs, total_score, tech_score, full_score, footprint,
     pivot, buy_stop, stop_loss, risk_pct, entry_status,
     fund_coverage("full"|"partial"|"none"), fund_strong(bool|null), fund_eps_yoy, fund_rev_yoy, fund_stale, fund_checked_date,
+    fund_verdict("pass"|"unknown"|"fail"|null), fund_multiplier(1.0|0.5|0.0|null),
     priority(1-4), unmet_conditions, high_dist, ma_dev系, sector33, sector_strength, sector_direction,
     has_chart, new_breakout_today?, market_guard_warning? } ] }
 ```

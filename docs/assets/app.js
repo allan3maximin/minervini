@@ -134,11 +134,14 @@ const TERM_HELP = {
       "テクニカル要素のみで付けた点数(0-100)。",
   },
   full_score: {
-    title: "フルスコア",
+    title: "フルスコア(表示専用)",
     body:
       "テクニカルスコアの要素に加え、EPS成長率・売上成長率など業績の伸びも\n" +
       "加味した点数(0-100)。ファンダデータが一部欠けている場合は、\n" +
-      "取得できた要素だけで100点満点に再計算される。",
+      "取得できた要素だけで100点満点に再計算される。\n" +
+      "※順位付けには使われない参考値。ランキングはテクニカル+VCPの\n" +
+      "純セットアップ品質で決まり、ファンダはサイズ係数(エントリー可否と\n" +
+      "ロット)に反映される。",
   },
   vcp_score: {
     title: "VCPスコア",
@@ -149,8 +152,19 @@ const TERM_HELP = {
   total_score: {
     title: "総合スコア",
     body:
-      "各スコアを合成した順位付け用の点数。エントリー可否の判定そのものではなく、\n" +
-      "リスト内の並び順を決めるためのもの(判定はMUST条件が担う)。",
+      "テクニカルスコアとVCPスコアを合成した順位付け用の点数(純セットアップ\n" +
+      "品質)。エントリー可否の判定そのものではなく、リスト内の並び順を\n" +
+      "決めるためのもの(判定はMUST条件が担う)。ファンダは含まれない\n" +
+      "(ファンダはサイズ係数として発注株数の計算に反映)。",
+  },
+  fund_multiplier: {
+    title: "サイズ係数(ファンダ)",
+    body:
+      "ファンダ強度に応じた発注株数の乗数。合格(EPS YoY+25%かつ売上YoY+20%\n" +
+      "以上)=1.0でフルサイズ、データ不足で判定不能=0.5でハーフサイズ、\n" +
+      "明確に基準未達=0でエントリー取り止め(セットアップが完成しても見送り)。\n" +
+      "RSは業績を織り込むためスコアにファンダを足すと二重計上になる。\n" +
+      "そこで順位はテクニカルに任せ、ファンダは「どれだけ張るか」に使う設計。",
   },
   margin_ratio: {
     title: "信用倍率",
@@ -352,6 +366,15 @@ function marginBadgeHtml(m, { detail = false } = {}) {
   if (!detail && m.badge !== "heavy_buy") return "";
   const meta = MARGIN_BADGE_LABELS[m.badge];
   return meta ? `<span class="sell-signal-badge ${meta.className}">${meta.label}</span>` : "";
+}
+
+// ファンダのサイズ係数バッジ (2026-07-22)。表示専用(ランキングには一切使わない)。
+// fail=エントリー取り止め(係数0) / unknown=ハーフサイズ(係数0.5)。
+// pass および旧report.json(fund_verdictなし)は何も出さない(バッジ行の混雑回避)。
+function fundVerdictBadgeHtml(s) {
+  if (s.fund_verdict === "fail") return '<span class="fund-badge fund-badge-fail">F不合格 取止</span>';
+  if (s.fund_verdict === "unknown") return '<span class="fund-badge fund-badge-unknown">F未確認 ½</span>';
+  return "";
 }
 
 // リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
@@ -1708,6 +1731,7 @@ function renderCardList(stocks, tier, options = {}) {
         <span class="sc-sector">${sectorStrengthHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
         <span class="sc-margin">${marginBadgeHtml(s.margin)}</span>
+        <span class="sc-fund">${fundVerdictBadgeHtml(s)}</span>
       </div>${stageLine}`;
     list.appendChild(card);
   }
@@ -2795,6 +2819,10 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
     if (stock.fund_rev_yoy != null) yoyParts.push(`売上YoY ${stock.fund_rev_yoy > 0 ? "+" : ""}${stock.fund_rev_yoy}%`);
     L.push(`- ファンダ強度判定: ${stock.fund_strong ? "合格" : "不合格"} (基準: EPS YoY≥+25%かつ売上YoY≥+20%${yoyParts.length ? ` / 実績: ${yoyParts.join("、")}` : ""})`);
   }
+  if (stock.fund_verdict != null) {
+    const verdictLabel = { pass: "pass (フルサイズ)", unknown: "unknown (ハーフサイズ)", fail: "fail (エントリー取り止め)" }[stock.fund_verdict] ?? stock.fund_verdict;
+    L.push(`- サイズ係数: ${stock.fund_multiplier ?? "-"} — ${verdictLabel}。ファンダはランキング非算入で、エントリー可否とロット確信度にのみ使用`);
+  }
   L.push("");
 
   L.push("## 市況コンテキスト");
@@ -3102,6 +3130,16 @@ function renderSizingResult(stock) {
     return;
   }
 
+  // ファンダのサイズ係数 (2026-07-22)。fail=0(取り止め)/unknown=0.5(ハーフ)/
+  // pass=1.0。旧report.json(フィールドなし)は従来どおり係数1.0扱い。
+  const fundMult = typeof stock.fund_multiplier === "number" ? stock.fund_multiplier : 1.0;
+  if (fundMult === 0) {
+    el.innerHTML =
+      `<p class="sizing-warn sizing-warn-strong">🚫 エントリー取り止め(ファンダ不合格・サイズ係数0)${helpBtnHtml("fund_multiplier")}</p>` +
+      '<p class="tier-note">直近EPS/売上YoYが基準未達。セットアップが完成しても見送り。</p>';
+    return;
+  }
+
   const capitalInput = document.getElementById("sizing-capital");
   const capital = Number(capitalInput ? capitalInput.value : NaN);
   const activeBtn = document.querySelector("#sizing-risk-toggle button.active");
@@ -3118,14 +3156,18 @@ function renderSizingResult(stock) {
     return;
   }
 
-  const allowedLoss = capital * (riskPct / 100);
+  const allowedLoss = capital * (riskPct / 100) * fundMult;
   const theoreticalShares = allowedLoss / riskPerShare;
   const orderShares = Math.floor(theoreticalShares / 100) * 100;
+  const halfNote =
+    fundMult < 1
+      ? `<p class="sizing-warn">ファンダ強度未確認のためハーフサイズ(係数0.5)を適用${helpBtnHtml("fund_multiplier")}</p>`
+      : "";
 
   if (orderShares < 100) {
     const oneUnitLoss = riskPerShare * 100;
     const oneUnitPct = (oneUnitLoss / capital) * 100;
-    el.innerHTML = `<p class="sizing-warn">リスク許容内で1単元買えません(1単元の損失 = ${Math.round(oneUnitLoss).toLocaleString("ja-JP")}円 = 資金の${oneUnitPct.toFixed(2)}%)</p>`;
+    el.innerHTML = `${halfNote}<p class="sizing-warn">リスク許容内で1単元買えません(1単元の損失 = ${Math.round(oneUnitLoss).toLocaleString("ja-JP")}円 = 資金の${oneUnitPct.toFixed(2)}%)</p>`;
     return;
   }
 
@@ -3147,6 +3189,7 @@ function renderSizingResult(stock) {
       <div><span>資金比</span><strong>${capitalRatio.toFixed(1)}%</strong></div>
       <div><span>実損失額</span><strong>${Math.round(actualLoss).toLocaleString("ja-JP")}円</strong></div>
     </div>
+    ${halfNote}
     ${concentrationWarning}
   `;
 }

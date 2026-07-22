@@ -431,8 +431,21 @@ def build_stock_summary(
                     f"通期計画に対する進捗が良好(Q{gv['quarters_reported']}時点で{gv['eps_progress_pct']:.0f}%、"
                     f"目安{expected:.0f}%)。上方修正余地。")
 
+    # サイズ係数(fund_verdict)ベースの注意喚起 (2026-07-22)。
+    # fail=取り止め / unknown=ハーフ / 旧report.json(フィールド無し)は従来文言。
     coverage = record.get("fund_coverage")
-    if coverage == "none":
+    verdict = record.get("fund_verdict")
+    if verdict == "fail":
+        cautions.append(
+            f"ファンダ不合格→エントリー取り止め(サイズ係数0): 直近EPS YoY {_signed_pct(eps_yoy)}・"
+            f"売上YoY {_signed_pct(rev_yoy)}"
+            f"(基準 EPS+{fcfg['confirmed_eps_yoy_min']:.0f}%/売上+{fcfg['confirmed_rev_yoy_min']:.0f}%に未達)。"
+            "セットアップが完成しても見送り。")
+    elif verdict == "unknown":
+        cautions.append(
+            "ファンダ強度未確認(サイズ係数0.5): エントリーする場合はハーフサイズ推奨。"
+            + ("データ自体なし。" if coverage == "none" else "前年比較が計算不能。"))
+    elif coverage == "none":
         cautions.append("ファンダデータなし。EPS・売上の裏付け未確認。")
     elif record.get("fund_strong") is False:
         cautions.append(

@@ -97,7 +97,10 @@ def assemble_stock_record(
     config = config or load_config()
 
     tier = tier_override or fund_info["tier"]
-    phase1_score = fund_info.get("full_score") if tier == "confirmed" and fund_info.get("full_score") is not None else fund_info.get("tech_score")
+    # 2026-07-22改定: ランキングは全ティア tech_score に統一(純セットアップ品質)。
+    # full_score はレコードに残るが表示・分析専用でランキングには使わない。
+    # ファンダは tier バッジ + fund_verdict/fund_multiplier(サイズ係数)に再配置。
+    phase1_score = fund_info.get("tech_score")
     vcp_score = vcp_result.get("vcp_score")
     if phase1_score is not None and vcp_score is not None:
         total_score = combined_score(phase1_score, vcp_score, config)
@@ -129,6 +132,11 @@ def assemble_stock_record(
         "breakout_age_days": entry_result.get("breakout_age_days"),
         "fund_coverage": fund_info.get("fund_coverage"),
         "fund_strong": fund_info.get("fund_strong"),
+        # ファンダのサイズ係数レイヤー(2026-07-22)。pass=1.0(フル)/unknown=0.5
+        # (ハーフ)/fail=0.0(エントリー取り止め)。フロントのサイジング計算機が
+        # 乗数として適用する。判定基準は Code33 (fund_coverage_tier と共用)。
+        "fund_verdict": fund_info.get("fund_verdict"),
+        "fund_multiplier": fund_info.get("fund_multiplier"),
         "fund_eps_yoy": fund_info.get("fund_eps_yoy"),
         "fund_rev_yoy": fund_info.get("fund_rev_yoy"),
         "fund_stale": fund_info.get("fund_stale", False),

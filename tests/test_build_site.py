@@ -23,16 +23,32 @@ def _fund_info(tier="confirmed", tech_score=80.0, full_score=75.0):
     }
 
 
-def test_assemble_stock_record_confirmed_uses_full_score_for_total():
+def test_assemble_stock_record_confirmed_uses_tech_score_for_total():
+    # 2026-07-22改定: confirmedティアもランキングは tech_score(純セットアップ品質)。
+    # full_score はレコードに残るが total_score には影響しない(表示専用)。
     tt_flags = {"cond1": True}
     vcp_result = {"vcp_score": 70.0, "footprint": "7W 18/9/4 3T", "must_flags": {"V1": True}, "contractions": []}
     entry_result = {"status": "WATCH_A", "pivot": 1280, "buy_stop": 1281, "stop_loss": 1228, "risk_pct": 4.1, "dist_to_pivot": 3.6}
 
     record = assemble_stock_record(
-        "7134", "Test Co", CONFIG_LATEST, tt_flags, vcp_result, entry_result, _fund_info(tier="confirmed", full_score=80.0)
+        "7134", "Test Co", CONFIG_LATEST, tt_flags, vcp_result, entry_result, _fund_info(tier="confirmed", tech_score=80.0, full_score=90.0)
     )
     assert record["tier"] == "confirmed"
-    assert record["total_score"] == 75.0  # (80*0.5 + 70*0.5)
+    assert record["total_score"] == 75.0  # (tech 80*0.5 + vcp 70*0.5)、full_score 90は非算入
+    assert record["full_score"] == 90.0  # 表示用には残る
+
+
+def test_assemble_stock_record_passes_through_fund_multiplier():
+    tt_flags = {"cond1": True}
+    vcp_result = {"vcp_score": 70.0, "footprint": None, "must_flags": None, "contractions": []}
+    entry_result = {"status": "WATCH_A", "pivot": 1280}
+    fund_info = {**_fund_info(tier="pool"), "fund_verdict": "fail", "fund_multiplier": 0.0}
+
+    record = assemble_stock_record(
+        "7134", "T", CONFIG_LATEST, tt_flags, vcp_result, entry_result, fund_info
+    )
+    assert record["fund_verdict"] == "fail"
+    assert record["fund_multiplier"] == 0.0
 
 
 DRYUP_CONFIG = {
