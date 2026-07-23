@@ -194,11 +194,13 @@ const TERM_HELP = {
     title: "VCPライン",
     body:
       "検出されたVCP(ボラティリティ収縮パターン)の各収縮の高値→安値を\n" +
-      "結んだジグザグ線。右へ行くほど振れ幅が狭くなっていれば、売り物が\n" +
-      "枯れてブレイクアウトの準備が整いつつあることを意味する。\n" +
+      "結んだジグザグ線。T1,T2…は収縮番号(山の上/谷の下に表示)。右へ行く\n" +
+      "ほど振れ幅が狭くなっていれば、売り物が枯れてブレイクアウトの準備が\n" +
+      "整いつつあることを意味する。\n" +
       "破線はベース熟成中(日数不足)の形成途中ライン。収縮の形が\n" +
       "できつつあるかの経過観察用で、VCP判定はまだ行われていない。\n" +
-      "日足表示のみ。ベース未形成(または旧データ)の銘柄では選べない。",
+      "チェック状態は銘柄を切り替えても維持される(データなし銘柄では\n" +
+      "選択不可のまま保持)。日足表示のみ。",
   },
   pivot: {
     title: "ピボット",
@@ -3458,6 +3460,11 @@ const DEFAULT_DAILY_BARS = 22;
 // 再利用して別銘柄を描画し直すため、前回分を確実に破棄してから作り直す。
 let stockChartState = null;
 
+// VCPトグルのチェック状態は銘柄切替をまたいで維持する(ユーザー要望 2026-07-23:
+// チェックしたまま＞で銘柄を送りたい。描画データが無い銘柄ではチェックあり
+// のままdisabledになり、データがある銘柄に戻れば自動で線が復帰する)。
+let vcpToggleSticky = false;
+
 function teardownCharts() {
   if (!stockChartState) return;
   const { charts, resizeHandler, dateAxisEl } = stockChartState;
@@ -3527,29 +3534,53 @@ function renderCharts(chart) {
   // 出力)を時系列に結んだ折れ線。収縮が右へ行くほど狭くなる様子を可視化する。
   // 旧charts JSON(timeフィールドなし)はfilterで全滅→トグルがdisabledになる
   // だけなので後方互換。日足専用(月足では日付軸と噛み合わないためクリア)。
-  const vcpPoints = (chart.markers || [])
-    .filter((m) => m.time && m.price != null)
-    .map((m) => ({ time: m.time, value: m.price }))
-    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  // chart.markers は収縮ごとに swing_high → swing_low の順。swing_high の出現
+  // 回数で収縮番号(T1,T2,…)を振る。merge後は前収縮の谷と次収縮の山が同一日に
+  // 重なることがあり、lightweight-chartsの折れ線は同時刻の重複を受け付けない
+  // ため、折れ線データのみ先勝ちで重複除去する(マーカーは同時刻OK)。
+  const vcpRaw = (chart.markers || []).filter((m) => m.time && m.price != null);
+  let vcpT = 0;
+  const vcpLabeled = vcpRaw.map((m) => {
+    if (m.type === "swing_high") vcpT += 1;
+    return { time: m.time, price: m.price, isHigh: m.type === "swing_high", label: "T" + vcpT };
+  });
+  vcpLabeled.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  const vcpPoints = [];
+  for (const m of vcpLabeled) {
+    if (vcpPoints.length && vcpPoints[vcpPoints.length - 1].time === m.time) continue;
+    vcpPoints.push({ time: m.time, value: m.price });
+  }
+  // T番号ラベル: 山は上(aboveBar)・谷は下(belowBar)に出し、ローソク足やヒゲに
+  // 被らないようにする。size:0 で矢印図形は消してテキストだけ表示。
+  const vcpMarkers = vcpLabeled.map((m) => ({
+    time: m.time,
+    position: m.isHigh ? "aboveBar" : "belowBar",
+    color: "#facc15",
+    shape: m.isHigh ? "arrowDown" : "arrowUp",
+    size: 0,
+    text: m.label,
+  }));
   // vcp_forming=true はIMMATURE(ベース熟成中)の形成途中ライン。破線+細めで
   // 検出済みVCP(実線)と視覚的に区別する。
   const vcpForming = !!chart.vcp_forming;
   const vcpSeries = priceChart.addLineSeries({
-    color: "#f472b6",
+    color: "#facc15",
     lineWidth: vcpForming ? 1 : 2,
     lineStyle: vcpForming ? 2 : 0, // 2 = Dashed
     priceLineVisible: false,
     lastValueVisible: false,
     crosshairMarkerVisible: false,
   });
-  let vcpOn = false;
+  const vcpDrawable = vcpPoints.length >= 2;
+  // sticky(チェック維持)でONのまま来た場合、実描画は初回の setTimeframe が行う。
+  let vcpOn = vcpDrawable && vcpToggleSticky;
 
   // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
   // checkboxes in the toolbar. Handles are kept so the lines can be removed.
   let pivotLine = null;
   let stopLine = null;
 
-  function wireLineToggle(id, price, apply) {
+  function wireLineToggle(id, price, apply, opts = {}) {
     const boxOld = document.getElementById(id);
     if (!boxOld) return;
     // SPA再描画のたびに呼ばれるので、cloneNodeで前回分のchangeリスナーごと
@@ -3558,22 +3589,33 @@ function renderCharts(chart) {
     boxOld.replaceWith(box);
     box.disabled = false;
     box.closest("label")?.classList.remove("disabled");
-    // チェックのリセットはdisable判定より前に行う。後だと、チェックONのまま
-    // 次の銘柄(該当データなし)へ移った際にreturnで素通りし、チェック入りの
-    // disabledチェックボックスが残る。
-    box.checked = false;
+    // sticky指定時はチェック状態を銘柄切替をまたいで維持する(データなし銘柄
+    // ではチェックありのままdisabled)。非stickyは従来どおり毎回リセット。
+    // リセットはdisable判定より前に行う(後だとreturnで素通りしてチェック入り
+    // disabledが残る)。
+    box.checked = opts.sticky ? opts.sticky.get() : false;
     if (price == null) {
       box.disabled = true;
       box.closest("label")?.classList.add("disabled");
       return;
     }
-    box.addEventListener("change", () => apply(box.checked));
+    box.addEventListener("change", () => {
+      if (opts.sticky) opts.sticky.set(box.checked);
+      apply(box.checked);
+    });
   }
 
-  wireLineToggle("toggle-vcp", vcpPoints.length >= 2 ? 1 : null, (on) => {
-    vcpOn = on;
-    vcpSeries.setData(on && currentTf === "D" ? vcpPoints : []);
-  });
+  wireLineToggle(
+    "toggle-vcp",
+    vcpDrawable ? 1 : null,
+    (on) => {
+      vcpOn = on;
+      const show = on && currentTf === "D";
+      vcpSeries.setData(show ? vcpPoints : []);
+      vcpSeries.setMarkers(show ? vcpMarkers : []);
+    },
+    { sticky: { get: () => vcpToggleSticky, set: (v) => { vcpToggleSticky = v; } } }
+  );
   wireLineToggle("toggle-pivot", chart.pivot, (on) => {
     if (on && !pivotLine) {
       pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "ピボット" });
@@ -3723,7 +3765,9 @@ function renderCharts(chart) {
     // 決算マーカーは日足のバー日付基準。月足では噛み合わないのでクリアする。
     candleSeries.setMarkers(isMonthly ? [] : earningsMarkers);
     // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。
+    // 初回呼び出しがsticky ONの初期描画も兼ねる。
     vcpSeries.setData(!isMonthly && vcpOn ? vcpPoints : []);
+    vcpSeries.setMarkers(!isMonthly && vcpOn ? vcpMarkers : []);
     if (isMonthly) {
       for (const c of charts) c.timeScale().fitContent();
     } else {
