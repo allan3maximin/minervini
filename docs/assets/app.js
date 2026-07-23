@@ -369,11 +369,12 @@ function marginBadgeHtml(m, { detail = false } = {}) {
 }
 
 // ファンダのサイズ係数バッジ (2026-07-22)。表示専用(ランキングには一切使わない)。
-// fail=エントリー取り止め(係数0) / unknown=ハーフサイズ(係数0.5)。
-// pass および旧report.json(fund_verdictなし)は何も出さない(バッジ行の混雑回避)。
+// カード一覧に出すのは fail=エントリー取り止め(係数0) のみ。
+// unknown(0.5)はユニバースの大半が該当してバッジだらけになるため一覧では非表示
+// (2026-07-23 ユーザー要望)。ハーフサイズの情報は個別画面の株数計算機・
+// ヘルプ・分析用コピーで引き続き表示される。
 function fundVerdictBadgeHtml(s) {
   if (s.fund_verdict === "fail") return '<span class="fund-badge fund-badge-fail">F不合格 取止</span>';
-  if (s.fund_verdict === "unknown") return '<span class="fund-badge fund-badge-unknown">F未確認 ½</span>';
   return "";
 }
 

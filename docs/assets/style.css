@@ -1060,7 +1060,8 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 
 /* ファンダのサイズ係数バッジ(2026-07-22)。表示専用(ランキング非算入)。
-   fail=取り止め(danger系) / unknown=ハーフ(warn系)。 */
+   カード一覧に出すのは fail=取り止め(danger系)のみ。unknown用スタイルは
+   2026-07-23 に削除(該当銘柄が多すぎて一覧がバッジだらけになるため非表示化)。 */
 .fund-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -1072,10 +1073,6 @@ a.nav-btn:hover { border-color: var(--link); }
 .fund-badge-fail {
   background: rgba(248, 113, 113, 0.18);
   color: #f87171;
-}
-.fund-badge-unknown {
-  background: rgba(250, 204, 21, 0.14);
-  color: #facc15;
 }
 
 /* 需給(信用取引週末残高)カード。表示専用(総合スコアには一切使わない)。 */
