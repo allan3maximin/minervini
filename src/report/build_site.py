@@ -575,6 +575,8 @@ def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result
         "pivot": entry_result.get("pivot"),
         "stop_loss": entry_result.get("stop_loss"),
         "markers": markers,
+        # IMMATURE(ベース熟成中)の形成途中ラインはフロントで破線表示に切り替える。
+        "vcp_forming": vcp_result.get("status") == "IMMATURE",
         "earnings": _earnings_markers(recent, fund_entry),
     }
 

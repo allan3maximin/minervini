@@ -196,7 +196,9 @@ const TERM_HELP = {
       "検出されたVCP(ボラティリティ収縮パターン)の各収縮の高値→安値を\n" +
       "結んだジグザグ線。右へ行くほど振れ幅が狭くなっていれば、売り物が\n" +
       "枯れてブレイクアウトの準備が整いつつあることを意味する。\n" +
-      "日足表示のみ。VCP未検出(または旧データ)の銘柄では選べない。",
+      "破線はベース熟成中(日数不足)の形成途中ライン。収縮の形が\n" +
+      "できつつあるかの経過観察用で、VCP判定はまだ行われていない。\n" +
+      "日足表示のみ。ベース未形成(または旧データ)の銘柄では選べない。",
   },
   pivot: {
     title: "ピボット",
@@ -3529,9 +3531,13 @@ function renderCharts(chart) {
     .filter((m) => m.time && m.price != null)
     .map((m) => ({ time: m.time, value: m.price }))
     .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  // vcp_forming=true はIMMATURE(ベース熟成中)の形成途中ライン。破線+細めで
+  // 検出済みVCP(実線)と視覚的に区別する。
+  const vcpForming = !!chart.vcp_forming;
   const vcpSeries = priceChart.addLineSeries({
     color: "#f472b6",
-    lineWidth: 2,
+    lineWidth: vcpForming ? 1 : 2,
+    lineStyle: vcpForming ? 2 : 0, // 2 = Dashed
     priceLineVisible: false,
     lastValueVisible: false,
     crosshairMarkerVisible: false,

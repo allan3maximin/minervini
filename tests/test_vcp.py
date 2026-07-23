@@ -115,8 +115,10 @@ def _interpolate(control_points: list[tuple[int, float]]) -> list[float]:
     return closes
 
 
-def _build_synthetic_df(control_points: list[tuple[int, float]]) -> pd.DataFrame:
-    runup = list(np.linspace(RUNUP_START, RUNUP_END, RUNUP_DAYS, endpoint=False))
+def _build_synthetic_df(
+    control_points: list[tuple[int, float]], runup_days: int = RUNUP_DAYS
+) -> pd.DataFrame:
+    runup = list(np.linspace(RUNUP_START, RUNUP_END, runup_days, endpoint=False))
     base = _interpolate(control_points)
     closes = runup + base
     n = len(closes)
@@ -126,7 +128,7 @@ def _build_synthetic_df(control_points: list[tuple[int, float]]) -> pd.DataFrame
     # Volume: flat during run-up, then declining through the base (dry-up).
     base_len = len(base)
     base_volume = np.linspace(190_000, 60_000, base_len)
-    volume = [200_000.0] * RUNUP_DAYS + base_volume.tolist()
+    volume = [200_000.0] * runup_days + base_volume.tolist()
 
     df = pd.DataFrame(
         {
@@ -141,6 +143,37 @@ def _build_synthetic_df(control_points: list[tuple[int, float]]) -> pd.DataFrame
     df = add_moving_averages(df)  # gives vol_ma50
     df = add_atr(df, 20)
     return df
+
+
+# Short base: T0 -> one 24% contraction -> partial rally, only 11 base days
+# (< base_min_days 15) so evaluate_vcp returns IMMATURE. days_from_high (10)
+# stays >= min_days_from_high (5) so it doesn't fall into TOO_RECENT instead.
+IMMATURE_CONTROL_POINTS = [
+    (0, 100.0),     # T0
+    (6, 76.0),      # trough1: depth 24%
+    (10, 88.0),     # partial recovery
+]
+
+
+def test_vcp_immature_returns_contractions_for_charting():
+    """IMMATURE(ベース熟成中)でも形成途中の収縮を描画用に返す。判定系
+    (must_flags/vcp_score/footprint)は従来どおり付けない。"""
+    df = _build_synthetic_df(IMMATURE_CONTROL_POINTS, runup_days=150)
+    result = evaluate_vcp(df)
+
+    assert result["status"] == "IMMATURE", result
+    assert result["must_flags"] is None
+    assert result["vcp_score"] is None
+    assert "footprint" not in result
+
+    contractions = result["contractions"]
+    assert len(contractions) == 1, contractions
+    c = contractions[0]
+    assert c["high_price"] == pytest.approx(100.0)
+    assert c["low_price"] == pytest.approx(76.0)
+    # チャート描画に必須の日付が文字列で付与され、時系列順になっている
+    assert c["high_date"] < c["low_date"]
+    assert result["t0_date"] is not None
 
 
 def test_vcp_watch_a_on_classic_four_contraction_pattern():

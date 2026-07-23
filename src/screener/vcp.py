@@ -57,7 +57,15 @@ def find_base_origin(df: pd.DataFrame, config: dict | None = None) -> dict:
         base_df = window_df.iloc[t0_idx:].reset_index(drop=True)
         base_days = len(base_df)
         if base_days < base_min_days:
-            return {"status": "immature", "base_days": base_days, "days_from_high": days_from_high}
+            # 熟成中でも形成途中のベースをチャート描画できるよう base_df / t0_date
+            # を返す(判定は行わないので呼び出し側は描画用途にのみ使う)。
+            return {
+                "status": "immature",
+                "base_days": base_days,
+                "days_from_high": days_from_high,
+                "base_df": base_df,
+                "t0_date": base_df["date"].iloc[0] if "date" in base_df.columns else None,
+            }
 
         return {
             "status": "ok",
@@ -519,6 +527,26 @@ def footprint_string(contractions: list[dict], base_days: int) -> str:
 # Orchestration
 # ---------------------------------------------------------------------------
 
+def _compute_dated_contractions(
+    base_df: pd.DataFrame, latest: dict, config: dict
+) -> list[dict]:
+    """ZigZag→浅いピボット統合→収縮抽出→日付付与、をまとめて実行する。
+
+    通常評価(status ok)とIMMATURE(描画専用)の両方から使う共通処理。日付は
+    report/charts JSON にそのまま乗せられるよう文字列化する。
+    """
+    threshold = zigzag_swing_threshold(latest, config)
+    pivots = compute_zigzag(base_df, threshold)
+    pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
+    contractions = extract_contractions(pivots)
+    if "date" in base_df.columns:
+        dates = base_df["date"]
+        for c in contractions:
+            c["high_date"] = pd.Timestamp(dates.iloc[c["high_idx"]]).strftime("%Y-%m-%d")
+            c["low_date"] = pd.Timestamp(dates.iloc[c["low_idx"]]).strftime("%Y-%m-%d")
+    return contractions
+
+
 def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
     """Run the full VCP pipeline for one stock's price history.
 
@@ -545,7 +573,7 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
 
     origin = find_base_origin(df, config)
     if origin["status"] != "ok":
-        return {
+        result = {
             "status": origin["status"].upper(),
             "must_flags": None,
             "vcp_score": None,
@@ -554,22 +582,20 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
             "base_days": origin.get("base_days"),
             "days_from_high": origin.get("days_from_high"),
         }
+        # IMMATURE(ベース熟成中)は形成途中の収縮をチャートに描画できるよう
+        # contractions を付与する。V1-V7判定・スコア・footprint・エントリー計算
+        # には一切使わない(それらは status=="WATCH_A" 等でガード済み)。
+        if origin["status"] == "immature" and origin.get("base_df") is not None:
+            result["t0_date"] = origin.get("t0_date")
+            result["contractions"] = _compute_dated_contractions(
+                origin["base_df"], latest, config
+            )
+        return result
 
     base_df = origin["base_df"]
     base_days = origin["base_days"]
 
-    threshold = zigzag_swing_threshold(latest, config)
-    pivots = compute_zigzag(base_df, threshold)
-    pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
-    contractions = extract_contractions(pivots)
-
-    # チャート描画用に各収縮の高値/安値の日付を付与 (base_df のローカル idx →
-    # 実際の日付)。report/charts JSON にそのまま乗せられるよう文字列化する。
-    if "date" in base_df.columns:
-        dates = base_df["date"]
-        for c in contractions:
-            c["high_date"] = pd.Timestamp(dates.iloc[c["high_idx"]]).strftime("%Y-%m-%d")
-            c["low_date"] = pd.Timestamp(dates.iloc[c["low_idx"]]).strftime("%Y-%m-%d")
+    contractions = _compute_dated_contractions(base_df, latest, config)
 
     flags, diagnostics = check_vcp_must_conditions(contractions, base_days, base_df, config)
     status = vcp_status(flags)

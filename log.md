@@ -21,6 +21,28 @@
 
 ---
 
+## 2026-07-23 (105): IMMATURE(ベース熟成中)もVCPジグザグ線を描画
+
+- ユーザー要望「ベース熟成間近は描画できなくていいの？どこまでできてるか
+  みられる価値はないの？」への対応。形成途中のベースを経過観察できるようにした。
+- **vcp.py**: `find_base_origin` の immature 返却に `base_df`/`t0_date` を追加。
+  ZigZag→merge→抽出→日付付与を `_compute_dated_contractions` に共通化し、
+  `evaluate_vcp` で IMMATURE 時も contractions を算出して返す(描画専用。
+  must_flags/vcp_score/footprint は従来どおり None/なし)。判定・エントリー・
+  バックテストへの影響なし(consumers は `status == "WATCH_A"` でガード済み、
+  grep で確認)。
+- **build_site.py**: chart JSON に `vcp_forming`(status==IMMATURE)を追加。
+  markers は既存ロジックのまま IMMATURE でも出力される。
+- **app.js**: `vcp_forming` なら線を破線(lineStyle=2)+細線(width1)で描画し、
+  検出済みVCP(実線・width2)と区別。ヘルプ文に破線の説明追記。
+  cache-buster app.js `a3d47e21`。
+- **検証**: 新規テスト2本(test_vcp: IMMATURE で contractions 返却/
+  test_build_site: vcp_forming フラグ)。pytest 388 passed、node --check OK。
+  実データ全件で IMMATURE 96 中 95 が描画可(1件はピボット対なし→disabled、
+  正常)、日付昇順・高安整合の違反0。8418/9247 も markers 出力+forming=True 確認。
+
+---
+
 ## 2026-07-23 (104): ライントグルのチェック残りバグ修正 + VCP描画の実機検証
 
 - **バグ修正** `app.js` wireLineToggle: チェックリセットをdisable判定より前に移動。

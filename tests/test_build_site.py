@@ -224,6 +224,29 @@ def test_build_chart_data_includes_ma_and_markers():
     assert len(chart["markers"]) == 2
     assert len(chart["ma50"]) == 1  # only the non-null value
     assert chart["earnings"] == []  # fund_entry未指定なら決算マーカーは空
+    assert chart["vcp_forming"] is False  # IMMATURE以外は実線描画
+
+
+def test_build_chart_data_flags_forming_base_for_immature():
+    dates = pd.bdate_range("2024-01-01", periods=3)
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": [10, 11, 12],
+            "high": [10.5, 11.5, 12.5],
+            "low": [9.5, 10.5, 11.5],
+            "close": [10, 11, 12],
+            "volume": [100, 200, 300],
+        }
+    )
+    vcp_result = {
+        "status": "IMMATURE",
+        "contractions": [{"high_idx": 0, "high_price": 12.0, "low_idx": 1, "low_price": 10.0,
+                          "high_date": "2024-01-01", "low_date": "2024-01-02"}],
+    }
+    chart = build_chart_data("7134", df, vcp_result, {})
+    assert chart["vcp_forming"] is True  # フロントは破線で描画
+    assert len(chart["markers"]) == 2  # 熟成中でもジグザグ点は出力される
 
 
 def test_build_chart_data_earnings_markers_snap_and_filter():
