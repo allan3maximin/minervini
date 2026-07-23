@@ -3384,6 +3384,75 @@ function makeChart(el, { showTimeAxis }) {
   });
 }
 
+// VCPジグザグをprice paneのcanvasに直接描く Series Primitive (Lightweight
+// Charts 4.1+)。従来の addLineSeries は同一時刻に2点を保持できず、収縮のmerge後に
+// 前収縮の谷と次収縮の山が同一足へ重なると片方が落ちて収縮が1つ消えていた
+// (Joshin 8173 等でfootprintの収縮数と見た目がズレる原因)。primitiveなら同一足の
+// 2点も縦セグメントとして描けるので、footprint(NT)の収縮数と折れ線が必ず一致する。
+// points: [{time, price, isHigh, label}] を時系列順に受け取り、折れ線+Tラベルを描く。
+function createVcpZigzagPrimitive(points, opts) {
+  let _chart = null;
+  let _series = null;
+  let _requestUpdate = null;
+  const renderer = {
+    draw(target) {
+      if (!opts.isVisible() || !_chart || !_series || points.length < 2) return;
+      const timeScale = _chart.timeScale();
+      const coords = points.map((p) => {
+        const x = timeScale.timeToCoordinate(p.time);
+        const y = _series.priceToCoordinate(p.price);
+        return x == null || y == null ? null : { x, y, isHigh: p.isHigh, label: p.label };
+      });
+      target.useMediaCoordinateSpace((scope) => {
+        const ctx = scope.context;
+        ctx.save();
+        // 折れ線本体。vcp_forming(IMMATURE)は破線+細めで検出済み実線と区別する。
+        ctx.strokeStyle = opts.color;
+        ctx.lineWidth = opts.dashed ? 1 : 2;
+        ctx.setLineDash(opts.dashed ? [4, 3] : []);
+        ctx.beginPath();
+        let started = false;
+        for (const c of coords) {
+          if (!c) { started = false; continue; }
+          if (!started) { ctx.moveTo(c.x, c.y); started = true; }
+          else ctx.lineTo(c.x, c.y);
+        }
+        ctx.stroke();
+        // Tラベル: 山は上・谷は下に出し、足やヒゲに被らないよう頂点から少しずらす。
+        ctx.setLineDash([]);
+        ctx.fillStyle = opts.color;
+        ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.textAlign = "center";
+        for (const c of coords) {
+          if (!c) continue;
+          ctx.textBaseline = c.isHigh ? "bottom" : "top";
+          ctx.fillText(c.label, c.x, c.y + (c.isHigh ? -6 : 6));
+        }
+        ctx.restore();
+      });
+    },
+  };
+  const paneView = { renderer: () => renderer, zOrder: () => "top" };
+  return {
+    attached(param) {
+      _chart = param.chart;
+      _series = param.series;
+      _requestUpdate = param.requestUpdate;
+    },
+    detached() {
+      _chart = null;
+      _series = null;
+      _requestUpdate = null;
+    },
+    paneViews() {
+      return [paneView];
+    },
+    requestUpdate() {
+      if (_requestUpdate) _requestUpdate();
+    },
+  };
+}
+
 // ---- 自前の日付軸 (#chart-date-axis) -----------------------------------
 // ライブラリの時間軸(visible:false)の代わりに、目盛・ホバー・最新日の全日付を
 // 1本のstripにDOMで描画する。縦位置はCSS(.chart-date-axis .cda-label の top)で
@@ -3535,45 +3604,31 @@ function renderCharts(chart) {
   // 旧charts JSON(timeフィールドなし)はfilterで全滅→トグルがdisabledになる
   // だけなので後方互換。日足専用(月足では日付軸と噛み合わないためクリア)。
   // chart.markers は収縮ごとに swing_high → swing_low の順。swing_high の出現
-  // 回数で収縮番号(T1,T2,…)を振る。merge後は前収縮の谷と次収縮の山が同一日に
-  // 重なることがあり、lightweight-chartsの折れ線は同時刻の重複を受け付けない
-  // ため、折れ線データのみ先勝ちで重複除去する(マーカーは同時刻OK)。
+  // 回数で収縮番号(T1,T2,…)を振る。描画は Series Primitive(canvas直描き)で、
+  // merge後に前収縮の谷と次収縮の山が同一足へ重なっても両点を縦セグメントとして
+  // 保持できる(旧lineSeriesは同時刻の片方を落として収縮が消えていた)。
   const vcpRaw = (chart.markers || []).filter((m) => m.time && m.price != null);
   let vcpT = 0;
-  const vcpLabeled = vcpRaw.map((m) => {
+  const vcpPts = vcpRaw.map((m) => {
     if (m.type === "swing_high") vcpT += 1;
     return { time: m.time, price: m.price, isHigh: m.type === "swing_high", label: "T" + vcpT };
   });
-  vcpLabeled.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
-  const vcpPoints = [];
-  for (const m of vcpLabeled) {
-    if (vcpPoints.length && vcpPoints[vcpPoints.length - 1].time === m.time) continue;
-    vcpPoints.push({ time: m.time, value: m.price });
-  }
-  // T番号ラベル: 山は上(aboveBar)・谷は下(belowBar)に出し、ローソク足やヒゲに
-  // 被らないようにする。size:0 で矢印図形は消してテキストだけ表示。
-  const vcpMarkers = vcpLabeled.map((m) => ({
-    time: m.time,
-    position: m.isHigh ? "aboveBar" : "belowBar",
-    color: "#facc15",
-    shape: m.isHigh ? "arrowDown" : "arrowUp",
-    size: 0,
-    text: m.label,
-  }));
-  // vcp_forming=true はIMMATURE(ベース熟成中)の形成途中ライン。破線+細めで
-  // 検出済みVCP(実線)と視覚的に区別する。
+  vcpPts.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  // vcp_forming=true はIMMATURE(ベース熟成中)の形成途中ライン。
   const vcpForming = !!chart.vcp_forming;
-  const vcpSeries = priceChart.addLineSeries({
-    color: "#facc15",
-    lineWidth: vcpForming ? 1 : 2,
-    lineStyle: vcpForming ? 2 : 0, // 2 = Dashed
-    priceLineVisible: false,
-    lastValueVisible: false,
-    crosshairMarkerVisible: false,
-  });
-  const vcpDrawable = vcpPoints.length >= 2;
+  // primitive API は Lightweight Charts 4.1+。CDNが旧版ならトグルをdisableにする。
+  const vcpSupported = typeof candleSeries.attachPrimitive === "function";
+  const vcpDrawable = vcpSupported && vcpPts.length >= 2;
   // sticky(チェック維持)でONのまま来た場合、実描画は初回の setTimeframe が行う。
   let vcpOn = vcpDrawable && vcpToggleSticky;
+  const vcpPrimitive = vcpDrawable
+    ? createVcpZigzagPrimitive(vcpPts, {
+        color: "#facc15",
+        dashed: vcpForming,
+        isVisible: () => vcpOn && currentTf === "D",
+      })
+    : null;
+  if (vcpPrimitive) candleSeries.attachPrimitive(vcpPrimitive);
 
   // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
   // checkboxes in the toolbar. Handles are kept so the lines can be removed.
@@ -3610,9 +3665,7 @@ function renderCharts(chart) {
     vcpDrawable ? 1 : null,
     (on) => {
       vcpOn = on;
-      const show = on && currentTf === "D";
-      vcpSeries.setData(show ? vcpPoints : []);
-      vcpSeries.setMarkers(show ? vcpMarkers : []);
+      if (vcpPrimitive) vcpPrimitive.requestUpdate();
     },
     { sticky: { get: () => vcpToggleSticky, set: (v) => { vcpToggleSticky = v; } } }
   );
@@ -3764,10 +3817,9 @@ function renderCharts(chart) {
     ma200.setData(isMonthly ? [] : chart.ma200 || []);
     // 決算マーカーは日足のバー日付基準。月足では噛み合わないのでクリアする。
     candleSeries.setMarkers(isMonthly ? [] : earningsMarkers);
-    // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。
-    // 初回呼び出しがsticky ONの初期描画も兼ねる。
-    vcpSeries.setData(!isMonthly && vcpOn ? vcpPoints : []);
-    vcpSeries.setMarkers(!isMonthly && vcpOn ? vcpMarkers : []);
+    // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。描画可否は
+    // primitiveのisVisible(vcpOn && currentTf==="D")が判定するので再描画を促すだけ。
+    if (vcpPrimitive) vcpPrimitive.requestUpdate();
     if (isMonthly) {
       for (const c of charts) c.timeScale().fitContent();
     } else {
