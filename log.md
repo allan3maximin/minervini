@@ -21,6 +21,27 @@
 
 ---
 
+## 2026-07-23 (104): ライントグルのチェック残りバグ修正 + VCP描画の実機検証
+
+- **バグ修正** `app.js` wireLineToggle: チェックリセットをdisable判定より前に移動。
+  チェックON→次銘柄(データなし)でチェック入りdisabledが残る問題(ユーザー指摘)。
+  cache-buster app.js `8c15f0b9`。コミット `6ec5ca89`(origin/master+1、rebase相当済み)。
+- **どの銘柄で線が出るか(検証)**: 当日ユニバース全件を本番同一パイプラインで
+  再計算した結果、WATCH_A 3 / WATCH_B 7 / REJECTED 744 は線が出る。IMMATURE/
+  NO_BASE/TOO_RECENT/TOO_VOLATILE(計255)は出ない。「監視Aだけ」ではなく
+  「当日再検出でベースが取れた銘柄全部」。ブレイク済み(EXTENDED/STALE等)は
+  ロック由来ピボットで当日がIMMATURE等ならdisabled(8418/9247で実機確認)。
+- **描画正当性**: 線が出る754銘柄でジグザグ点の日付昇順・価格が当日高安レンジ内で
+  あることを機械検証、違反0。8173(監視A, 3W 22/8/7 3T)はiPhoneミラーリングで
+  目視確認し、計算値(H7/1 4325→L7/7 3395→H7/7 3650→L7/8 3370→H7/22 3835→
+  L7/23 3560)と描画が一致。
+- **git補足**: sandboxのunlink不可で index.lock/HEAD.lock が git 自身の失敗後に
+  残留し通常のcommit/rebaseが通らないことがある。plumbing
+  (GIT_INDEX_FILE=別indexで read-tree→update-index→write-tree→commit-tree→
+  update-ref、作業ツリーは `git show REV:path > path` で上書き)なら通る。
+
+---
+
 ## 2026-07-23 (103): チャートにVCPジグザグ線を描画
 
 ユーザー要望「株グラフにVCPを描画できないか」。描画方式はジグザグ線を選択
