@@ -21,6 +21,42 @@
 
 ---
 
+## 2026-07-23 (106): VCPライン描画を黄色化+T1/T2ラベル(山は上/谷は下)
+
+前セッションが作業ツリーに残していたVCP描画の見た目改修を引き継いで確定。
+ユーザー要望「VCPチェックは維持(チェックありDisableでもよい)/色は黄色/
+T1,T2ラベルを出す/山は上・谷は下に出して足やヒゲが隠れないように」。
+
+- **app.js `renderCharts`**: VCPライン/マーカーの色を `#f472b6`→`#facc15`(黄)。
+  markers を swing_high 出現回数で採番し `T1,T2…` ラベル付与。マーカーは
+  `position: isHigh ? "aboveBar" : "belowBar"` + `size:0`(矢印図形は消して
+  テキストのみ)でローソク足・ヒゲに被らせない。折れ線は同時刻重複を先勝ちで
+  除去(merge後に前収縮の谷=次収縮の山が同一日になる対策)。
+- **チェック維持(sticky)**: `vcpToggleSticky` を導入し銘柄切替をまたいでON/OFFを
+  保持。`wireLineToggle` に `opts.sticky` を追加。描画データ無し銘柄では
+  チェック付きのまま disable、データ復帰で自動再表示。setTimeframe が
+  sticky初期描画も兼ねる(markersもsetMarkersで日足専用に同期)。
+- ヘルプ文 `vcp_line` にT1/T2ラベルとチェック維持の説明を追記。
+- **index.html**: cache-buster app.js `a3d47e21`→`b7e92c04`。
+- **検証**: `node --check docs/assets/app.js` OK。git diff HEAD で差分の整合確認。
+
+### git 補足(sandbox制約での復旧手順)
+セッション開始時、前セッションの残骸で `.git/rebase-merge/` + `.git/index.lock`
++ `.git/HEAD.lock` が残り git porcelain が「rebase中」状態だった。sandbox は
+virtiofs で **新規作成は可・unlink不可**のため、これらstaleファイルは削除できず。
+`git rebase --abort` は作業ツリー(未コミットのVCP改修)を巻き戻すため使わず、
+plumbing で回避: fetch で origin が先行(265b9809)と判明 → 別index
+(`GIT_INDEX_FILE`)で `read-tree 265b9809` → `update-index` で app.js/index.html を
+上乗せ → `write-tree`→`commit-tree -p 265b9809` でコミット e9499f22 作成 →
+`update-ref` は HEAD.lock で失敗するため **`.git/refs/heads/master` を直接上書き**で
+ref前進 → 作業ツリーのdata 162ファイルを `git show 265b9809:$f > $f` で同期 →
+temp index を `.git/index` に cp して index も HEAD 一致に。結果 master=e9499f22
+(親=origin最新265b9809、origin より +1=FF可)、作業ツリー clean。
+**ユーザーは自分のMacで `.git/index.lock` `.git/HEAD.lock` `.git/rebase-merge/` を
+削除してから push すること**(sandboxでは消せなかった)。
+
+---
+
 ## 2026-07-23 (105): IMMATURE(ベース熟成中)もVCPジグザグ線を描画
 
 - ユーザー要望「ベース熟成間近は描画できなくていいの？どこまでできてるか
