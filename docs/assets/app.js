@@ -190,6 +190,14 @@ const TERM_HELP = {
       "信用買残÷平均出来高。溜まった買残を消化するのに何日分の出来高が\n" +
       "必要かの目安。大きいほど需給が重く、ブレイクアウトの上値が抑えられやすい。",
   },
+  vcp_line: {
+    title: "VCPライン",
+    body:
+      "検出されたVCP(ボラティリティ収縮パターン)の各収縮の高値→安値を\n" +
+      "結んだジグザグ線。右へ行くほど振れ幅が狭くなっていれば、売り物が\n" +
+      "枯れてブレイクアウトの準備が整いつつあることを意味する。\n" +
+      "日足表示のみ。VCP未検出(または旧データ)の銘柄では選べない。",
+  },
   pivot: {
     title: "ピボット",
     body:
@@ -3513,6 +3521,23 @@ function renderCharts(chart) {
 
   const rsSeries = rsChart ? rsChart.addLineSeries({ color: "#2dd4bf", lineWidth: 1 }) : null;
 
+  // VCPジグザグ線: markers(swing_high/swing_low、build_chart_dataが日付付きで
+  // 出力)を時系列に結んだ折れ線。収縮が右へ行くほど狭くなる様子を可視化する。
+  // 旧charts JSON(timeフィールドなし)はfilterで全滅→トグルがdisabledになる
+  // だけなので後方互換。日足専用(月足では日付軸と噛み合わないためクリア)。
+  const vcpPoints = (chart.markers || [])
+    .filter((m) => m.time && m.price != null)
+    .map((m) => ({ time: m.time, value: m.price }))
+    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  const vcpSeries = priceChart.addLineSeries({
+    color: "#f472b6",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  let vcpOn = false;
+
   // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
   // checkboxes in the toolbar. Handles are kept so the lines can be removed.
   let pivotLine = null;
@@ -3536,6 +3561,10 @@ function renderCharts(chart) {
     box.addEventListener("change", () => apply(box.checked));
   }
 
+  wireLineToggle("toggle-vcp", vcpPoints.length >= 2 ? 1 : null, (on) => {
+    vcpOn = on;
+    vcpSeries.setData(on && currentTf === "D" ? vcpPoints : []);
+  });
   wireLineToggle("toggle-pivot", chart.pivot, (on) => {
     if (on && !pivotLine) {
       pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "ピボット" });
@@ -3684,6 +3713,8 @@ function renderCharts(chart) {
     ma200.setData(isMonthly ? [] : chart.ma200 || []);
     // 決算マーカーは日足のバー日付基準。月足では噛み合わないのでクリアする。
     candleSeries.setMarkers(isMonthly ? [] : earningsMarkers);
+    // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。
+    vcpSeries.setData(!isMonthly && vcpOn ? vcpPoints : []);
     if (isMonthly) {
       for (const c of charts) c.timeScale().fitContent();
     } else {

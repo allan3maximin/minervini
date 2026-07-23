@@ -559,8 +559,10 @@ def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result
 
     markers = []
     for c in vcp_result.get("contractions", []) or []:
-        markers.append({"type": "swing_high", "price": c["high_price"]})
-        markers.append({"type": "swing_low", "price": c["low_price"]})
+        markers.append({"type": "swing_high", "time": c.get("high_date"),
+                        "price": round(float(c["high_price"]), 2)})
+        markers.append({"type": "swing_low", "time": c.get("low_date"),
+                        "price": round(float(c["low_price"]), 2)})
 
     return {
         "code": code,

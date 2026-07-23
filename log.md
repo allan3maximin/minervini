@@ -21,6 +21,28 @@
 
 ---
 
+## 2026-07-23 (103): チャートにVCPジグザグ線を描画
+
+ユーザー要望「株グラフにVCPを描画できないか」。描画方式はジグザグ線を選択
+(AskUserQuestionで確認)。検出済みVCPの各収縮の高値→安値を時系列に結んだ
+折れ線を個別株チャートに重ねる。
+
+- **`src/screener/vcp.py`**: detect_vcpで各contractionに `high_date`/`low_date`
+  (YYYY-MM-DD文字列、base_dfのローカルidx→日付変換)を付与。
+- **`src/report/build_site.py`**: build_chart_dataのmarkersに `time` を追加
+  (従来はprice/typeのみで未使用だった)。
+- **フロント**: index.htmlのライントグルに「VCP」チェック追加(help `vcp_line`
+  新設)。app.jsで markers から time付きの点を昇順ソートしてラインシリーズ
+  (ピンク#f472b6, width2)を構築。日足専用(月足切替でクリア、決算マーカーと
+  同じ扱い)。旧charts JSON(timeなし)は点が0件→トグルdisabledで後方互換。
+  cache-buster app.js `3d7a91e4`。
+- **注意**: 既存の docs/data/charts/*.json は次回日次バッチまで旧形式のまま
+  なので、バッチが走るまでVCPトグルはdisabledのまま。
+
+検証: pytest 386 passed / node --check OK。
+
+---
+
 ## 2026-07-23 (102): カード一覧のF未確認バッジ非表示化
 
 (101)のFバッジを本番反映したところ、ユニバースの大半がYoY計算不能=unknownで

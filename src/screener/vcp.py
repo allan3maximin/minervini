@@ -563,6 +563,14 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
     pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
     contractions = extract_contractions(pivots)
 
+    # チャート描画用に各収縮の高値/安値の日付を付与 (base_df のローカル idx →
+    # 実際の日付)。report/charts JSON にそのまま乗せられるよう文字列化する。
+    if "date" in base_df.columns:
+        dates = base_df["date"]
+        for c in contractions:
+            c["high_date"] = pd.Timestamp(dates.iloc[c["high_idx"]]).strftime("%Y-%m-%d")
+            c["low_date"] = pd.Timestamp(dates.iloc[c["low_idx"]]).strftime("%Y-%m-%d")
+
     flags, diagnostics = check_vcp_must_conditions(contractions, base_days, base_df, config)
     status = vcp_status(flags)
 
