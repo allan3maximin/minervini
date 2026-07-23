@@ -3552,12 +3552,15 @@ function renderCharts(chart) {
     boxOld.replaceWith(box);
     box.disabled = false;
     box.closest("label")?.classList.remove("disabled");
+    // チェックのリセットはdisable判定より前に行う。後だと、チェックONのまま
+    // 次の銘柄(該当データなし)へ移った際にreturnで素通りし、チェック入りの
+    // disabledチェックボックスが残る。
+    box.checked = false;
     if (price == null) {
       box.disabled = true;
       box.closest("label")?.classList.add("disabled");
       return;
     }
-    box.checked = false;
     box.addEventListener("change", () => apply(box.checked));
   }
 
