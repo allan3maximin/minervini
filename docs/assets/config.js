@@ -14,7 +14,7 @@ window.MINERVINI_CONFIG = {
   // the dashboard is read-only. 2026-07-12: データ暗号化ゲート導入に伴い有効化。
   // (注: 起動時ゲート自体はこのフラグではなく「report.jsonが暗号化されているか」
   //  で発動する。このフラグは解錠/設定ボタン等の表示制御のみ。)
-  passkeyAuthEnabled: true,
+  passkeyAuthEnabled: false,
   // バッチ実行ページ(view-batch)で手動トリガー可能にするワークフロー一覧。
   // .github/workflows/ の実ファイル名と一致させること。
   workflows: [
