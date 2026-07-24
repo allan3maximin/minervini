@@ -1566,40 +1566,16 @@ function orderedTierCodes(tier) {
   return ordered.filter((s) => s.has_chart !== false).map((s) => s.code);
 }
 
-// 個別株画面の前後ナビ(＜=次へ / ＞=前へ)。listNavTier のフィルタ済み並び順で
-// 現在銘柄の前後を割り出し、ボタンの遷移先(dataset.target)と有効/無効を更新。
+// 個別株画面の前後銘柄。listNavTier のフィルタ済み並び順で現在銘柄の前後を割り出し、
+// 横スワイプ(setupStockPanels の wireStockSwipe)が参照するモジュール変数へ格納する。
+// ＜＞ボタンは廃止し、パネル全体の横スワイプで銘柄を切り替える方式に変更した。
+let stockNavPrevCode = null; // リストの上(前の銘柄, idx-1)
+let stockNavNextCode = null; // リストの下(次の銘柄, idx+1)
 function updateStockNav(code) {
-  const leftBtn = document.getElementById("stock-nav-next");  // ＜ = リストの上へ(index-1)
-  const rightBtn = document.getElementById("stock-nav-prev"); // ＞ = リストの下へ(index+1)
-  if (!leftBtn || !rightBtn) return;
   const codes = orderedTierCodes(listNavTier);
   const idx = codes.indexOf(code);
-  const upCode = idx > 0 ? codes[idx - 1] : null;
-  const downCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
-  // ＜=リストの上へ / ＞=リストの下へ(体感に合わせて左右反転)。参照先が無い側は
-  // 右詰めにならないよう、スペースを保ったまま不可視化(is-empty)する。
-  const set = (btn, target) => {
-    btn.hidden = false;
-    btn.dataset.target = target || "";
-    btn.classList.toggle("is-empty", !target);
-  };
-  set(leftBtn, upCode);
-  set(rightBtn, downCode);
-}
-
-// 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。
-function initStockNav() {
-  const wire = (id) => {
-    const btn = document.getElementById(id);
-    if (!btn || btn.dataset.wired) return;
-    btn.dataset.wired = "1";
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.target;
-      if (target) window.location.hash = `stock/${encodeURIComponent(target)}`;
-    });
-  };
-  wire("stock-nav-next");
-  wire("stock-nav-prev");
+  stockNavPrevCode = idx > 0 ? codes[idx - 1] : null;
+  stockNavNextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
 }
 
 // ソートボタンのラベルを、今のティアの並び替えキーに合わせて更新。
@@ -1904,7 +1880,6 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
   setupYahooFinanceLink(code);
-  initStockNav();
   updateStockNav(code);
   setupStockPanels();
   renderStockSummary(stock);
@@ -1946,48 +1921,110 @@ function setupYahooFinanceLink(code) {
 // 個別画面の外(モジュールスコープ)で覚えておく。既定はサマリー。
 let currentStockPanel = "summary";
 
-// アクティブなタブ表示を切り替える。切替のたびに currentStockPanel も更新し、
-// 次に別銘柄を開いたときに同じタブへ復元できるようにする。
+// アクティブなタブ+パネルを切り替える。切替のたびに currentStockPanel も更新し、
+// 次に別銘柄を開いたときに同じタブへ復元できるようにする。パネルは単一表示
+// (.active のみ display)なので、タブと対応パネルの両方に .active を付け替える。
 function updateStockActiveTab(panelName) {
   currentStockPanel = panelName;
   const tabs = document.getElementById("stock-tabs");
-  if (!tabs) return;
-  tabs.querySelectorAll(".stock-tab").forEach((b) => {
-    b.classList.toggle("active", b.dataset.panel === panelName);
-  });
+  if (tabs) {
+    tabs.querySelectorAll(".stock-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.panel === panelName);
+    });
+  }
+  const panels = document.getElementById("stock-panels");
+  if (panels) {
+    panels.querySelectorAll(".stock-panel").forEach((p) => {
+      p.classList.toggle("active", p.dataset.panel === panelName);
+    });
+  }
+  // パネルは単一表示(非アクティブは display:none)。チャートは非表示中に生成されると
+  // clientWidth/Height=0 で描画されるため、チャートタブが表になった直後に実寸で
+  // リサイズし直す(次フレームでレイアウト確定後に resizeHandler を呼ぶ)。
+  if (panelName === "chart" && stockChartState && stockChartState.resizeHandler) {
+    requestAnimationFrame(() => {
+      if (stockChartState && stockChartState.resizeHandler) stockChartState.resizeHandler();
+    });
+  }
 }
 
-// 個別画面の横スワイプ/タブUI。パネルを横スクロールスナップで並べ、
-// タブクリック↔スクロール位置を双方向同期。銘柄遷移のたびに先頭へリセット。
+// 前後銘柄へハッシュ遷移する共通ヘルパ。dir<0=次(リストの下/idx+1)、dir>0=前(上/idx-1)。
+function navigateStock(dir) {
+  const target = dir < 0 ? stockNavNextCode : stockNavPrevCode;
+  if (target) window.location.hash = `stock/${encodeURIComponent(target)}`;
+}
+
+// パネル全体の横スワイプで前後の銘柄へ遷移する(初回のみ配線)。左スワイプ=次の銘柄
+// (リストの下/idx+1)、右スワイプ=前の銘柄(リストの上/idx-1)。縦スクロール中は
+// ブラウザがポインタを奪って pointercancel が飛ぶため誤爆しない。グラフの canvas が
+// ポインタキャプチャしても panels は祖先なのでキャプチャ段階のリスナーには届く。
+// マウスは対象外(デスクトップは矢印キーで操作。マウスドラッグはグラフの時間軸パン用)。
+function wireStockSwipe(panels) {
+  const TH = 55;            // 銘柄切替とみなす最小横移動量(px)
+  const H_DOMINANCE = 1.4;  // 横 > 縦*係数 でないと縦スクロール扱いで無視
+  let activeId = null;
+  let sx = 0;
+  let sy = 0;
+  panels.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (activeId !== null || e.pointerType === "mouse") return;
+      activeId = e.pointerId;
+      sx = e.clientX;
+      sy = e.clientY;
+    },
+    true
+  );
+  const finish = (e) => {
+    if (activeId === null || e.pointerId !== activeId) return;
+    activeId = null;
+    const dx = e.clientX - sx;
+    const dy = e.clientY - sy;
+    if (Math.abs(dx) < TH || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
+    navigateStock(dx < 0 ? -1 : 1);
+  };
+  panels.addEventListener("pointerup", finish, true);
+  panels.addEventListener(
+    "pointercancel",
+    (e) => {
+      if (e.pointerId === activeId) activeId = null;
+    },
+    true
+  );
+
+  // デスクトップ用の前後ナビ(←=前の銘柄 / →=次の銘柄)。個別株ビュー表示中かつ
+  // 入力欄にフォーカスが無いときだけ拾う。document へ1回だけ配線。
+  if (!document.body.dataset.stockKeyWired) {
+    document.body.dataset.stockKeyWired = "1";
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const view = document.getElementById("view-stock");
+      if (!view || view.hidden) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+      navigateStock(e.key === "ArrowRight" ? -1 : 1);
+    });
+  }
+}
+
+// 個別画面のタブUI。パネルは単一表示(タブのタップ/スライドで切替)、パネル全体の
+// 横スワイプは銘柄切替(wireStockSwipe)に割り当てる。銘柄遷移のたびに直前のタブを維持。
 function setupStockPanels() {
   const panels = document.getElementById("stock-panels");
   const tabs = document.getElementById("stock-tabs");
   if (!panels || !tabs) return;
 
   // 銘柄を切り替えても直前に見ていたタブを維持する(例: A株のグラフから
-  // ＞でB株へ移ってもグラフタブのまま)。currentStockPanel の位置へ即座に
-  // スクロール(アニメ無し)し、そのタブをアクティブにする。
+  // スワイプでB株へ移ってもグラフタブのまま)。
   const tabItems = Array.from(tabs.querySelectorAll(".stock-tab"));
-  let restoreIdx = tabItems.findIndex((b) => b.dataset.panel === currentStockPanel);
-  if (restoreIdx < 0) restoreIdx = 0;
-  const restorePanel = tabItems[restoreIdx] ? tabItems[restoreIdx].dataset.panel : "summary";
-  const applyRestore = () => {
-    panels.scrollLeft = restoreIdx * panels.clientWidth;
-  };
-  applyRestore();
-  // 画面表示直後は clientWidth が確定していないことがあるため次フレームでも再適用。
-  requestAnimationFrame(applyRestore);
-  updateStockActiveTab(restorePanel);
+  const hasPanel = tabItems.some((b) => b.dataset.panel === currentStockPanel);
+  updateStockActiveTab(hasPanel ? currentStockPanel : "summary");
 
   if (panels.dataset.wired) return;
   panels.dataset.wired = "1";
 
   const goToTab = (btn) => {
-    const items = Array.from(tabs.querySelectorAll(".stock-tab"));
-    const idx = items.indexOf(btn);
-    if (idx < 0) return;
-    panels.scrollTo({ left: idx * panels.clientWidth, behavior: "smooth" });
-    updateStockActiveTab(btn.dataset.panel);
+    if (btn && btn.dataset.panel) updateStockActiveTab(btn.dataset.panel);
   };
 
   tabs.addEventListener("click", (e) => {
@@ -1996,21 +2033,7 @@ function setupStockPanels() {
     goToTab(btn);
   });
   wireTabSlide(tabs, ".stock-tab", goToTab);
-
-  let raf = 0;
-  panels.addEventListener(
-    "scroll",
-    () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
-        const cur = panels.querySelectorAll(".stock-panel")[idx];
-        if (cur) updateStockActiveTab(cur.dataset.panel);
-      });
-    },
-    { passive: true }
-  );
+  wireStockSwipe(panels);
 }
 
 // ピル型タブバー共通の「スライド切替」。タブボタンを押したまま横に滑らせると
@@ -3374,10 +3397,12 @@ function makeChart(el, { showTimeAxis }) {
       mouseWheel: true,
       pinch: true,
     },
-    // スマホ: 縦スワイプはページスクロールに渡す(チャートは横のみ掴む)。
+    // スマホ: 縦横ともタッチドラッグはチャートに掴ませない。横スワイプは
+    // パネル全体のジェスチャ(wireStockSwipe)に渡して前後銘柄へ切り替えるため。
+    // マウス操作(pressedMouseMove/ホイール)での時間軸移動は従来どおり可。
     handleScroll: {
       vertTouchDrag: false,
-      horzTouchDrag: true,
+      horzTouchDrag: false,
       pressedMouseMove: true,
       mouseWheel: true,
     },

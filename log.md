@@ -21,6 +21,36 @@
 
 ---
 
+## 2026-07-25 (113): 個別株UX — 横スワイプを「タブ切替」から「銘柄切替」へ
+
+個別株画面(index.html #stock/CODE)の横スワイプの割り当てを変更。従来はパネル全体を
+横スクロールスナップで並べ、横スワイプで同一銘柄のタブ(サマリー/グラフ/需給/ファンダ/
+ロット)を切り替えていた。これを **横スワイプ=前後の銘柄へ遷移**(＜＞ボタンと同じ動き)に
+変更し、＜＞ナビボタンは削除した。タブ切替はタップ+タブバー上スライドのみに集約。
+
+- `docs/index.html`: `stock-tabs-bar` から `stock-nav-next`/`stock-nav-prev` を削除。
+- `docs/assets/app.js`:
+  - `updateStockNav(code)`: ボタン配線をやめ、前後コードをモジュール変数
+    `stockNavPrevCode`(idx-1)/`stockNavNextCode`(idx+1)に格納するだけに転用。
+    `initStockNav` は廃止(renderStock からの呼び出しも削除)。
+  - `updateStockActiveTab(panelName)`: タブに加えて対応 `.stock-panel` へ `.active` を
+    付け替え(単一表示化)。チャートタブに入った直後は非表示中に 0×0 で生成された
+    チャートを実寸で再描画するため `requestAnimationFrame` で `resizeHandler()` を呼ぶ。
+  - `setupStockPanels`: スクロールスナップ/scrollTo 同期ロジックを撤去。タブの
+    タップ/`wireTabSlide` と `wireStockSwipe` の配線に簡素化。直前タブは維持。
+  - `wireStockSwipe(panels)`: パネル全体の pointer(タッチ/ペンのみ)横スワイプを検出し
+    前後銘柄へハッシュ遷移(左=次/idx+1、右=前/idx-1)。閾値55px・横>縦*1.4。縦スクロールは
+    pointercancel で自動的に無視。マウスは対象外(グラフの時間軸パンと競合するため)。
+    デスクトップ用に ← / → キーで前後銘柄ナビ(個別株ビュー表示中・入力欄非フォーカス時)。
+  - `makeChart` の `handleScroll.horzTouchDrag` を true→**false**。グラフタブでも横スワイプが
+    銘柄切替に回るようにする(マウスの pressedMouseMove による時間軸移動は据え置き)。
+- `docs/assets/style.css`: `.stock-panels` を横スクロールスナップから単一表示(flex column)へ。
+  `.stock-panel` は既定 `display:none`、`.stock-panel.active` のみ表示(チャートは
+  `.active[data-panel="chart"]` で flex column)。未使用の `.stock-nav-btn`/`.is-empty` を削除。
+- node --check で app.js 構文OK。実機でのスワイプ/タブ/グラフ再描画は要目視確認。
+
+---
+
 ## 2026-07-25 (112): fund_verdict の fail をYoYマイナス時のみに緩和
 
 `fund_verdict_and_multiplier`(サイズ係数レイヤー)の fail 基準を変更。従来は
