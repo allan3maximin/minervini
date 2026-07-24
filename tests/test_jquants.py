@@ -35,8 +35,28 @@ def test_record_to_point_basic():
         "label": "2025Q1",
         "eps": 50.5,
         "revenue": 1000000.0,
+        "ni": None,
+        "shares": None,
         "disc_date": "2025-08-01",
     }
+
+
+def test_record_to_point_net_income_and_shares():
+    p = jq.record_to_point(_rec(NP="500000000", ShOutFY="10000000", TrShFY="200000"))
+    assert p["ni"] == 500000000.0
+    assert p["shares"] == 9800000.0  # 発行済 - 自己株式
+
+
+def test_record_to_point_shares_none_when_nonpositive():
+    # 自己株式が発行済以上 -> shares<=0 は None (異常値ガード)
+    p = jq.record_to_point(_rec(NP="100", ShOutFY="1000", TrShFY="1000"))
+    assert p["shares"] is None
+    assert p["ni"] == 100.0
+
+
+def test_record_to_point_treasury_missing_defaults_zero():
+    p = jq.record_to_point(_rec(NP="100", ShOutFY="1000"))
+    assert p["shares"] == 1000.0
 
 
 def test_record_to_point_fy_maps_to_q4():
@@ -70,7 +90,7 @@ def test_record_to_point_rejects_when_no_values():
 # derive_quarters (YTD差分)
 # ---------------------------------------------------------------------------
 
-def _point(n, eps, revenue, fy="2025-04-01", disc="2025-08-01"):
+def _point(n, eps, revenue, fy="2025-04-01", disc="2025-08-01", ni=None, shares=None):
     return {
         "code": "7203",
         "fy_start": fy,
@@ -78,6 +98,8 @@ def _point(n, eps, revenue, fy="2025-04-01", disc="2025-08-01"):
         "label": f"{fy[:4]}Q{n}",
         "eps": eps,
         "revenue": revenue,
+        "ni": ni,
+        "shares": shares,
         "disc_date": disc,
     }
 
@@ -172,6 +194,43 @@ def test_derive_quarters_modest_negative_quarter_kept():
 
 
 # ---------------------------------------------------------------------------
+# derive_quarters -- 純利益(総額)ベースEPS (分割根治)
+# ---------------------------------------------------------------------------
+
+def test_derive_quarters_net_income_based_eps_split_safe():
+    # 期中2:1分割。純利益(総額)は連続、会社報告のYTD EPSは分割で歪む。
+    # ni/最新株式数(200万)で割り直すと単QEPSは滑らかで捏造マイナスが出ない。
+    points = [
+        _point(1, 100.0, 800.0, ni=100e6, shares=1_000_000, disc="2025-08-01"),
+        _point(2, 210.0, 1700.0, ni=210e6, shares=1_000_000, disc="2025-11-01"),
+        _point(3, 330.0, 2700.0, ni=330e6, shares=1_000_000, disc="2026-02-01"),
+        # 分割後の通期。会社報告EPS=460M/2M=230 → 差分だと230-330=-100の捏造マイナス
+        _point(4, 230.0, 4000.0, ni=460e6, shares=2_000_000, disc="2026-05-01"),
+    ]
+    out = jq.derive_quarters(points)
+    eps_by_q = {q["fiscal_quarter"]: q["eps"] for q in out}
+    # 最新株式数200万で全四半期を割り直し: Q1=100M/2M=50 ... Q4=130M/2M=65
+    assert eps_by_q == {"2025Q1": 50.0, "2025Q2": 55.0, "2025Q3": 60.0, "2025Q4": 65.0}
+    # 単Q純利益(総額)も保存される(merge時の再計算基準)
+    ni_by_q = {q["fiscal_quarter"]: q["ni"] for q in out}
+    assert ni_by_q["2025Q4"] == 130e6
+
+
+def test_derive_quarters_falls_back_to_legacy_when_no_ni():
+    # NP/株式数が無い銘柄は従来のEPS差分+対症ガードのまま。
+    points = [
+        _point(1, 200.0, 800.0),
+        _point(2, 424.72, 1700.0),
+        _point(3, 674.72, 2700.0),
+        _point(4, 170.28, 4000.0),  # 分割artifact → ガードでeps=None
+    ]
+    out = jq.derive_quarters(points)
+    q4 = next(q for q in out if q["fiscal_quarter"] == "2025Q4")
+    assert q4["eps"] is None
+    assert q4["revenue"] == 1300.0
+
+
+# ---------------------------------------------------------------------------
 # _merge_into_store
 # ---------------------------------------------------------------------------
 
@@ -191,6 +250,25 @@ def test_merge_into_store_overwrites_and_caps():
     entry = store["7203"]
     assert entry["checked_date"] == "2025-11-01"
     assert [q["fiscal_quarter"] for q in entry["quarters"]] == ["2025Q2", "2025Q3"]  # max_keep=2
+
+
+def test_merge_into_store_recomputes_eps_on_share_change():
+    # 分割で株式数が2倍になると、過去四半期(ni保存済み)のEPSも最新株式数で
+    # 割り直される → 分割前後でEPSの基準が揃う。
+    store = {}
+    early = [
+        {"fiscal_quarter": "2025Q1", "eps": 100.0, "revenue": 800.0, "ni": 100e6},
+        {"fiscal_quarter": "2025Q2", "eps": 110.0, "revenue": 900.0, "ni": 110e6},
+    ]
+    jq._merge_into_store(store, "7203", early, "2025-11-01", max_keep=8, shares=1_000_000)
+    assert store["7203"]["quarters"][0]["eps"] == 100.0  # 100M / 1M
+
+    # 分割後(株式数200万)の新四半期が到着 → 全四半期を200万で割り直す
+    late = [{"fiscal_quarter": "2025Q3", "eps": 60.0, "revenue": 1000.0, "ni": 120e6}]
+    jq._merge_into_store(store, "7203", late, "2026-02-01", max_keep=8, shares=2_000_000)
+    eps_by_q = {q["fiscal_quarter"]: q["eps"] for q in store["7203"]["quarters"]}
+    assert eps_by_q == {"2025Q1": 50.0, "2025Q2": 55.0, "2025Q3": 60.0}
+    assert store["7203"]["shares"] == 2_000_000
 
 
 # ---------------------------------------------------------------------------

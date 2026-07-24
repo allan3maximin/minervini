@@ -120,8 +120,13 @@ def _num(raw) -> float | None:
 def record_to_point(rec: dict) -> dict | None:
     """/fins/summary の1レコードをYTD点に変換する。対象外はNone。
 
-    戻り値: {"code", "fy_start", "n", "label", "eps", "revenue", "disc_date"}
-    (eps/revenueはYTD累計。連結が空なら非連結にフォールバック。)
+    戻り値: {"code", "fy_start", "n", "label", "eps", "revenue", "ni", "shares",
+             "disc_date"} (eps/revenue/niはYTD累計。連結が空なら非連結にフォールバック。)
+
+    ni(NP=当期純利益,総額)とshares(ShOutFY−TrShFY=実発行済株式数)は分割根治用。
+    純利益は総額なので売上と同様に分割不変 → 単四半期純利益を最新株式数で割れば
+    期中分割・YoY双方を分割調整済みEPSにできる。NP/株式数が無いレコードでは
+    None(下流は従来のEPS差分+対症ガードにフォールバック)。
     """
     doc_type = rec.get("DocType") or ""
     if "FinancialStatements" not in doc_type:
@@ -143,6 +148,17 @@ def record_to_point(rec: dict) -> dict | None:
     if eps is None and revenue is None:
         return None
 
+    ni = _num(rec.get("NP"))
+    if ni is None:
+        ni = _num(rec.get("NCNP"))
+    shares_out = _num(rec.get("ShOutFY"))
+    treasury = _num(rec.get("TrShFY"))
+    shares = None
+    if shares_out is not None:
+        shares = shares_out - (treasury or 0.0)
+        if shares <= 0:
+            shares = None
+
     fy_year = fy_start[:4]
     return {
         "code": code5[:4],
@@ -151,6 +167,8 @@ def record_to_point(rec: dict) -> dict | None:
         "label": f"{fy_year}Q{n}",
         "eps": eps,
         "revenue": revenue,
+        "ni": ni,
+        "shares": shares,
         "disc_date": (rec.get("DiscDate") or "").strip(),
     }
 
@@ -201,6 +219,22 @@ def record_to_guidance(rec: dict) -> dict | None:
 # Quarter derivation (YTD差分) -- EDINET版と同一ロジック
 # ---------------------------------------------------------------------------
 
+def _latest_shares(points: list[dict]) -> float | None:
+    """銘柄の最新の実発行済株式数(発行済−自己株式)を返す。開示日→四半期nの
+    順で最も新しい点のsharesを採用。全四半期のEPSをこの最新値で割り直すことで、
+    期中分割・YoY比較の両方を分割調整済みで一貫させる。"""
+    best = None
+    best_key = None
+    for p in points:
+        s = p.get("shares")
+        if not s or s <= 0:
+            continue
+        key = (p.get("disc_date") or "", p.get("n") or 0)
+        if best_key is None or key > best_key:
+            best, best_key = s, key
+    return best
+
+
 def derive_quarters(ytd_points: list[dict]) -> list[dict]:
     """会計年度ごとにYTD点を昇順に並べ、隣接差分でラベル値を導出する。
 
@@ -216,6 +250,9 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
     by_fy: dict[str, list[dict]] = {}
     for p in ytd_points:
         by_fy.setdefault(p["fy_start"], []).append(p)
+
+    # 銘柄の最新実発行済株式数。純利益(総額)ベースのEPS再計算に使う。
+    shares = _latest_shares(ytd_points)
 
     out: list[dict] = []
     for fy_points in by_fy.values():
@@ -240,7 +277,7 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
             if disc:
                 rec["disc_date"] = disc
             eps_cur = eps_base = None
-            for key in ("eps", "revenue"):
+            for key in ("eps", "revenue", "ni"):
                 cur = p.get(key)
                 if cur is None:
                     continue
@@ -249,10 +286,15 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
                 rec[key] = round(cur - base, 4)
                 if key == "eps":
                     eps_cur, eps_base = cur, base
-            # 期中株式分割の artifact(通期EPS[分割後] − 9M累計[分割前] = 捏造の
-            # 深マイナス)を検出したらEPSだけ破棄。revenueは分割に無関係で正常
-            # なので残す → 下流が直前のクリーンな四半期にフォールバックする。
-            if is_split_artifact_eps(rec["eps"], eps_cur, eps_base, rec["revenue"]):
+            # 根治: 単四半期純利益(総額,分割不変)を最新株式数で割ってEPSを再計算。
+            # 分割の前後で分子(総額)は連続、分母(株式数)は常に最新値なので、期中
+            # 分割artifactもYoY分割ミスマッチも原理的に発生しない。
+            if rec.get("ni") is not None and shares:
+                rec["eps"] = round(rec["ni"] / shares, 4)
+            # フォールバック(NP/株式数が無い銘柄): 従来のEPS差分に対症ガードを適用。
+            # 通期EPS[分割後]−9M累計[分割前]=捏造の深マイナスを検出したらEPSだけ破棄
+            # (revenueは分割無関係で正常なので残す → 下流が直前四半期にフォールバック)。
+            elif is_split_artifact_eps(rec["eps"], eps_cur, eps_base, rec["revenue"]):
                 rec["eps"] = None
             if rec["eps"] is not None or rec["revenue"] is not None:
                 out.append(rec)
@@ -260,14 +302,26 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
     return out
 
 
-def _merge_into_store(store: dict, code: str, quarters: list[dict], checked_date: str, max_keep: int) -> None:
+def _merge_into_store(store: dict, code: str, quarters: list[dict], checked_date: str,
+                      max_keep: int, shares: float | None = None) -> None:
     entry = store.setdefault(code, {"quarters": [], "checked_date": None, "source": "jquants"})
     entry["source"] = "jquants"
+    # code単位の最新株式数を保持。分割で株式数が変わると全四半期のEPSを割り直す
+    # 基準になる(ni は総額で保存されているので分母だけ最新化すれば分割調整完了)。
+    if shares and shares > 0:
+        entry["shares"] = shares
     by_label = {q["fiscal_quarter"]: q for q in entry["quarters"]}
     for q in quarters:
         by_label[q["fiscal_quarter"]] = q  # 新しい開示が同ラベルを上書き
     merged = sorted(by_label.values(), key=lambda q: (q["fiscal_quarter"][:4], q["fiscal_quarter"][-1]))
     entry["quarters"] = merged[-max_keep:]
+    # 最新株式数で ni 保持四半期の EPS を再計算。過去の開示(分割前の株式数で
+    # 計算された EPS)も自動的に最新株式数ベースへ揃うため、分割時の不整合が残らない。
+    cur_shares = entry.get("shares")
+    if cur_shares and cur_shares > 0:
+        for q in entry["quarters"]:
+            if q.get("ni") is not None:
+                q["eps"] = round(q["ni"] / cur_shares, 4)
     if entry["checked_date"] is None or (checked_date and checked_date > entry["checked_date"]):
         entry["checked_date"] = checked_date
 
@@ -278,7 +332,7 @@ def _apply_points(store: dict, points_by_code: dict[str, list[dict]], max_keep: 
         if not quarters:
             continue
         checked = max((p.get("disc_date") or "" for p in points), default="")
-        _merge_into_store(store, code, quarters, checked, max_keep)
+        _merge_into_store(store, code, quarters, checked, max_keep, shares=_latest_shares(points))
 
 
 def _apply_guidance(store: dict, guidance_by_code: dict[str, list[dict]]) -> None:
