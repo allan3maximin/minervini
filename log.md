@@ -21,6 +21,43 @@
 
 ---
 
+## 2026-07-25 (114): ＜＞ボタン復活・切替アニメ・グラフ初期表示修正・市況/セクターもスワイプ切替
+
+113 の続き。ユーザー要望5点を対応。
+
+- **＜＞ボタン復活**(113で削除したものを戻す。スワイプ+キーボードは維持)。
+  - `docs/index.html`: `stock-tabs-bar` に `stock-nav-next`(＜)/`stock-nav-prev`(＞)を再追加。
+  - `docs/assets/style.css`: `.stock-nav-btn` / `.is-empty` のCSSを復元。
+  - `docs/assets/app.js`: `updateStockNav` でモジュール変数格納に加えボタンの
+    `dataset.target`/`is-empty` も更新。`initStockNav`(クリック配線)を復活し
+    `initStockPage` から呼ぶ。ボタンクリックは `stockNavDir` を立ててからハッシュ遷移。
+- **切替スライドインアニメ**(前後ナビで来たとき約150msだけ左右からスライド)。
+  - CSS: 共通キーフレーム `panel-slide-next`/`panel-slide-prev` を新設し
+    `.stock-panels`/`.market-panels`/`.hm-panels` の `.slide-next`/`.slide-prev` に適用。
+    `prefers-reduced-motion` では無効。
+  - JS: 共通ヘルパ `playPanelSlide(container, dir)` を追加。銘柄遷移方向は
+    `stockNavDir`(1=次/-1=前/0=直接) に保持し、`setupStockPanels` で再生。
+- **縦スクロールパネルでの横スワイプ判定改善**(ベストエフォート)。
+  `.stock-panel`/`.market-panel`/`.hm-panels` に `touch-action: pan-y` を付与し、
+  縦パンのみブラウザに委譲=横ジェスチャをpointerで拾いやすくした。
+- **グラフ初期表示を1ヶ月(22営業日)に修正**。非表示中に0幅で生成→実寸リサイズ時に
+  バー間隔が再計算され表示本数がずれていた。`setTimeframe` から可視範囲適用を
+  `applyVisibleRange()` に切り出し、現在の期間値を `currentTfVal` に保持。
+  `resizeHandler` の `applyOptions` 後に `applyVisibleRange()` を呼び直して本数を維持。
+- **市況データ/市況分析をスワイプ+無限ループ切替**。共通 `wireLoopSwipe(el, onSwipe)`
+  (タッチ/ペンのみ、左=次/右=前、端でラップ)を追加。`initMarketTabs` に配線し
+  切替時 `playPanelSlide`。
+- **セクター詳細/簡易も同様**。`docs/assets/heatmap.js`: scroll-snapカルーセルを
+  単一表示(.hm-panel.active)へ変更。`scrollToHmView`→`setHmView(view, dir)`(display
+  切替+アニメ)にリネーム。scroll同期リスナー撤去、`wireLoopSwipe` で配線。treemapの
+  基準幅を非表示で0になり得る `detailC` から常時可視の `hm-panels` へ変更(render/resizeガード)。
+  ※ `wireLoopSwipe`/`playPanelSlide` は app.js 定義(heatmap.jsより後読み)だが、
+  実行時(initHeatmap以降)には定義済みなので `typeof` ガードして参照。
+
+検証: `node --check app.js heatmap.js` 通過。
+
+---
+
 ## 2026-07-25 (113): 個別株UX — 横スワイプを「タブ切替」から「銘柄切替」へ
 
 個別株画面(index.html #stock/CODE)の横スワイプの割り当てを変更。従来はパネル全体を

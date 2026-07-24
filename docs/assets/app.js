@@ -1567,8 +1567,9 @@ function orderedTierCodes(tier) {
 }
 
 // 個別株画面の前後銘柄。listNavTier のフィルタ済み並び順で現在銘柄の前後を割り出し、
-// 横スワイプ(setupStockPanels の wireStockSwipe)が参照するモジュール変数へ格納する。
-// ＜＞ボタンは廃止し、パネル全体の横スワイプで銘柄を切り替える方式に変更した。
+// 横スワイプ(setupStockPanels の wireStockSwipe)が参照するモジュール変数へ格納しつつ、
+// ＜＞ボタンの遷移先(dataset.target)と有効/無効も同時に更新する。前後の切替は
+// ＜＞ボタンと横スワイプの両方で可能(体感を揃えるため ＜=上へ / ＞=下へ)。
 let stockNavPrevCode = null; // リストの上(前の銘柄, idx-1)
 let stockNavNextCode = null; // リストの下(次の銘柄, idx+1)
 function updateStockNav(code) {
@@ -1576,6 +1577,35 @@ function updateStockNav(code) {
   const idx = codes.indexOf(code);
   stockNavPrevCode = idx > 0 ? codes[idx - 1] : null;
   stockNavNextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
+  // ＜=リストの上へ(前の銘柄) / ＞=リストの下へ(次の銘柄)。参照先が無い側は
+  // 右詰めにならないよう、スペースを保ったまま不可視化(is-empty)する。
+  const leftBtn = document.getElementById("stock-nav-next");  // ＜ = 前の銘柄(idx-1)
+  const rightBtn = document.getElementById("stock-nav-prev"); // ＞ = 次の銘柄(idx+1)
+  const set = (btn, target) => {
+    if (!btn) return;
+    btn.dataset.target = target || "";
+    btn.classList.toggle("is-empty", !target);
+  };
+  set(leftBtn, stockNavPrevCode);
+  set(rightBtn, stockNavNextCode);
+}
+
+// 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。
+function initStockNav() {
+  const wire = (id) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.target;
+      if (!target) return;
+      // ＞(stock-nav-prev)=次の銘柄(右から) / ＜(stock-nav-next)=前の銘柄(左から)
+      stockNavDir = id === "stock-nav-prev" ? 1 : -1;
+      window.location.hash = `stock/${encodeURIComponent(target)}`;
+    });
+  };
+  wire("stock-nav-next");
+  wire("stock-nav-prev");
 }
 
 // ソートボタンのラベルを、今のティアの並び替えキーに合わせて更新。
@@ -1880,6 +1910,7 @@ async function initStockPage(codeOverride) {
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
   if (stock) renderStockMeta(stock);
   setupYahooFinanceLink(code);
+  initStockNav();
   updateStockNav(code);
   setupStockPanels();
   renderStockSummary(stock);
@@ -1948,10 +1979,67 @@ function updateStockActiveTab(panelName) {
   }
 }
 
+// 直近の銘柄遷移方向。次の描画時の切替アニメの向きに使う(1=次/-1=前/0=直接遷移)。
+let stockNavDir = 0;
+
 // 前後銘柄へハッシュ遷移する共通ヘルパ。dir<0=次(リストの下/idx+1)、dir>0=前(上/idx-1)。
+// アニメ向きは「次=右から(1)」「前=左から(-1)」で覚えておく。
 function navigateStock(dir) {
   const target = dir < 0 ? stockNavNextCode : stockNavPrevCode;
-  if (target) window.location.hash = `stock/${encodeURIComponent(target)}`;
+  if (!target) return;
+  stockNavDir = dir < 0 ? 1 : -1;
+  window.location.hash = `stock/${encodeURIComponent(target)}`;
+}
+
+// パネル切替のスライドインを再生する共通ヘルパ。dir>0=次(右から)/dir<0=前(左から)。
+// 同方向連続でも必ず再生されるよう reflow を強制してからクラスを付ける。
+function playPanelSlide(container, dir) {
+  if (!container || !dir) return;
+  const cls = dir > 0 ? "slide-next" : "slide-prev";
+  container.classList.remove("slide-next", "slide-prev");
+  void container.offsetWidth;
+  container.classList.add(cls);
+  container.addEventListener("animationend", () => container.classList.remove(cls), { once: true });
+}
+
+// 横スワイプ(タッチ/ペンのみ)を検出して onSwipe(dir) を呼ぶ共通配線。左スワイプ=次
+// (dir=+1)、右スワイプ=前(dir=-1)。縦優勢/移動量不足は無視。マウスは対象外
+// (デスクトップは各ビューのタブ/キーで操作)。縦スクロール中は pointercancel で誤爆しない。
+function wireLoopSwipe(el, onSwipe) {
+  const TH = 55;            // 切替とみなす最小横移動量(px)
+  const H_DOMINANCE = 1.4;  // 横 > 縦*係数 でないと縦スクロール扱いで無視
+  let activeId = null;
+  let sx = 0;
+  let sy = 0;
+  el.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (activeId !== null || e.pointerType === "mouse") return;
+      activeId = e.pointerId;
+      sx = e.clientX;
+      sy = e.clientY;
+    },
+    true
+  );
+  el.addEventListener(
+    "pointerup",
+    (e) => {
+      if (activeId === null || e.pointerId !== activeId) return;
+      activeId = null;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+      if (Math.abs(dx) < TH || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
+      onSwipe(dx < 0 ? 1 : -1);
+    },
+    true
+  );
+  el.addEventListener(
+    "pointercancel",
+    (e) => {
+      if (e.pointerId === activeId) activeId = null;
+    },
+    true
+  );
 }
 
 // パネル全体の横スワイプで前後の銘柄へ遷移する(初回のみ配線)。左スワイプ=次の銘柄
@@ -2019,6 +2107,13 @@ function setupStockPanels() {
   const tabItems = Array.from(tabs.querySelectorAll(".stock-tab"));
   const hasPanel = tabItems.some((b) => b.dataset.panel === currentStockPanel);
   updateStockActiveTab(hasPanel ? currentStockPanel : "summary");
+
+  // 前後ナビ(スワイプ/＜＞/矢印キー)で来たときだけ、ほんの一瞬スライドインさせて
+  // 銘柄が切り替わったことを示す。直接遷移(stockNavDir=0)ではアニメしない。
+  if (stockNavDir !== 0) {
+    playPanelSlide(panels, stockNavDir);
+    stockNavDir = 0;
+  }
 
   if (panels.dataset.wired) return;
   panels.dataset.wired = "1";
@@ -2170,10 +2265,9 @@ function initSettingsSubtabs() {
   });
 }
 
-// 市況画面(市況データ/市況分析)のタブ切替。initListView と同じパターン
-// (パネルは横スワイプせず、タブクリックのみで切替。初期表示は既にactiveな
-// タブを尊重)。initDashboard はファンダ保存後などに再実行されうるため、
-// dataset.wired でイベント登録の重複を防ぐ。
+// 市況画面(市況データ/市況分析)のタブ切替。タブのタップ/スライドに加え、
+// パネル全体の横スワイプでもループ切替(端でラップ)できる。切替時はスライドイン。
+// initDashboard はファンダ保存後などに再実行されうるため、dataset.wired で重複防止。
 function initMarketTabs() {
   const panels = document.getElementById("market-panels");
   const tabs = document.getElementById("market-tabs");
@@ -2202,6 +2296,18 @@ function initMarketTabs() {
     setActive(btn.dataset.panel);
   });
   wireTabSlide(tabs, ".market-tab", (btn) => setActive(btn.dataset.panel));
+
+  // 横スワイプでループ切替(2枚なので左右どちらでも相手側へ)。dir>0=次,dir<0=前。
+  wireLoopSwipe(panels, (dir) => {
+    const names = Array.from(tabs.querySelectorAll(".market-tab")).map((b) => b.dataset.panel);
+    if (!names.length) return;
+    const cur = names.findIndex(
+      (n) => tabs.querySelector(`.market-tab[data-panel="${n}"]`).classList.contains("active")
+    );
+    const next = ((cur < 0 ? 0 : cur) + dir + names.length) % names.length;
+    setActive(names[next]);
+    playPanelSlide(panels, dir);
+  });
 }
 
 // ルールベース日本語サマリー (src/report/summary.py が生成した
@@ -3829,10 +3935,29 @@ function renderCharts(chart) {
     });
   }
 
+  // 現在の期間設定(setTimeframe に渡された tf)を覚えておく。リサイズで
+  // バー間隔が再計算されると表示本数がずれるため、resizeHandler から
+  // applyVisibleRange() を呼び直して初期表示本数(既定=1ヶ月/22営業日)を保つ。
+  let currentTfVal = String(DEFAULT_DAILY_BARS);
+
+  // currentTfVal に基づいて全チャートの可視範囲を適用する。月足は全期間(fitContent)、
+  // 日足は最新バーを右端に固定してそこから指定本数だけ遡って表示。
+  function applyVisibleRange() {
+    if (currentTfVal === "M") {
+      for (const c of charts) c.timeScale().fitContent();
+    } else {
+      const bars = parseInt(currentTfVal, 10) || DEFAULT_DAILY_BARS;
+      const n = chart.candles.length;
+      const range = { from: Math.max(0, n - bars), to: n };
+      for (const c of charts) c.timeScale().setVisibleLogicalRange(range);
+    }
+  }
+
   // tf: "M" (月足・全期間) or 表示する日足本数 (数値文字列)。
   function setTimeframe(tf) {
     const isMonthly = tf === "M";
     currentTf = isMonthly ? "M" : "D";
+    currentTfVal = tf;
     candleSeries.setData(isMonthly ? monthly.candles : chart.candles);
     volSeries.setData(isMonthly ? monthly.volume : dailyVolume);
     if (rsSeries) rsSeries.setData(isMonthly ? monthly.rs_line : chart.rs_line);
@@ -3845,15 +3970,7 @@ function renderCharts(chart) {
     // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。描画可否は
     // primitiveのisVisible(vcpOn && currentTf==="D")が判定するので再描画を促すだけ。
     if (vcpPrimitive) vcpPrimitive.requestUpdate();
-    if (isMonthly) {
-      for (const c of charts) c.timeScale().fitContent();
-    } else {
-      // 最新バーを右端に固定し、そこから指定本数だけ遡って表示。
-      const bars = parseInt(tf, 10) || DEFAULT_DAILY_BARS;
-      const n = chart.candles.length;
-      const range = { from: Math.max(0, n - bars), to: n };
-      for (const c of charts) c.timeScale().setVisibleLogicalRange(range);
-    }
+    applyVisibleRange();
     updateLegend(latestBar());
   }
 
@@ -3895,6 +4012,10 @@ function renderCharts(chart) {
     for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
       c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     }
+    // 幅が変わるとバー間隔が再計算され表示本数がずれるため、可視範囲を再適用して
+    // 初期表示(1ヶ月=22営業日)を保つ。特にチャートタブが非表示→表示になった直後
+    // (0幅で生成→実寸へリサイズ)で効く。
+    applyVisibleRange();
     drawAxis();
   };
   window.addEventListener("resize", resizeHandler);

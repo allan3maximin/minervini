@@ -1197,7 +1197,8 @@ a.nav-btn:hover { border-color: var(--link); }
   margin: 14px 0 10px;
 }
 
-/* ヒートマップ: 詳細/簡易を横スワイプで切替、トグルは画面下部の固定バーへ。 */
+/* ヒートマップ: 詳細/簡易を横スワイプ(ループ)で切替、トグルは画面下部の固定バーへ。
+   パネルは単一表示(.active のみ display)。横スワイプは前後ビューへのループ切替に割当。 */
 .hm-view { display: flex; flex-direction: column; }
 .hm-view[hidden] { display: none; }
 
@@ -1207,23 +1208,22 @@ a.nav-btn:hover { border-color: var(--link); }
 .hm-head { flex: 0 0 auto; }
 .hm-head h2 { margin: 0 0 4px; }
 .hm-panels {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
   margin-top: 8px;
+  /* 横スワイプ(詳細/簡易のループ切替)をpointerで拾う。treemapは縦スクロール不要。 */
+  touch-action: pan-y;
 }
-.hm-panels::-webkit-scrollbar { display: none; }
 .hm-panel {
-  flex: 0 0 100%;
+  display: none;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   box-sizing: border-box;
-  scroll-snap-align: start;
 }
+.hm-panel.active { display: block; }
 .hm-bottom-bar {
   flex: 0 0 auto;
   display: flex;
@@ -1486,10 +1486,34 @@ a.nav-btn:hover { border-color: var(--link); }
   max-width: 100%;
   margin: 8px auto 2px;
 }
-/* タブ群(ドック本体)をメインDockと同じ幅に固定。＜＞ナビボタンは廃止し、
-   前後銘柄の切替はパネル全体の横スワイプ(wireStockSwipe)に統一した。
+/* タブ群(ドック本体)だけをメインDockと同じ幅に固定。＜＞はこの外側に並ぶ。
+   前後銘柄の切替は＜＞ボタンとパネル全体の横スワイプ(wireStockSwipe)の両方で可能。
    各タブは flex:1 1 0 なので300px内で均等割りされ、メインDockと横幅が揃う。 */
 .stock-tabs-bar .stock-tabs { margin: 0; width: var(--dock-w); max-width: 100%; flex: 0 0 auto; }
+.stock-nav-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: rgba(19, 23, 32, 0.88);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: color 0.18s, opacity 0.18s;
+}
+.stock-nav-btn:active { color: var(--text); }
+.stock-nav-btn:disabled { opacity: 0.3; cursor: default; }
+/* 参照先が無いナビは、右詰めにならないようスペースを保ったまま不可視化する
+   (display:none だと片方欠けたとき残りが端に寄ってしまうため) */
+.stock-nav-btn.is-empty { visibility: hidden; }
+.stock-nav-btn .bi { line-height: 1; }
 .stock-tab, .list-tab, .market-tab {
   flex: 1 0 auto;
   min-height: 30px;
@@ -1556,8 +1580,22 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 2px 2px 8px;
+  /* 縦スクロール中でも横スワイプ(前後銘柄切替)をpointerイベントで拾えるよう、
+     縦パンだけをブラウザ任せにする。これでサマリー等でも横判定が効きやすい。 */
+  touch-action: pan-y;
 }
 .stock-panel.active { display: block; }
+/* パネル切替時のスライドイン(約150ms)。個別株の前後銘柄・市況データ/分析・
+   セクター詳細/簡易で共通利用する。slide-next=次(右から) / slide-prev=前(左から)。 */
+@keyframes panel-slide-next { from { transform: translateX(22px); opacity: 0.35; } to { transform: none; opacity: 1; } }
+@keyframes panel-slide-prev { from { transform: translateX(-22px); opacity: 0.35; } to { transform: none; opacity: 1; } }
+.stock-panels.slide-next, .market-panels.slide-next, .hm-panels.slide-next { animation: panel-slide-next 150ms ease-out; }
+.stock-panels.slide-prev, .market-panels.slide-prev, .hm-panels.slide-prev { animation: panel-slide-prev 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .stock-panels.slide-next, .stock-panels.slide-prev,
+  .market-panels.slide-next, .market-panels.slide-prev,
+  .hm-panels.slide-next, .hm-panels.slide-prev { animation: none; }
+}
 /* グラフパネル: 株価/出来高/RSを1枚のカード(.chart-stack)に統合し、
    flex比率(5:2:2)で残り高さにぴったり配分する(=縦スクロール無し)。
    チャートインスタンスは3つ別々(JSがclientHeightで生成)。 */
@@ -1701,6 +1739,8 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-x: hidden;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
+  /* 縦スクロール中でも横スワイプ(データ/分析のループ切替)を拾えるよう縦パンのみ委譲。 */
+  touch-action: pan-y;
 }
 .market-panel.active { display: block; }
 

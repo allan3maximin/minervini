@@ -67,38 +67,32 @@ async function initHeatmap() {
       if (typeof wireTabSlide === "function") wireTabSlide(toggle, "button[data-period]", setPeriod);
     }
 
-    // 詳細/簡易は横スワイプ(scroll-snap)で切替。トグルはそのパネルへスクロール
-    // するショートカット。パネルのスクロール位置とトグルの選択を双方向同期。
+    // 詳細/簡易は単一表示(.active のみ)。トグルのクリック/スライドで切替でき、
+    // さらにパネル全体の横スワイプでもループ切替(端でラップ)できる。
     const viewToggle = document.getElementById("hm-view-toggle");
     const panels = document.getElementById("hm-panels");
     if (viewToggle && panels) {
       viewToggle.addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-view]");
         if (!btn) return;
-        scrollToHmView(btn.dataset.view);
+        setHmView(btn.dataset.view);
       });
       // 詳細/簡易もスライド切替対応(押したまま滑らせて離す)。
       if (typeof wireTabSlide === "function") {
-        wireTabSlide(viewToggle, "button[data-view]", (btn) => scrollToHmView(btn.dataset.view));
+        wireTabSlide(viewToggle, "button[data-view]", (btn) => setHmView(btn.dataset.view));
       }
 
-      let raf = 0;
-      panels.addEventListener(
-        "scroll",
-        () => {
-          if (raf) return;
-          raf = requestAnimationFrame(() => {
-            raf = 0;
-            const idx = Math.round(panels.scrollLeft / Math.max(1, panels.clientWidth));
-            const el = panels.querySelectorAll(".hm-panel")[idx];
-            if (el && el.dataset.view !== currentView) {
-              currentView = el.dataset.view;
-              updateHmViewToggle();
-            }
-          });
-        },
-        { passive: true }
-      );
+      // 横スワイプでループ切替(2枚なので左右どちらでも相手側へ)。dir>0=次,dir<0=前。
+      if (typeof wireLoopSwipe === "function") {
+        wireLoopSwipe(panels, (dir) => {
+          const list = Array.from(panels.querySelectorAll(".hm-panel"));
+          if (!list.length) return;
+          let cur = list.findIndex((el) => el.dataset.view === currentView);
+          if (cur < 0) cur = 0;
+          const next = list[(cur + dir + list.length) % list.length];
+          setHmView(next.dataset.view, dir);
+        });
+      }
     }
 
     let resizeTimer = null;
@@ -106,7 +100,9 @@ async function initHeatmap() {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         // 幅が変わっていなければ(=スクロールに伴う高さ変化だけなら)再描画しない。
-        const c = document.getElementById("hm-container-detail");
+        // 詳細パネルは非アクティブ時 display:none で幅0になるため、常に見える
+        // hm-panels の幅で判定する。
+        const c = document.getElementById("hm-panels");
         const w = c ? c.clientWidth : 0;
         if (w && w !== lastRenderWidth) render();
       }, 150);
@@ -117,8 +113,8 @@ async function initHeatmap() {
 
   zoomedSector = null; // タブ再表示時は俯瞰(全セクター)から始める
   render();
-  // 表示のたびに現在ビューのパネルへ位置を合わせる(非表示中はscrollLeftが0に戻るため)。
-  requestAnimationFrame(() => scrollToHmView(currentView, false));
+  // 現在ビューのパネルをアクティブ表示にする(アニメ無し)。
+  setHmView(currentView);
 }
 
 // トグルの選択表示を currentView に合わせる。
@@ -128,15 +124,17 @@ function updateHmViewToggle() {
   viewToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === currentView));
 }
 
-// 指定ビューのパネルへ横スクロール。smooth=false なら即時(初期表示用)。
-function scrollToHmView(view, smooth = true) {
+// 指定ビューのパネルを単一表示する。dir を渡すとその向きにスライドインさせる
+// (dir>0=次/右から, dir<0=前/左から, 省略時=アニメ無し)。
+function setHmView(view, dir = 0) {
   const panels = document.getElementById("hm-panels");
   if (!panels) return;
   const list = Array.from(panels.querySelectorAll(".hm-panel"));
   const idx = Math.max(0, list.findIndex((el) => el.dataset.view === view));
   currentView = list[idx] ? list[idx].dataset.view : "detail";
+  list.forEach((el) => el.classList.toggle("active", el.dataset.view === currentView));
   updateHmViewToggle();
-  panels.scrollTo({ left: idx * panels.clientWidth, behavior: smooth ? "smooth" : "auto" });
+  if (dir && typeof playPanelSlide === "function") playPanelSlide(panels, dir);
 }
 
 // ヒートマップ描画高さ: app shell化により #hm-panels がflexで残り高さ
@@ -253,7 +251,10 @@ function render() {
   detailC.innerHTML = "";
   if (simpleC) simpleC.innerHTML = "";
 
-  const W = detailC.clientWidth;
+  // 単一表示化により非アクティブなパネル(=詳細)の幅が0になり得るため、常に見える
+  // 親コンテナ(hm-panels)の幅を基準にする。無ければ detailC 実測へフォールバック。
+  const panelsEl = document.getElementById("hm-panels");
+  const W = (panelsEl && panelsEl.clientWidth) || detailC.clientWidth;
   lastRenderWidth = W; // resize時の幅変化判定用に記録
   // 下部トグルバー + ドックを避けた実効高さ(縦スクロール不要)。
   const H = heatmapHeight();
