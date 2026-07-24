@@ -21,6 +21,36 @@
 
 ---
 
+## 2026-07-24 (108): passkey OFF + 判定妥当性のLLM監査 (生データ↔解釈のローカルdump機構)
+
+ユーザー要望「機械的なミネルヴィニ判定が実際に妥当かLLMとして評価してほしい。passkeyをOFFにし、
+比較用の内部データ(実データ)と解釈データをローカルに落とす仕組みを作る。できる部分はSonnetに委譲」。
+
+- **passkey OFF**: `docs/assets/config.js` の `passkeyAuthEnabled` を `true→false`。コミット `ce677c2e`
+  (親=origin/master `870a8559`、+1でFF可)。※このフラグは解錠/設定UIの表示制御のみで、
+  データ復号ゲート(report.jsonが暗号化されているか)とは独立。sandbox で `.git/objects` の
+  unlink 不可のため plumbing(hash-object→temp GIT_INDEX_FILE で read-tree origin/master→
+  update-index config.js→write-tree→commit-tree→`.git/refs/heads/master` 直接上書き)で作成。
+  **ユーザーは自分のMacで push すること**。
+- **dump機構** `scripts/dump_raw_vs_interp.py` (新規): 画面・復号鍵に頼らず、平文キャッシュ
+  (data/prices/*.parquet 1000件, fundamentals_auto.json)から**本番と同一の判定関数**を呼んで再計算。
+  `prices_mod.update_prices` をキャッシュ専用にモンキーパッチ(ネット無し)。銘柄ごとに
+  (A)生データ(close/MA/slope/RS/52w高安/VCP収縮/ファンダ四半期)と(B)機械判定(8条件フラグ/
+  VCP/status/tier/スコア/fund_verdict)を並べて `data/analysis_dump/{full,sample,meta}.json` に出力。
+  `--codes` で個別指定可。**忠実性ゲート**: 再計算8条件を `trend_template_debug.json` と全件照合
+  → 992/992=100%一致(本番忠実を担保)。出力は data/ 配下のバッチ出力なので**コミットしない**。
+- **監査結果** (`data/analysis_dump/EVALUATION_REPORT.md`): サンプル33銘柄(候補3+監視 random30)。
+  8条件の算術は33/33正しく、機械は「ルールを正しく計算」できている。妥当性の懸念は上位レイヤーに集中:
+  (1) VCP収縮に**最低継続日数が無く単日スウィングを誤検知**(サンプルVCP22銘柄の77%が非単調)、
+  (2) ファンダは`latest_yoy_growth`が**直近1四半期のみで一過性損益に歪む**(銀行8393等 前3Q好調→Q4引当でfail)、
+  (3) 閾値の甘さ(安値マージン25%・MA200上向き21日下限)とRSの母集団依存、
+  (4) 候補3件全fund=fail/MA50過熱乖離/ゾンビピボット等クロス整合の誤解リスク。
+  ※Sonnet監査の「7282/6448は強い株の誤排除」は裏取りで訂正: 両者とも**売上YoY<20%**で正しくfail。
+  改善は既存判定関数の外側に足す形で対応可(コア8条件には不要)。
+- **委譲**: コード探索・dumpスクリプト実装・33銘柄評価はSonnetサブエージェントに委譲しトークン節約。
+
+---
+
 ## 2026-07-23 (107): VCP描画をlineSeries→Series Primitiveに変更(同一足2点の消失を解消)
 
 **背景**: ユーザーがJoshin(8173)で「折れ線は1収縮ぶんに見えるのに footprint は
