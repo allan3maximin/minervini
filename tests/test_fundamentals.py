@@ -169,23 +169,33 @@ def test_fund_verdict_pass_full_size():
     assert v == {"fund_verdict": "pass", "fund_multiplier": 1.0}
 
 
-def test_fund_verdict_fail_when_any_metric_below_threshold():
-    # EPS不合格(片方でも明確未達なら取り止め)
+def test_fund_verdict_fail_only_when_yoy_negative():
+    # 2026-07-25改定: fail はYoYマイナス(減益/減収)時のみ。
+    # EPS減益
     assert fund_verdict_and_multiplier(-29.8, 25.0, CONFIG) == {
         "fund_verdict": "fail", "fund_multiplier": 0.0}
-    # 売上不合格
-    assert fund_verdict_and_multiplier(30.0, 5.0, CONFIG) == {
+    # 売上減収
+    assert fund_verdict_and_multiplier(30.0, -1.0, CONFIG) == {
         "fund_verdict": "fail", "fund_multiplier": 0.0}
-    # 片方計算不能でも、計算できる方が未達なら fail
+    # 片方計算不能でも、計算できる方がマイナスなら fail
     assert fund_verdict_and_multiplier(-10.0, None, CONFIG) == {
         "fund_verdict": "fail", "fund_multiplier": 0.0}
+
+
+def test_fund_verdict_positive_below_threshold_is_unknown():
+    # プラス成長だが confirmed 閾値未満 -> fail ではなく unknown(半サイズ)
+    assert fund_verdict_and_multiplier(24.0, 18.0, CONFIG) == {
+        "fund_verdict": "unknown", "fund_multiplier": 0.5}
+    # 片方だけ閾値以上でも、他方がプラス未満なら strong ではない -> unknown
+    assert fund_verdict_and_multiplier(30.0, 5.0, CONFIG) == {
+        "fund_verdict": "unknown", "fund_multiplier": 0.5}
 
 
 def test_fund_verdict_unknown_half_size():
     # 両方計算不能(データ無し等) -> 不明はハーフ(不明≠悪)
     assert fund_verdict_and_multiplier(None, None, CONFIG) == {
         "fund_verdict": "unknown", "fund_multiplier": 0.5}
-    # 片方が合格水準・片方が計算不能 -> 未達確定ではないので unknown
+    # 片方が合格水準・片方が計算不能 -> pass確定ではないので unknown
     assert fund_verdict_and_multiplier(30.0, None, CONFIG) == {
         "fund_verdict": "unknown", "fund_multiplier": 0.5}
 

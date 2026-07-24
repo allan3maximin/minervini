@@ -334,18 +334,31 @@ def fund_verdict_and_multiplier(
     confirmed_rev_yoy_min) を fund_coverage_tier と共用し、合否ロジックの
     二重管理を避ける。
 
-    - pass    (1.0): EPS YoY・売上YoY とも計算可能かつ両方閾値以上 → フルサイズ
-    - fail    (0.0): 計算可能な指標のどちらかが閾値未達 → エントリー取り止め
-    - unknown (0.5): 閾値未達の指標が無いが、どちらかが計算不能
-                     (データ無し/前年比較不能) → ハーフサイズ(不明≠悪)
+    - fail    (0.0): EPS YoY か 売上YoY のどちらかが前年同期比マイナス
+                     (減益/減収) → エントリー取り止め
+    - pass    (1.0): 両方計算可能かつ両方 confirmed 閾値以上 → フルサイズ
+    - unknown (0.5): 上記以外。プラス成長だが閾値未満、またはどちらかが
+                     計算不能(データ無し/前年比較不能) → ハーフサイズ
+                     (弱い≠悪、不明≠悪)
+
+    2026-07-25改定: fail をYoYマイナス時のみに限定。従来は confirmed 閾値
+    (EPS+25%/売上+20%)未満を一律 fail(0.0=エントリー封殺)にしていたが、
+    プラス成長銘柄に不合格の烙印を押すのは過剰なため、プラス圏の弱め成長は
+    unknown(0.5=ハーフ)へ緩和した。confirmed 閾値は pass(フルサイズ)と
+    ティアバッジの基準として引き続き使用する。
     """
     config = config or load_config()
     fcfg = config["fundamentals"]
-    eps_fail = eps_yoy is not None and eps_yoy < fcfg["confirmed_eps_yoy_min"]
-    rev_fail = rev_yoy is not None and rev_yoy < fcfg["confirmed_rev_yoy_min"]
-    if eps_fail or rev_fail:
+    eps_neg = eps_yoy is not None and eps_yoy < 0
+    rev_neg = rev_yoy is not None and rev_yoy < 0
+    if eps_neg or rev_neg:
         return {"fund_verdict": "fail", "fund_multiplier": 0.0}
-    if eps_yoy is not None and rev_yoy is not None:
+    strong = (
+        eps_yoy is not None and rev_yoy is not None
+        and eps_yoy >= fcfg["confirmed_eps_yoy_min"]
+        and rev_yoy >= fcfg["confirmed_rev_yoy_min"]
+    )
+    if strong:
         return {"fund_verdict": "pass", "fund_multiplier": 1.0}
     return {"fund_verdict": "unknown", "fund_multiplier": 0.5}
 
