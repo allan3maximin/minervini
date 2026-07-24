@@ -441,6 +441,45 @@ let pendingFund = {};
 // initDashboard(ダッシュボード再訪)が常に再fetchして上書きする。
 let reportCache = null;
 
+// 個別株チャートJSONのメモリキャッシュ(code→Promise)。前後1銘柄を先読みして
+// スワイプ/＜＞での銘柄切替を待ち時間なく表示するため。同一コードの多重fetchも防ぐ。
+// データは日次更新なのでTTLは持たず(セッション内は据え置き)、リロードで最新化する。
+const chartCache = new Map();
+const CHART_CACHE_MAX = 12; // メモリ肥大を防ぐ上限(超えたら古い順=Map挿入順に破棄)
+
+// チャートJSONを取得(キャッシュ優先)。失敗(null)はキャッシュに残さず再取得できるようにする。
+function loadChart(code) {
+  if (!code) return Promise.resolve(null);
+  const hit = chartCache.get(code);
+  if (hit) {
+    // LRU: 参照したものを末尾へ回し、直近利用ぶんが上限で消えにくくする。
+    chartCache.delete(code);
+    chartCache.set(code, hit);
+    return hit;
+  }
+  const p = window.MinerviniData
+    .fetchJson(`data/charts/${encodeURIComponent(code)}.json`, { optional: true })
+    .catch(() => null);
+  chartCache.set(code, p);
+  // 取得失敗(null)は据え置かず破棄して、次回アクセスで再取得できるようにする。
+  p.then((v) => {
+    if (v == null) chartCache.delete(code);
+  });
+  while (chartCache.size > CHART_CACHE_MAX) {
+    const oldest = chartCache.keys().next().value;
+    chartCache.delete(oldest);
+  }
+  return p;
+}
+
+// 現在銘柄の前後(idx-1/idx+1)のチャートを先読みしてキャッシュへ。fire-and-forget。
+// updateStockNav(code) 後に呼ぶこと(stockNavPrevCode/NextCode が確定している必要がある)。
+function prefetchAdjacentCharts() {
+  [stockNavPrevCode, stockNavNextCode].forEach((c) => {
+    if (c) loadChart(c);
+  });
+}
+
 async function initDashboard() {
   if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
     hidePasskeyAuthUi();
@@ -1891,20 +1930,19 @@ async function initStockPage(codeOverride) {
     if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
     return;
   }
-  if (titleEl) titleEl.textContent = "読み込み中...";
+  // 先読み済み(前後銘柄をprefetch)なら即描画できるので「読み込み中...」の点滅を出さない。
+  if (titleEl && !chartCache.has(code)) titleEl.textContent = "読み込み中...";
 
   // report.jsonはダッシュボード表示時のキャッシュ(reportCache)を再利用し、
-  // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。
+  // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。チャートは
+  // loadChart 経由でメモリキャッシュ(前後銘柄の先読み結果)を再利用する。
   const reportPromise = reportCache
     ? Promise.resolve(reportCache.data)
     : window.MinerviniData.fetchJson("data/report.json").then((r) => {
         reportCache = { data: r, fetchedAt: Date.now() };
         return r;
       });
-  const [report, chart] = await Promise.all([
-    reportPromise,
-    window.MinerviniData.fetchJson(`data/charts/${encodeURIComponent(code)}.json`, { optional: true }),
-  ]);
+  const [report, chart] = await Promise.all([reportPromise, loadChart(code)]);
   const stock = report.stocks.find((s) => s.code === code);
 
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
@@ -1912,6 +1950,7 @@ async function initStockPage(codeOverride) {
   setupYahooFinanceLink(code);
   initStockNav();
   updateStockNav(code);
+  prefetchAdjacentCharts(); // 前後1銘柄のチャートを先読みして次のスワイプ/＜＞を即応答に
   setupStockPanels();
   renderStockSummary(stock);
   if (stock) renderStockFundamentals(code, stock.name, report.generated_at);

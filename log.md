@@ -21,6 +21,23 @@
 
 ---
 
+## 2026-07-25 (115): 個別株チャートの前後1銘柄プリフェッチ(シームレス切替)
+
+`docs/assets/app.js`: 個別株の銘柄切替(スワイプ/＜＞/矢印)を待ち時間なく表示するため、
+チャートJSONのメモリキャッシュ+前後1銘柄の先読みを追加。
+
+- `chartCache`(Map: code→Promise, 上限12のLRU)と `loadChart(code)`(キャッシュ優先取得。
+  取得失敗=nullはキャッシュに残さず再取得可能に)を新設。
+- `prefetchAdjacentCharts()`: `stockNavPrevCode`/`stockNavNextCode` のチャートを
+  fire-and-forgetで先読み。`initStockPage` の `updateStockNav(code)` 直後に呼ぶ。
+- `initStockPage` のチャート取得を `loadChart(code)` に置換。先読み済み(`chartCache.has`)なら
+  「読み込み中...」の点滅を出さない。
+- 注: `report.json` は従来どおり `reportCache` を再利用。日次更新はリロードで最新化。
+
+検証: `node --check app.js` 通過。
+
+---
+
 ## 2026-07-25 (114): ＜＞ボタン復活・切替アニメ・グラフ初期表示修正・市況/セクターもスワイプ切替
 
 113 の続き。ユーザー要望5点を対応。
