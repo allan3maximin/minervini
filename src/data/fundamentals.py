@@ -33,6 +33,50 @@ PUBLIC_JSON_PATH = REPO_ROOT / "docs" / "data" / "fundamentals_public.json"
 CSV_COLUMNS = ["code", "fiscal_quarter", "eps", "revenue", "monthly_yoy", "checked_date"]
 _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
 
+# 期中株式分割による単四半期EPS導出バグの検出しきい値。
+# YTD差分でQ4単独EPSを出すとき「通期EPS(分割後・株数増でEPS縮小) − 9M累計
+# (分割前)」となり巨大マイナスが捏造される。revenueは加法的で分割に無関係
+# なので正常のまま → EPS単独が深マイナスなのにrevenueが正常、という非対称が
+# 分割artifactの検出手掛かり。導出EPSの絶対値が引いた9M累計の frac 倍を超える
+# 異常な深さなら分割artifactとみなす(実測 6590:0.75 / 8393:0.56 / 8386 で発火、
+# 通常の小幅赤字は通過)。分割比の外部データ無しで自己完結して判定できる。
+SPLIT_ARTIFACT_EPS_FRAC = 0.5
+
+
+def is_split_artifact_eps(
+    derived_eps,
+    ytd_eps,
+    prior_ytd_eps,
+    derived_rev,
+    frac: float = SPLIT_ARTIFACT_EPS_FRAC,
+) -> bool:
+    """YTD差分で導出した単四半期EPSが期中株式分割の artifact(捏造された深い
+    マイナス)かどうかを判定する。
+
+    derived_eps: 導出した単四半期EPS(= ytd_eps - prior_ytd_eps)。
+    ytd_eps: 当該四半期までの累計EPS(Q4なら通期EPS。分割後の株数基準)。
+    prior_ytd_eps: 差し引いた直前累計EPS(Q4なら9M累計。分割前の株数基準)。
+    derived_rev: 同時に導出した単四半期revenue(分割に無関係=正常なら非負)。
+
+    True の条件(すべて満たす):
+      - derived_eps が負(単四半期が赤字に見える)
+      - ytd_eps が正(通期は黒字 → 単Qだけ深赤字は不自然)
+      - prior_ytd_eps が正(9M累計も黒字だった)
+      - |derived_eps| > prior_ytd_eps * frac(9M黒字を大きく食い潰す異常な深さ)
+      - derived_rev が非負(revenueは正常 → EPSだけ壊れる分割の非対称)
+    """
+    return (
+        derived_eps is not None
+        and derived_eps < 0
+        and ytd_eps is not None
+        and ytd_eps > 0
+        and prior_ytd_eps is not None
+        and prior_ytd_eps > 0
+        and abs(derived_eps) > prior_ytd_eps * frac
+        and derived_rev is not None
+        and derived_rev >= 0
+    )
+
 
 def load_auto_store(path=None) -> dict:
     """data/fundamentals_auto.json を読む。無い・壊れている場合は空dict

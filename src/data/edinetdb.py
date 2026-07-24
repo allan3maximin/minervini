@@ -48,7 +48,7 @@ from email.utils import parsedate_to_datetime
 import requests
 
 from src.config import REPO_ROOT, load_config
-from src.data.fundamentals import load_auto_store
+from src.data.fundamentals import is_split_artifact_eps, load_auto_store
 from src.utils_io import atomic_write_json, safe_load_json
 
 STATE_PATH = REPO_ROOT / "data" / "edinetdb_state.json"
@@ -433,6 +433,7 @@ def derive_with_base(point: dict, base_quarters: list[dict]) -> dict | None:
     by_label = {q["fiscal_quarter"]: q for q in base_quarters if q.get("fiscal_quarter")}
 
     result = {"fiscal_quarter": label, "eps": None, "revenue": None}
+    prior_totals = {"eps": None, "revenue": None}
     for key in ("eps", "revenue"):
         ytd = point.get(key)
         if ytd is None:
@@ -450,6 +451,13 @@ def derive_with_base(point: dict, base_quarters: list[dict]) -> dict | None:
             prior_total += prior[key]
         if complete:
             result[key] = round(ytd - prior_total, 4)
+            prior_totals[key] = prior_total
+
+    # 期中株式分割の artifact(通期EPS[分割後] − 9M累計[分割前] = 捏造の深マイナス)
+    # を検出したらEPSだけ破棄する。revenueは分割に無関係で正常なので残す
+    # → 下流の latest_yoy_growth が直前のクリーンな四半期にフォールバックする。
+    if is_split_artifact_eps(result["eps"], point.get("eps"), prior_totals["eps"], result["revenue"]):
+        result["eps"] = None
 
     if result["eps"] is None and result["revenue"] is None:
         return None

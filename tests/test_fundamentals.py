@@ -13,11 +13,37 @@ from src.data.fundamentals import (
     fund_coverage_tier,
     fund_verdict_and_multiplier,
     get_fundamentals_for_code,
+    is_split_artifact_eps,
     load_fundamentals_csv,
     merge_fundamentals,
     score_stock,
     write_public_json,
 )
+
+
+# ---------------------------------------------------------------------------
+# is_split_artifact_eps -- 期中株式分割による単四半期EPS導出バグの検出
+# ---------------------------------------------------------------------------
+
+def test_split_artifact_detects_real_cases():
+    # 6590芝浦 (通期170.28 − 9M 674.72 = -504.44)
+    assert is_split_artifact_eps(-504.44, 170.28, 674.72, 1300.0)
+    # 8393宮崎銀 (通期167.32逆算 − 9M ≈616.85 = -449.53)
+    assert is_split_artifact_eps(-449.53, 167.32, 616.85, 5000.0)
+
+
+def test_split_artifact_passes_modest_negative():
+    # 小幅赤字四半期(9Mの半分未満)は artifact ではない
+    assert not is_split_artifact_eps(-5.0, 90.0, 95.0, 1300.0)
+
+
+def test_split_artifact_requires_positive_annual_and_normal_revenue():
+    # 通期が赤字なら単Q赤字は自然 -> artifact扱いしない
+    assert not is_split_artifact_eps(-504.44, -10.0, 674.72, 1300.0)
+    # revenueまで負なら分割の非対称ではない -> artifact扱いしない
+    assert not is_split_artifact_eps(-504.44, 170.28, 674.72, -100.0)
+    # 正のEPSは対象外
+    assert not is_split_artifact_eps(50.0, 170.28, 120.0, 1300.0)
 
 CONFIG = load_config()
 

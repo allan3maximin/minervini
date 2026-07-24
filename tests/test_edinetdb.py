@@ -193,6 +193,25 @@ def test_derive_with_base_partial_field_completeness():
     assert out == {"fiscal_quarter": "2025Q3", "eps": 20.0, "revenue": None}
 
 
+def test_derive_with_base_split_artifact_nulls_eps_keeps_revenue():
+    # 6590芝浦の実値: 通期EPS170.28(黒字・増益) − 9M累計674.72 = -504.44。
+    # 期中1→5分割で通期は分割後(株数増でEPS縮小)・9Mは分割前 → 捏造の深マイナス。
+    # revenueは加法的で正常なので残し、EPSだけNoneに落とす。
+    point = {"n": 4, "label": "2026Q4", "eps": 170.28, "revenue": 4000.0}
+    base = [_q("2026Q1", 200.0, 800.0), _q("2026Q2", 224.72, 900.0), _q("2026Q3", 250.0, 1000.0)]
+    out = ed.derive_with_base(point, base)
+    assert out["eps"] is None
+    assert out["revenue"] == 1300.0  # 4000 - (800+900+1000)
+
+
+def test_derive_with_base_modest_negative_quarter_kept():
+    # 通常の小幅赤字四半期(分割artifactではない)は破棄せず残す。
+    point = {"n": 4, "label": "2026Q4", "eps": 90.0, "revenue": 4000.0}
+    base = [_q("2026Q1", 30.0, 800.0), _q("2026Q2", 35.0, 900.0), _q("2026Q3", 30.0, 1000.0)]
+    out = ed.derive_with_base(point, base)
+    assert out["eps"] == -5.0  # 90 - 95、9M=95*0.5=47.5 > 5 なので通過
+
+
 # ---------------------------------------------------------------------------
 # _extract_list_of_dicts / fetch_companies_map / fetch_events -- 未知スキーマ耐性
 # (2026-07-08の初回稼働で既知キー名が外れて0件になった不具合の再発防止)

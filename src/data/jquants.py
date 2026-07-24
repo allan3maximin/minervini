@@ -29,7 +29,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from src.config import REPO_ROOT, load_config
-from src.data.fundamentals import AUTO_PATH, load_auto_store
+from src.data.fundamentals import AUTO_PATH, is_split_artifact_eps, load_auto_store
 from src.utils_io import atomic_write_json, safe_load_json
 
 STATE_PATH = REPO_ROOT / "data" / "jquants_state.json"
@@ -239,12 +239,21 @@ def derive_quarters(ytd_points: list[dict]) -> list[dict]:
             disc = p.get("disc_date") or None
             if disc:
                 rec["disc_date"] = disc
+            eps_cur = eps_base = None
             for key in ("eps", "revenue"):
                 cur = p.get(key)
                 if cur is None:
                     continue
                 base = prev.get(key) if prev is not None else 0.0
-                rec[key] = round(cur - (base if base is not None else 0.0), 4)
+                base = base if base is not None else 0.0
+                rec[key] = round(cur - base, 4)
+                if key == "eps":
+                    eps_cur, eps_base = cur, base
+            # 期中株式分割の artifact(通期EPS[分割後] − 9M累計[分割前] = 捏造の
+            # 深マイナス)を検出したらEPSだけ破棄。revenueは分割に無関係で正常
+            # なので残す → 下流が直前のクリーンな四半期にフォールバックする。
+            if is_split_artifact_eps(rec["eps"], eps_cur, eps_base, rec["revenue"]):
+                rec["eps"] = None
             if rec["eps"] is not None or rec["revenue"] is not None:
                 out.append(rec)
             prev = p

@@ -143,6 +143,34 @@ def test_derive_quarters_none_values_skip_key():
     assert out[1]["revenue"] is None
 
 
+def test_derive_quarters_split_artifact_nulls_eps_keeps_revenue():
+    # 期中株式分割の artifact: 通期YTD EPS(分割後) < 9M YTD EPS(分割前) で
+    # Q4単独が捏造の深マイナスになる。EPSだけNoneに落とし、revenueは残す。
+    points = [
+        _point(1, 200.0, 800.0),
+        _point(2, 424.72, 1700.0),
+        _point(3, 674.72, 2700.0),  # 9M累計EPS(分割前)
+        _point(4, 170.28, 4000.0),  # 通期EPS(分割後・黒字)。170.28-674.72=-504.44
+    ]
+    out = jq.derive_quarters(points)
+    q4 = next(q for q in out if q["fiscal_quarter"] == "2025Q4")
+    assert q4["eps"] is None
+    assert q4["revenue"] == 1300.0  # 4000 - 2700、revenueは正常に導出
+
+
+def test_derive_quarters_modest_negative_quarter_kept():
+    # 通常の小幅赤字四半期は分割artifactではないので残す。
+    points = [
+        _point(1, 30.0, 800.0),
+        _point(2, 65.0, 1700.0),
+        _point(3, 95.0, 2700.0),
+        _point(4, 90.0, 4000.0),  # 90-95=-5 の小幅赤字。9M=95*0.5=47.5 > 5 で通過
+    ]
+    out = jq.derive_quarters(points)
+    q4 = next(q for q in out if q["fiscal_quarter"] == "2025Q4")
+    assert q4["eps"] == -5.0
+
+
 # ---------------------------------------------------------------------------
 # _merge_into_store
 # ---------------------------------------------------------------------------
