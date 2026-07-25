@@ -10,6 +10,8 @@ from src.screener.vcp import (
     extract_contractions,
     merge_shallow_pivots,
     merge_short_contractions,
+    merge_short_legs,
+    merge_short_rallies,
     vcp_quality_score,
 )
 
@@ -446,6 +448,137 @@ def test_merge_short_contractions_noop_when_disabled():
         {"idx": 11, "price": 88.0, "type": "L"},
     ]
     assert merge_short_contractions([dict(p) for p in pivots], 0) == pivots
+
+
+# --- (c-2) 期間マージ: merge_short_rallies ----------------------------------
+
+def test_merge_short_rallies_folds_zero_bar_rally():
+    """T(N)の安値とT(N+1)の高値が同じ足に乗る「0日戻し」は戻し脚として数えない。
+
+    VCPは「高値 → 押し → 戻し → より浅い押し」の繰り返しで、戻しにも時間がかかる
+    のが前提。0日戻しは1本の広いレンジ足を2つの波に割っているだけなので畳む。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 8, "price": 80.0, "type": "L"},
+        {"idx": 8, "price": 92.0, "type": "H"},   # 0日戻し (L と同じ足)
+        {"idx": 16, "price": 85.0, "type": "L"},
+        {"idx": 24, "price": 90.0, "type": "H"},
+        {"idx": 32, "price": 87.0, "type": "L"},
+    ]
+    merged = merge_short_rallies([dict(p) for p in pivots], 1)
+
+    assert len(merged) == len(pivots) - 2
+    cons = extract_contractions(merged)
+    rallies = [b["high_idx"] - a["low_idx"] for a, b in zip(cons, cons[1:])]
+    assert all(r >= 1 for r in rallies)
+
+
+def test_merge_short_rallies_preserves_envelope_and_order():
+    """畳んだ戻しの極値は隣接波へ吸収され、包絡と時系列順は保たれる。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 8, "price": 78.0, "type": "L"},   # ベース最安値
+        {"idx": 14, "price": 95.0, "type": "H"},
+        {"idx": 20, "price": 80.0, "type": "L"},  # 局所ボトム: 隣接Lへ吸収される
+        {"idx": 20, "price": 90.0, "type": "H"},  # 0日戻し
+        {"idx": 30, "price": 86.0, "type": "L"},
+    ]
+    merged = merge_short_rallies([dict(p) for p in pivots], 1)
+
+    assert len(merged) == len(pivots) - 2
+    assert [p["idx"] for p in merged] == sorted(p["idx"] for p in merged)
+    assert max(p["price"] for p in merged) == 100.0
+    assert min(p["price"] for p in merged) == 78.0
+    # 80.0 のボトムは削除ではなく隣接Lへ吸収されている。
+    assert any(p["price"] == 80.0 and p["idx"] == 20 for p in merged)
+
+
+def test_merge_short_rallies_keeps_base_anchored_at_t0():
+    """戻しを畳んでも T0(ベース最高値)のアンカーは先頭に残る。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},  # T0
+        {"idx": 10, "price": 88.0, "type": "L"},
+        {"idx": 11, "price": 96.0, "type": "H"},  # 1日戻し
+        {"idx": 20, "price": 90.0, "type": "L"},
+        {"idx": 28, "price": 94.0, "type": "H"},
+        {"idx": 36, "price": 92.0, "type": "L"},
+    ]
+    merged = merge_short_rallies([dict(p) for p in pivots], 3)
+
+    assert merged[0]["idx"] == 0 and merged[0]["price"] == 100.0
+    assert [p["idx"] for p in merged] == sorted(p["idx"] for p in merged)
+
+
+def test_merge_short_rallies_never_empties_the_base():
+    """収縮が1本しか残らない状態では、それ以上畳まない(ベースを空にしない)。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 5, "price": 94.0, "type": "L"},
+        {"idx": 5, "price": 98.0, "type": "H"},
+        {"idx": 12, "price": 95.0, "type": "L"},
+    ]
+    merged = merge_short_rallies([dict(p) for p in pivots], 5)
+
+    assert len(merged) == 2
+    assert merged[0]["type"] == "H" and merged[1]["type"] == "L"
+
+
+def test_merge_short_rallies_noop_when_disabled():
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 10, "price": 90.0, "type": "L"},
+        {"idx": 10, "price": 95.0, "type": "H"},
+        {"idx": 20, "price": 92.0, "type": "L"},
+    ]
+    assert merge_short_rallies([dict(p) for p in pivots], 0) == pivots
+
+
+def test_merge_short_legs_applies_both_floors_until_settled():
+    """収縮マージと戻しマージを交互に回し、どちらの床も満たすまで畳む。
+
+    片方のマージが新しい短脚を生むことがあるので、変化が止まるまで往復する。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 10, "price": 80.0, "type": "L"},
+        {"idx": 10, "price": 92.0, "type": "H"},   # 0日戻し
+        {"idx": 11, "price": 86.0, "type": "L"},   # 1日収縮
+        {"idx": 20, "price": 90.0, "type": "H"},
+        {"idx": 30, "price": 88.0, "type": "L"},
+    ]
+    merged = merge_short_legs([dict(p) for p in pivots], 2, 1)
+
+    cons = extract_contractions(merged)
+    assert all(c["low_idx"] - c["high_idx"] >= 2 for c in cons)
+    rallies = [b["high_idx"] - a["low_idx"] for a, b in zip(cons, cons[1:])]
+    assert all(r >= 1 for r in rallies)
+    assert [p["idx"] for p in merged] == sorted(p["idx"] for p in merged)
+
+
+def test_merge_short_legs_is_idempotent():
+    """一度収束した列をもう一度通しても変化しない。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 10, "price": 80.0, "type": "L"},
+        {"idx": 10, "price": 92.0, "type": "H"},
+        {"idx": 18, "price": 85.0, "type": "L"},
+        {"idx": 26, "price": 90.0, "type": "H"},
+        {"idx": 34, "price": 88.0, "type": "L"},
+    ]
+    once = merge_short_legs([dict(p) for p in pivots], 2, 1)
+    twice = merge_short_legs([dict(p) for p in once], 2, 1)
+    assert once == twice
+
+
+def test_merge_short_legs_noop_when_both_disabled():
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 10, "price": 90.0, "type": "L"},
+        {"idx": 10, "price": 95.0, "type": "H"},
+        {"idx": 11, "price": 92.0, "type": "L"},
+    ]
+    assert merge_short_legs([dict(p) for p in pivots], 0, 0) == pivots
 
 
 # --- (d) ボラ過大除外: TOO_VOLATILE ----------------------------------------

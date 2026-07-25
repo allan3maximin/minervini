@@ -279,6 +279,60 @@ def merge_short_contractions(pivots: list[dict], min_bars: int) -> list[dict]:
     return p
 
 
+def merge_short_rallies(pivots: list[dict], min_bars: int) -> list[dict]:
+    """Fold away rallies (L -> H) shorter than `min_bars` trading days.
+
+    The mirror image of `merge_short_contractions`. A VCP is "high, pull back,
+    rally back to a lower high, pull back to a higher low" -- the rally between
+    two contractions takes time just like the pull-back does. When the low of
+    contraction N and the high of contraction N+1 land on the same bar the
+    rally leg is zero days long, which means one wide bar has been split into
+    two waves. On the chart that shows up as T(N) and T(N+1) labelled on the
+    same day.
+
+    Folding uses the same envelope-preserving merge, with the neighbours
+    mirrored: a rally sits between the previous high and the next low.
+    """
+    if not min_bars or len(pivots) < 4:
+        return pivots
+    p = [dict(pv) for pv in pivots]
+    while len(p) >= 4:
+        target = None
+        # L→H のペアだけが戻し脚。ピボット列は必ず交互だが先頭の型は決め打ち
+        # できないので、収縮側と同じく1つずつ型を見て拾う。
+        for j in range(len(p) - 1):
+            if p[j]["type"] != "L" or p[j + 1]["type"] != "H":
+                continue
+            bars = p[j + 1]["idx"] - p[j]["idx"]
+            if bars < min_bars and (target is None or bars < target[1]):
+                target = (j, bars)
+        if target is None:
+            break
+        j = target[0]
+        # 戻し脚は「前の高値」と「次の安値」に挟まれる(収縮の逆)。端では同型の
+        # 最寄りピボットへフォールバックして極値の行き先を確保する。
+        high_nb = p[j - 1] if j >= 1 else (p[j + 3] if j + 3 < len(p) else None)
+        low_nb = p[j + 2] if j + 2 < len(p) else (p[j - 2] if j >= 2 else None)
+        _fold_pair(p, j, low_nb, high_nb)
+    return p
+
+
+# 収縮マージと戻しマージは互いに新しい短脚を生み得るので、変化が止まるまで
+# 交互に回す。上限は暴走時の保険(1ベースのピボットは高々数十本)。
+_MAX_MERGE_PASSES = 20
+
+
+def merge_short_legs(pivots: list[dict], min_bars: int, min_rally_bars: int) -> list[dict]:
+    """Apply the contraction / rally duration floors until the pivot list settles."""
+    for _ in range(_MAX_MERGE_PASSES):
+        before = len(pivots)
+        pivots = merge_short_contractions(pivots, min_bars)
+        pivots = merge_short_rallies(pivots, min_rally_bars)
+        if len(pivots) == before:
+            break
+    return pivots
+
+
 def extract_contractions(pivots: list[dict]) -> list[dict]:
     """Pair adjacent (H, L) pivots into contractions, in chronological order."""
     contractions = []
@@ -620,7 +674,11 @@ def _compute_dated_contractions(
     threshold = zigzag_swing_threshold(latest, config)
     pivots = compute_zigzag(base_df, threshold)
     pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
-    pivots = merge_short_contractions(pivots, config["vcp"].get("min_contraction_bars", 0))
+    pivots = merge_short_legs(
+        pivots,
+        config["vcp"].get("min_contraction_bars", 0),
+        config["vcp"].get("min_rally_bars", 0),
+    )
     contractions = extract_contractions(pivots)
     if "date" in base_df.columns:
         dates = base_df["date"]
