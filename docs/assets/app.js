@@ -446,6 +446,10 @@ let reportCache = null;
 // データは日次更新なのでTTLは持たず(セッション内は据え置き)、リロードで最新化する。
 const chartCache = new Map();
 const CHART_CACHE_MAX = 12; // メモリ肥大を防ぐ上限(超えたら古い順=Map挿入順に破棄)
+// 先読みが「完了済み」のコード。chartCache.has() は fetch 発行直後から true に
+// なるため、それを即描画可能の判定に使うと未解決なのに「読み込み中...」を出さず
+// 前の銘柄の画面が据え置かれて見える。解決済みかどうかはこちらで持つ。
+const chartCacheReady = new Set();
 
 // チャートJSONを取得(キャッシュ優先)。失敗(null)はキャッシュに残さず再取得できるようにする。
 function loadChart(code) {
@@ -464,10 +468,12 @@ function loadChart(code) {
   // 取得失敗(null)は据え置かず破棄して、次回アクセスで再取得できるようにする。
   p.then((v) => {
     if (v == null) chartCache.delete(code);
+    else chartCacheReady.add(code);
   });
   while (chartCache.size > CHART_CACHE_MAX) {
     const oldest = chartCache.keys().next().value;
     chartCache.delete(oldest);
+    chartCacheReady.delete(oldest);
   }
   return p;
 }
@@ -1902,8 +1908,17 @@ function renderStageSection(groupDef, stocks, sortKey) {
 
 // SPAルーターから#stock/CODEへ遷移するたびに呼ばれる。codeOverrideがあれば
 // それを使い(SPAルート経由)、なければ旧来の?code=クエリを見る(stock.html直リンク互換)。
+// initStockPage の世代番号。initStockPage は showView から fire-and-forget で
+// 呼ばれるため、連続で銘柄を送ると複数回分が同時に走る。チャートJSONは
+// 先読み済みなら即時・未取得ならネットワーク待ちと解決順が入れ替わるので、
+// 「あとから始まった新しい銘柄が先に描画 → 遅れて解決した古い銘柄が上書き」
+// が起きてグラフが切り替わらないように見える。await のたびに世代を突き合わせ、
+// 追い越された古い実行は何も描かずに降りる。
+let stockPageSeq = 0;
+
 async function initStockPage(codeOverride) {
   const code = codeOverride || new URLSearchParams(window.location.search).get("code");
+  const seq = ++stockPageSeq;
 
   // 前の銘柄のチャート・イベントリスナーを必ず片付けてから描画し直す
   // (teardownしないと銘柄を切り替えるたびにチャート/リスナーが積み上がる)。
@@ -1930,8 +1945,10 @@ async function initStockPage(codeOverride) {
     if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
     return;
   }
-  // 先読み済み(前後銘柄をprefetch)なら即描画できるので「読み込み中...」の点滅を出さない。
-  if (titleEl && !chartCache.has(code)) titleEl.textContent = "読み込み中...";
+  // 先読み「完了済み」なら即描画できるので「読み込み中...」の点滅を出さない。
+  // 先読みが未完了のうちに追いついた場合は待ち時間があるので通常どおり出す
+  // (出さないと前の銘柄の画面が残り、切り替わっていないように見える)。
+  if (titleEl && !chartCacheReady.has(code)) titleEl.textContent = "読み込み中...";
 
   // report.jsonはダッシュボード表示時のキャッシュ(reportCache)を再利用し、
   // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。チャートは
@@ -1943,6 +1960,10 @@ async function initStockPage(codeOverride) {
         return r;
       });
   const [report, chart] = await Promise.all([reportPromise, loadChart(code)]);
+  // 待っている間にさらに銘柄が送られていたら、この実行は古い。描画すると新しい
+  // 銘柄のチャートの上に重ねて作られてしまう(teardownCharts は await の前に
+  // 済んでいるので後片付けされない)ため、ここで降りる。
+  if (seq !== stockPageSeq) return;
   const stock = report.stocks.find((s) => s.code === code);
 
   if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
@@ -1953,7 +1974,7 @@ async function initStockPage(codeOverride) {
   prefetchAdjacentCharts(); // 前後1銘柄のチャートを先読みして次のスワイプ/＜＞を即応答に
   setupStockPanels();
   renderStockSummary(stock);
-  if (stock) renderStockFundamentals(code, stock.name, report.generated_at);
+  if (stock) renderStockFundamentals(code, stock.name, report.generated_at, seq);
   if (stock) renderStockMargin(stock);
   setupSizingCalculator(stock);
   setupStockCopyButton(stock, chart, report);
@@ -2531,7 +2552,9 @@ function fundChartHtml(quarters, byQuarter) {
   return `<div class="fund-chart-wrap">${eps}${rev}<p class="fund-chart-legend"><span class="lg-up">■</span> 前年同期比プラス　<span class="lg-down">■</span> マイナス　<span class="lg-neutral">■</span> 前年同期比なし</p></div>`;
 }
 
-async function renderStockFundamentals(code, name, reportGeneratedAt) {
+// seq: 呼び出し元 initStockPage の世代番号。fetch を待つ間に銘柄が送られていたら
+// 古い銘柄のファンダで上書きしないよう降りる(未指定なら世代チェックなし)。
+async function renderStockFundamentals(code, name, reportGeneratedAt, seq) {
   const container = document.getElementById("fund-detail-body");
   if (!container) return;
   container.innerHTML = "読み込み中...";
@@ -2550,6 +2573,7 @@ async function renderStockFundamentals(code, name, reportGeneratedAt) {
   } catch (e) {
     /* fetch failure: fall through to empty state below */
   }
+  if (seq !== undefined && seq !== stockPageSeq) return; // 別の銘柄へ遷移済み
 
   const btnHtml = `
     <button type="button" id="fund-detail-edit-btn" class="fund-edit-btn"${canEdit ? "" : ' disabled title="先に🔓解錠してください"'}>ファンダ入力/編集</button>
@@ -3714,6 +3738,11 @@ function teardownCharts() {
 }
 
 function renderCharts(chart) {
+  // 二重描画の保険。呼び出し元(initStockPage)は await の前に teardown している
+  // ので、そこから戻るまでの間に別経路で描かれていた場合に備えてもう一度畳む。
+  // stockChartState が null なら何もしないので二重呼び出しは無害。
+  teardownCharts();
+
   const monthly = aggregateMonthly(chart);
   const dailyVolume = colorizeVolume(chart);
 

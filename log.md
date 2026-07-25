@@ -21,6 +21,69 @@
 
 ---
 
+## 2026-07-25 (118): 銘柄を切り替えてもグラフが変わらないバグを修正(initStockPage のレース)
+
+### 症状
+
+個別株ビューで銘柄を送ると、タイトルや他のパネルは変わるのにチャートだけ前の銘柄の
+ままになることがある。連続で送った時に起きやすい。
+
+### 原因
+
+`initStockPage()` は `showView()` から `await` されずに呼ばれる(fire-and-forget)ため、
+連続で銘柄を送ると複数回分が同時に走る。`teardownCharts()` は関数の**先頭**、つまり
+`await` の**前**で実行される。したがって:
+
+1. 銘柄A へ遷移 → teardown → チャートJSONの取得待ちに入る
+2. 追い越して銘柄B へ遷移 → teardown(この時点で描画物は無いので何もしない)→ 取得待ち
+3. B が先に解決して `renderCharts(B)` → `stockChartState = B`
+4. 遅れて A が解決 → **teardown 済みのつもりで** `renderCharts(A)` → 同じコンテナに
+   B のチャートへ重ねて A のインスタンスが生成される。`stockChartState` も A で
+   上書きされ、B のインスタンスは破棄されず残る
+
+見た目には「切り替わっていない/前の銘柄が出ている」になる。117 以前から潜在していたが、
+115 のプリフェッチ導入で「キャッシュヒットは即時・ミスはネットワーク待ち」となり
+解決順の入れ替わりが常態化したため顕在化した。
+
+### 修正 (`docs/assets/app.js`)
+
+- `stockPageSeq`(世代番号)を導入。`initStockPage` の入口で採番し、`await` から
+  戻った直後に `if (seq !== stockPageSeq) return;` で追い越された古い実行を降ろす。
+  `initStockPage` 内の `await` はこの1箇所だけ(確認済み)。
+- `renderStockFundamentals(code, name, generatedAt, seq)` にも同じ世代チェックを追加。
+  こちらも fetch を挟むので古い銘柄のファンダで上書きされ得た。
+- `renderCharts()` の先頭にも `teardownCharts()` を保険で追加(`stockChartState` が
+  null なら no-op なので二重呼び出しは無害)。
+- 「読み込み中...」の抑制条件を `chartCache.has(code)` → `chartCacheReady.has(code)` に
+  変更。`chartCache` は fetch 発行の**直後**から true になるため、先読みが未完了の
+  うちに追いつくと待ち時間があるのに何も出さず、前の銘柄の画面が据え置かれて
+  「切り替わっていない」印象を強めていた。解決済みかどうかは `chartCacheReady`
+  (Set)で別に持ち、LRU 破棄と失敗時の破棄も同期させる。
+- `tools/update_cache_busters.py` で `app.js?v=` を更新(config.js も一緒に更新された)。
+
+### 検証: `tests/js/test_stock_page_race.js` (新規・依存なし)
+
+    node tests/js/test_stock_page_race.js [app.js のパス]
+
+実物の `docs/assets/app.js` を `vm` で読み込み、DOM とデータ層は最小スタブ、
+`renderCharts` はスパイに差し替えて「どの銘柄で何回描いたか」だけを見る。
+チャートJSONの解決タイミングを手で握り、上記シナリオ(A開始→B開始→B解決→A解決)を
+再現する。
+
+- 修正後: `renderCharts: ["2222"]` / title `2222 BBB` → PASS (exit 0)
+- 修正前(`git show HEAD:docs/assets/app.js`): `renderCharts: ["2222","1111"]` /
+  title `1111 AAA` → FAIL (exit 1)
+
+バグを実際に再現できるテストであることを確認済み。Python 側は 408 passed(無影響)。
+
+### 残(未着手・要相談)
+
+116 で挙げた表示側の課題は手つかず: (1) T ラベルが高値・安値の両方に出て重複、
+(2) 前の安値と次の高値が同じ足だとラベルが重なる、(4) 初期表示22本でジグザグの
+大半が画面外。
+
+---
+
 ## 2026-07-25 (117): 収縮の最小期間 min_contraction_bars を導入(0日収縮の除去)
 
 116 で見つけた「1本の足で完結する収縮(high_idx == low_idx)」への対応。Minervini の
