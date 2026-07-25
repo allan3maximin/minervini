@@ -66,6 +66,11 @@ VARIANTS: dict[str, dict] = {
     # 0.85 / 0.75 / 回帰スロープの複合条件は出典不明。
     # volume_trend_ratio=0 で sub-(b) は成立不能になる(中央値<=0 が要るため)。
     "plain_v5": {"volume_dryup_median_ratio": 1.0, "volume_trend_ratio": 0.0},
+    # V5をさらに2要素に分解する。どちらが選別の仕事をしているかを見るため。
+    # (a)側の0.85だけ素直に戻す(回帰スロープのOR分岐は残す)
+    "v5_ratio_only": {"volume_dryup_median_ratio": 1.0},
+    # (b)のOR分岐だけ消す(0.85は残す)
+    "v5_no_subb": {"volume_trend_ratio": 0.0},
 
     # --- 意図的に緩めた2つ。参考として単独で締める ---
     # V2: 収縮の単調減少。tolerance/前半例外/全体比率をすべて素直に。
@@ -94,12 +99,15 @@ VARIANTS: dict[str, dict] = {
     },
 }
 
-ARM_ORDER = ["current", "no_atr_gate", "plain_v5", "strict_v2", "strict_v4", "plain_all"]
+ARM_ORDER = ["current", "no_atr_gate", "plain_v5", "v5_ratio_only", "v5_no_subb",
+             "strict_v2", "strict_v4", "plain_all"]
 
 ARM_LABEL = {
     "current": "現行(ベースライン)",
     "no_atr_gate": "ATR除外を撤廃",
     "plain_v5": "V5を素直版",
+    "v5_ratio_only": "V5: 0.85→1.0のみ",
+    "v5_no_subb": "V5: (b)分岐を削除",
     "strict_v2": "V2を厳格版(参考)",
     "strict_v4": "V4を厳格版(参考)",
     "plain_all": "全部素直版",
