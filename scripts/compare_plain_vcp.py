@@ -138,8 +138,8 @@ def detect_vcp(df: pd.DataFrame, i: int, config: dict) -> dict | None:
     }
 
 
-def scan(code, df, rs_series, config, rs_min, start_idx, step=SCAN_STEP) -> list[dict]:
-    n = len(df)
+def scan(code, df, rs_series, config, rs_min, start_idx, step=SCAN_STEP, scan_end=None) -> list[dict]:
+    n = scan_end if scan_end is not None else len(df)
     setups: list[dict] = []
     seen_pivots: list[float] = []
 
@@ -188,14 +188,18 @@ def scan(code, df, rs_series, config, rs_min, start_idx, step=SCAN_STEP) -> list
     return setups
 
 
-def run(frames, rs_by_date, days, rs_min, vol_mult, stop_pct, config) -> list[dict]:
+def run(frames, rs_by_date, days, rs_min, vol_mult, stop_pct, config, end_offset=0) -> list[dict]:
+    """end_offset: 検出の打ち切り位置を末尾から何営業日手前にするか。
+    成績測定には常に全期間の df を使う(打ち切りは検出だけ)ので、期間を前半/後半に
+    割って安定性を見るのに使える。"""
     extended_pct = config["entry"]["extended_pct"]
     all_setups: list[dict] = []
     for code, df in frames.items():
         n = len(df)
-        start_idx = max(0, n - days)
+        scan_end = n - end_offset
+        start_idx = max(0, scan_end - days)
         rs_series = rs_by_date[code] if code in rs_by_date.columns else pd.Series(dtype="float64")
-        setups = scan(code, df, rs_series, config, rs_min, start_idx)
+        setups = scan(code, df, rs_series, config, rs_min, start_idx, scan_end=scan_end)
 
         for s in setups:
             bidx = find_breakout_index(df, s["setup_idx"], s["pivot"], MAX_BREAKOUT_WAIT_DAYS)
@@ -247,6 +251,7 @@ def summarize(setups: list[dict]) -> dict:
         "exp_r": exp_r,
         "exp_r_trim95": exp_r_trim,
         "median_r": med_r,
+        "r_values": rs,
         "perf": {h: _perf_stats(measured, h) for h in HORIZONS},
         "by_month": dict(sorted(by_month.items())),
         "keys": sorted({(s["code"], str(s["setup_date"])[:10]) for s in setups}),

@@ -150,7 +150,18 @@ def compute_zigzag(base_df: pd.DataFrame, threshold: float) -> list[dict]:
         pivots.append({"idx": last_low_idx, "price": last_low, "type": "L", "provisional": True})
 
     # Always ensure T0 (index 0) is represented as the first pivot.
-    if not pivots or pivots[0]["idx"] != 0:
+    #
+    # 2026-07-25 修正: 判定を idx から **type** に変えた。base_df[0] は探索窓の最高値
+    # なので、確定するH ピボットの idx は必ず 0 になる。つまり「先頭が L」のケースでは
+    # その L の idx も 0 であり、旧条件 `pivots[0]["idx"] != 0` は一度も発火しなかった。
+    # 先頭が L になるのは、ベース初日が広いレンジ足で、その安値が最初のスイング安値と
+    # して確定する(= 高値から threshold 下がるより先に安値から threshold 戻す)ケース。
+    # ベース最高値の日はしばしば大陽線なので珍しくなく、実測(400営業日/992銘柄)で
+    # 全ベースの 23.1% が該当し、ベース最高値そのものが収縮列から消えていた。
+    # 消えると T 数・V2(単調性の基準)・V3(第1収縮の深さ)・V7 が、本来より低い
+    # 別の高値を基準に計算される(乖離の中央値 1.54% / p90 5.54%)。
+    # 先頭が L のときに H@0 を挿す形なので、ピボット列の H/L 交互性は常に保たれる。
+    if not pivots or pivots[0]["type"] != "H":
         pivots.insert(0, {"idx": 0, "price": highs[0], "type": "H"})
 
     return pivots
