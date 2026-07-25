@@ -156,6 +156,38 @@ def compute_zigzag(base_df: pd.DataFrame, threshold: float) -> list[dict]:
     return pivots
 
 
+def _fold_pair(p: list[dict], i: int, low_nb: dict | None, high_nb: dict | None) -> None:
+    """Remove pivots p[i], p[i+1] in place, absorbing their extremes into the
+    given neighbours so the H/L envelope survives the merge (a merge, not a
+    delete).
+
+    Absorption moves a neighbour's `idx` as well as its price. If both sides
+    absorb at once (the removed pair holds both a higher high and a lower low
+    than its neighbours) the two neighbours can swap positions on the time
+    axis, leaving consecutive contractions overlapping in time -- which makes
+    the drawn ZigZag run backwards and the chart disagree with the contraction
+    list. Any absorption that would break the pivot list's chronological order
+    is therefore rolled back; the price envelope is only widened when it can be
+    done without reordering time.
+    """
+    saved = [(nb, nb["price"], nb["idx"]) for nb in (low_nb, high_nb) if nb is not None]
+    removed = (p[i], p[i + 1])
+    rem_high = max(removed, key=lambda pv: pv["price"])
+    rem_low = min(removed, key=lambda pv: pv["price"])
+    if low_nb is not None and low_nb["type"] == "L" and rem_low["price"] < low_nb["price"]:
+        low_nb["price"], low_nb["idx"] = rem_low["price"], rem_low["idx"]
+    if high_nb is not None and high_nb["type"] == "H" and rem_high["price"] > high_nb["price"]:
+        high_nb["price"], high_nb["idx"] = rem_high["price"], rem_high["idx"]
+    del p[i:i + 2]
+
+    # Roll back (low first -- the base's high envelope is the more important of
+    # the two) until the pivot list is chronological again.
+    for nb, price, idx in saved:
+        if all(p[k]["idx"] <= p[k + 1]["idx"] for k in range(len(p) - 1)):
+            break
+        nb["price"], nb["idx"] = price, idx
+
+
 def merge_shallow_pivots(pivots: list[dict], min_depth: float) -> list[dict]:
     """Envelope-preserving merge of sub-`min_depth` swings.
 
@@ -185,15 +217,54 @@ def merge_shallow_pivots(pivots: list[dict], min_depth: float) -> list[dict]:
         if shallow is None:
             break
         i = shallow[0]
-        removed = (p[i], p[i + 1])
-        rem_high = max(removed, key=lambda pv: pv["price"])
-        rem_low = min(removed, key=lambda pv: pv["price"])
-        for nb in (p[i - 1], p[i + 2]):
-            if nb["type"] == "H" and rem_high["price"] > nb["price"]:
-                nb["price"], nb["idx"] = rem_high["price"], rem_high["idx"]
-            elif nb["type"] == "L" and rem_low["price"] < nb["price"]:
-                nb["price"], nb["idx"] = rem_low["price"], rem_low["idx"]
-        del p[i:i + 2]
+        nbs = (p[i - 1], p[i + 2])
+        low_nb = next((nb for nb in nbs if nb["type"] == "L"), None)
+        high_nb = next((nb for nb in nbs if nb["type"] == "H"), None)
+        _fold_pair(p, i, low_nb, high_nb)
+    return p
+
+
+def merge_short_contractions(pivots: list[dict], min_bars: int) -> list[dict]:
+    """Fold away contractions shorter than `min_bars` trading days.
+
+    Minervini's contractions are corrections that take days to weeks to form;
+    a single bar's high-to-low range is not a contraction. ZigZag, however,
+    promotes any bar whose own range clears the swing threshold straight into
+    an H and an L pivot, producing zero-day "contractions" (high_idx ==
+    low_idx). Those inflate the footprint's T count, and feed V1/V2/V4/V7 and
+    the entry pivot with what is really one bar of intraday noise.
+
+    Duration is measured on the down-leg only (H -> L, i.e. the contraction
+    itself); the rallies between contractions are left alone. Folding is the
+    same envelope-preserving merge `merge_shallow_pivots` uses. The first
+    contraction can be folded too -- T0 is the base's highest high, so it is
+    always re-absorbed by the following high and the base keeps its anchor --
+    and so can the last, which is the common case (a still-forming final leg
+    that is only a bar or two old is not yet a contraction). Folding stops
+    while two pivots remain, so a base is never emptied out.
+    """
+    if not min_bars or len(pivots) < 4:
+        return pivots
+    p = [dict(pv) for pv in pivots]
+    while len(p) >= 4:
+        target = None
+        # H→L のペアだけが収縮。ピボット列は必ず交互なので、先頭がL始まり
+        # (T0直後に安値ピボットが立つケース)でも1つずつ見れば正しく拾える。
+        for j in range(len(p) - 1):
+            if p[j]["type"] != "H" or p[j + 1]["type"] != "L":
+                continue
+            bars = p[j + 1]["idx"] - p[j]["idx"]
+            if bars < min_bars and (target is None or bars < target[1]):
+                target = (j, bars)
+        if target is None:
+            break
+        j = target[0]
+        # Interior contractions sit between the previous low and the next high.
+        # At the edges the missing side falls back to the nearest same-type
+        # pivot so the extreme still has somewhere to go.
+        low_nb = p[j - 1] if j >= 1 else (p[j + 3] if j + 3 < len(p) else None)
+        high_nb = p[j + 2] if j + 2 < len(p) else (p[j - 2] if j >= 2 else None)
+        _fold_pair(p, j, low_nb, high_nb)
     return p
 
 
@@ -538,6 +609,7 @@ def _compute_dated_contractions(
     threshold = zigzag_swing_threshold(latest, config)
     pivots = compute_zigzag(base_df, threshold)
     pivots = merge_shallow_pivots(pivots, config["vcp"].get("min_contraction_depth", 0.0))
+    pivots = merge_short_contractions(pivots, config["vcp"].get("min_contraction_bars", 0))
     contractions = extract_contractions(pivots)
     if "date" in base_df.columns:
         dates = base_df["date"]

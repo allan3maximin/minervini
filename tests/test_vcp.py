@@ -7,7 +7,9 @@ from src.indicators import add_atr, add_moving_averages
 from src.screener.vcp import (
     _check_v5,
     evaluate_vcp,
+    extract_contractions,
     merge_shallow_pivots,
+    merge_short_contractions,
     vcp_quality_score,
 )
 
@@ -345,6 +347,105 @@ def test_merge_shallow_pivots_noop_when_disabled():
         {"idx": 24, "price": 85.0, "type": "L"},
     ]
     assert merge_shallow_pivots([dict(p) for p in pivots], 0.0) == pivots
+
+
+def test_merge_shallow_pivots_keeps_pivots_chronological():
+    """両隣が同時に極値を吸収しても、ピボット列の時系列順は壊さない。
+
+    H(0,100.2) と L(15,100.1) が除去ペアの極値を同時に吸収すると、高値が idx10、
+    安値が idx5 へ移り前後関係が逆転する(=収縮が時間的に重なりチャートの
+    ジグザグが逆走する)。順序を壊す吸収はロールバックされる。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.2, "type": "H"},
+        {"idx": 5, "price": 100.0, "type": "L"},
+        {"idx": 10, "price": 100.3, "type": "H"},
+        {"idx": 15, "price": 100.1, "type": "L"},
+    ]
+    merged = merge_shallow_pivots([dict(p) for p in pivots], 0.05)
+
+    assert len(merged) == 2
+    assert [p["idx"] for p in merged] == sorted(p["idx"] for p in merged)
+    assert merged[0]["type"] == "H" and merged[1]["type"] == "L"
+
+
+# --- (c) 期間マージ: merge_short_contractions -------------------------------
+
+def test_merge_short_contractions_folds_single_bar_contraction():
+    """1本の足で完結する収縮(high_idx == low_idx)は収縮として数えない。
+
+    Minerviniの収縮は日〜週で形成される調整であって、1本の足の高安レンジは
+    収縮ではない。ここでは idx18 の 0日収縮が畳まれ、収縮1本ぶん(ピボット2つ)減る。
+    """
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 8, "price": 80.0, "type": "L"},
+        {"idx": 14, "price": 92.0, "type": "H"},
+        {"idx": 20, "price": 85.0, "type": "L"},
+        {"idx": 26, "price": 90.0, "type": "H"},   # 同一足で完結する収縮
+        {"idx": 26, "price": 86.0, "type": "L", "provisional": True},
+    ]
+    merged = merge_short_contractions([dict(p) for p in pivots], 2)
+
+    assert [(p["idx"], p["type"]) for p in merged] == [
+        (0, "H"), (8, "L"), (14, "H"), (20, "L")
+    ]
+    assert all(c["low_idx"] - c["high_idx"] >= 2 for c in extract_contractions(merged))
+
+
+def test_merge_short_contractions_preserves_envelope_and_order():
+    """畳んだ収縮の極値は隣接波へ吸収され、包絡と時系列順は保たれる。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 8, "price": 80.0, "type": "L"},
+        {"idx": 14, "price": 95.0, "type": "H"},  # 局所ピーク: 隣接Hへ吸収される
+        {"idx": 15, "price": 88.0, "type": "L"},  # 1日収縮
+        {"idx": 22, "price": 90.0, "type": "H"},  # 95 より低い隣接H
+        {"idx": 30, "price": 84.0, "type": "L"},
+    ]
+    merged = merge_short_contractions([dict(p) for p in pivots], 2)
+
+    assert len(merged) == len(pivots) - 2
+    assert [p["idx"] for p in merged] == sorted(p["idx"] for p in merged)
+    assert max(p["price"] for p in merged) == 100.0
+    assert min(p["price"] for p in merged) == 80.0
+    # 95 のピークは削除ではなく隣接Hへ吸収されている。
+    assert any(p["price"] == 95.0 and p["idx"] == 14 for p in merged)
+
+
+def test_merge_short_contractions_keeps_base_anchored_at_t0():
+    """初回収縮が短くても、T0(ベース最高値)は次のHに吸収されアンカーは残る。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},  # T0
+        {"idx": 1, "price": 93.0, "type": "L"},   # 1日収縮
+        {"idx": 10, "price": 96.0, "type": "H"},
+        {"idx": 20, "price": 88.0, "type": "L"},
+        {"idx": 28, "price": 94.0, "type": "H"},
+        {"idx": 36, "price": 90.0, "type": "L"},
+    ]
+    merged = merge_short_contractions([dict(p) for p in pivots], 2)
+
+    assert len(merged) == len(pivots) - 2
+    assert merged[0]["idx"] == 0 and merged[0]["price"] == 100.0
+
+
+def test_merge_short_contractions_never_empties_the_base():
+    """収縮が1本しか残らない状態では、それ以上畳まない(ベースを空にしない)。"""
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 0, "price": 94.0, "type": "L"},
+    ]
+    assert merge_short_contractions([dict(p) for p in pivots], 5) == pivots
+
+
+def test_merge_short_contractions_noop_when_disabled():
+    pivots = [
+        {"idx": 0, "price": 100.0, "type": "H"},
+        {"idx": 0, "price": 90.0, "type": "L"},
+        {"idx": 10, "price": 95.0, "type": "H"},
+        {"idx": 11, "price": 88.0, "type": "L"},
+    ]
+    assert merge_short_contractions([dict(p) for p in pivots], 0) == pivots
 
 
 # --- (d) ボラ過大除外: TOO_VOLATILE ----------------------------------------
