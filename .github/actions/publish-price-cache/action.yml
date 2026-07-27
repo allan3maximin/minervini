@@ -1,0 +1,64 @@
+name: Publish price cache to a dedicated branch
+description: >
+  data/prices/ (銘柄ごとの parquet 価格キャッシュ) を、コミット1個だけの
+  orphan ブランチへ毎回 force push する。publish-site と同じ手口。
+
+  なぜ必要か: parquet はバイナリで git の差分圧縮がほぼ効かないため、日次 run で
+  全銘柄ぶんが書き換わるたびに丸ごと新しい blob として積まれる。2026-07-27 の実測で
+  1000銘柄・1コミットあたり 18MB、平日毎日で月400MB。ユニバースを売買代金閾値方式
+  (約2000銘柄)へ広げると倍になる。履歴を積まない orphan ブランチへ逃がして止める。
+
+inputs:
+  branch:
+    description: 価格キャッシュ用ブランチ名
+    required: false
+    default: price-cache
+  message:
+    description: コミットメッセージ
+    required: false
+    default: price cache
+  token:
+    description: push に使うトークン (secrets.GITHUB_TOKEN)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Force-push data/prices as a single-commit orphan branch
+      shell: bash
+      env:
+        PUBLISH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        branch="${{ inputs.branch }}"
+
+        if [ ! -d data/prices ]; then
+          echo "::error::data/prices が存在しない。パイプラインが価格を書けていない可能性がある。"
+          exit 1
+        fi
+
+        n=$(find data/prices -type f -name '*.parquet' | wc -l)
+        if [ "$n" -eq 0 ]; then
+          echo "::error::data/prices に parquet が1つも無い。空のキャッシュで上書きすると全銘柄の全履歴を再取得することになるため中断する。"
+          exit 1
+        fi
+
+        # 作業用の一時リポジトリ。親リポジトリの index を一切触らない。
+        work="$(mktemp -d)"
+        mkdir -p "$work/data"
+        cp -R data/prices "$work/data/prices"
+
+        pushd "$work" >/dev/null
+        git init -q
+        git checkout -q -b "$branch"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git commit -q -m "${{ inputs.message }}"
+        git push -q --force \
+          "https://x-access-token:${PUBLISH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          "$branch"
+        popd >/dev/null
+        rm -rf "$work"
+
+        echo "価格キャッシュを公開: $branch (${n} 銘柄, $(date -u +%FT%TZ))"

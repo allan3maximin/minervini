@@ -67,6 +67,13 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: ./.github/actions/restore-site-data
 
+      # data/prices/*.parquet も master には積まず price-cache ブランチに置く
+      # (2026-07-27〜)。バイナリで差分が効かず、全銘柄が毎日書き換わるため
+      # 1コミット18MB(1000銘柄時の実測)がそのまま .git に積み上がっていた。
+      - name: Restore price cache
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/restore-price-cache
+
       - name: Run daily pipeline
         if: steps.check.outputs.skip != 'true'
         env:
@@ -123,3 +130,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           message: "deploy: daily screener run ${{ github.run_id }}"
+
+      # 価格キャッシュも同様に、履歴を積まない専用ブランチへ退避する。
+      # これを落とすと翌日の run が全銘柄の全履歴を取り直すことになるので必ず通す。
+      - name: Publish price cache
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/publish-price-cache
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "cache: daily screener run ${{ github.run_id }}"

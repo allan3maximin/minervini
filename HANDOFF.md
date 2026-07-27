@@ -29,7 +29,7 @@ requirements.txt
 src/
   config.py                 load_config() = config.yaml のロード, REPO_ROOT
   pipeline.py               日次パイプライン本体 (python -m src.pipeline [--universe-rebuild])
-  universe.py               ユニバース構築 (JPX上場一覧→流動性上位1000→セクターmap/発行済株式数)
+  universe.py               ユニバース構築 (JPX上場一覧→20日平均売買代金1億円以上→セクターmap/発行済株式数)
   indicators.py             MA50/150/200, MA200勾配日数, 52w高安, ATR, RS raw/percentile, RSライン
   backtest.py               簡易バックテストCLI (python -m src.backtest。フェーズ1簡易版、GitHub Actions化なし。2026-07-11追加)
   data/
@@ -103,8 +103,9 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 
 1. `jpholiday` で祝日ならスキップ (return 0)
 2. 市場指標更新 `indices_mod.update_indices` — 失敗してもスクリーナーは止めない (try/except)
-3. `load_universe()` → codes (~1000銘柄)
-4. `prices_mod.update_prices(codes)` — yfinanceを50銘柄チャンク+sleep 2-4s、失敗銘柄はstooqへ。失敗率>10%でジョブ失敗
+3. `load_universe()` → codes (20日平均売買代金1億円以上。銘柄数は市況で変動する)
+4. `prices_mod.update_prices(codes)` — yfinanceを50銘柄チャンク+sleep 2-4s、失敗銘柄はstooqへ
+   (`data.stooq_max_codes` 件で打ち切り)。失敗率 > `data.max_fail_ratio`(0.15)でジョブ失敗
 5. `compute_all` で指標付与 → `rs_percentile_rank` でRS(1-99パーセンタイル、母集団はユニバース)
 6. `trend_template.screen_universe` → 8条件フラグ (debug: data/trend_template_debug.json)
 7. `priority_mod.evaluate_priority` — ハードフィルタ通過銘柄にP1〜P4付与。`p1_scarce` = P1数 < priority.p1_warn_threshold(3)
@@ -929,6 +930,14 @@ node --check docs/assets/app.js   # JS構文チェック
    (`src/pipeline.py`で`continue`のみに変更、`assemble_priority_record`削除。breadthの
    p1_count〜p4_countはpriority_by_codeから独立集計のため無影響)。
 6. RSパーセンタイルの母集団はユニバース内銘柄(全市場ではない)— 既知の仕様。
+   **2026-07-27: ユニバースを「流動性上位1000」から「20日平均売買代金1億円以上」へ変更したため、
+   母集団の顔ぶれと大きさがここで不連続になる。** 相対的に弱い中小型が母集団に加わるぶん
+   既存銘柄のRSパーセンタイルは押し上がる方向に動くので、`trend_template.rs_min`(70)の
+   実効的な厳しさも変わる。`data/history/status.jsonl` / `data/dryup_log.jsonl` /
+   `data/backtest/` の切替日をまたいだ集計は、前後を混ぜて評価しないこと。
+   さらに、この方式では銘柄数自体が市況で変動する(売買代金が全体的に細れば母集団が縮む)。
+   `data/universe.json` の `min_trading_value` / `size_cap` / `size` に、その時点の
+   採用基準と結果の銘柄数が記録されているので、履歴を解釈するときはそこを見る。
 7. ~~EDINET DB実地確認~~ → 2026-07-08、ユーザー指示で `config.yaml: edinetdb.enabled: true` に切替済み。
    **daily.yml の `EDINETDB_API_KEY` Secret が未登録なら登録すること**(未登録でもエラーにはならず
    既存ストアを返すだけで補完が効かないだけ、なので気付きにくい)。初回実行後は

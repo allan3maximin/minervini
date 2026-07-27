@@ -3,7 +3,9 @@
 Monthly job: fetch the full JPX listed securities list, keep domestic common
 stock only (exclude ETF/ETN/REIT/infra funds/PRO Market/foreign stock/capital
 certificates), fetch ~3 months of recent prices for all candidates, and keep
-the top `universe.size` by 20-day average trading value (close * volume).
+everything whose 20-day average trading value (close * volume) clears
+`universe.min_trading_value`. `universe.size`, if set, is an upper cap applied
+after the threshold; leave it null to let the threshold alone decide.
 Result is cached to data/universe.json; the daily job just reads that file.
 """
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import json
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 
@@ -106,6 +109,26 @@ def compute_liquidity_ranking(codes: list[str], config: dict | None = None) -> p
     )
 
 
+def select_liquid_codes(ranking: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
+    """流動性ランキングから採用銘柄を切り出す (config.universe)。
+
+    `min_trading_value` (20日平均売買代金の下限) を主、`size` を上限キャップとして
+    適用する。size が None/0 ならキャップ無し = 閾値だけで銘柄数が決まる。
+    どちらも未設定なら全件を返す。ネットワーク不要なので単体テストできる。
+    """
+    config = config or load_config()
+    uni_cfg = config.get("universe", {})
+    min_value = uni_cfg.get("min_trading_value")
+    size = uni_cfg.get("size")
+
+    selected = ranking
+    if min_value:
+        selected = selected[selected["avg_trading_value"] >= float(min_value)]
+    if size:
+        selected = selected.head(int(size))
+    return selected.reset_index(drop=True)
+
+
 def write_sector_map(candidates: pd.DataFrame) -> dict:
     """機能B: JPX月次Excel由来のTSE33業種 静的マッピング (data/sector_map.json)。
 
@@ -132,13 +155,19 @@ def fetch_shares_outstanding(codes: list[str], config: dict | None = None) -> di
 
     日次の時価総額は「株式数 × 最新終値」でバッチが算出する。
     取得失敗は None 許容(ヒートマップ側で最小面積フォールバック)。
+
+    銘柄あたり1リクエストなので逐次だと銘柄数に比例して伸びる(0.5秒×2000銘柄=17分)。
+    `universe.shares_workers` 本のスレッドで並列化する。sleep はワーカーごとに効くので
+    実効レートは workers/sleep_sec req/秒。
     """
     import yfinance as yf
 
     config = config or load_config()
-    sleep_sec = config["universe"].get("shares_sleep_sec", 0.5)
-    shares: dict[str, int | None] = {}
-    for i, code in enumerate(codes):
+    uni_cfg = config.get("universe", {})
+    sleep_sec = uni_cfg.get("shares_sleep_sec", 0.5)
+    workers = max(1, int(uni_cfg.get("shares_workers", 1) or 1))
+
+    def _one(code: str) -> tuple[str, int | None]:
         n = None
         try:
             fi = yf.Ticker(f"{code}.T").fast_info
@@ -151,22 +180,24 @@ def fetch_shares_outstanding(codes: list[str], config: dict | None = None) -> di
                 n = int(raw)
         except Exception:
             n = None
-        shares[code] = n
-        if i + 1 < len(codes):
-            time.sleep(sleep_sec)
-    return shares
+        time.sleep(sleep_sec)
+        return code, n
+
+    if workers == 1:
+        return dict(_one(code) for code in codes)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return dict(pool.map(_one, codes))
 
 
 def build_universe(config: dict | None = None) -> dict:
     config = config or load_config()
-    size = config["universe"]["size"]
 
     listed = fetch_jpx_listed_stocks(config)
     candidates = filter_domestic_common_stock(listed, config)
     write_sector_map(candidates)
     ranking = compute_liquidity_ranking(candidates["code"].tolist(), config)
 
-    top = ranking.head(size)
+    top = select_liquid_codes(ranking, config)
     name_by_code = dict(zip(candidates["code"], candidates["name"]))
     sector_by_code = (
         dict(zip(candidates["code"], candidates["sector33"])) if "sector33" in candidates.columns else {}
@@ -200,6 +231,11 @@ def build_universe(config: dict | None = None) -> dict:
         "generated_at": datetime.now().astimezone().isoformat(),
         "size": len(stocks),
         "candidates_scanned": len(candidates),
+        # 採用基準を出力にも残す。銘柄数が市況で変動する方式なので、後から
+        # 「この時どの閾値で何銘柄だったか」を追えないと breadth や RS の
+        # 履歴の断絶を説明できなくなる。
+        "min_trading_value": config["universe"].get("min_trading_value"),
+        "size_cap": config["universe"].get("size"),
         "stocks": stocks,
     }
     UNIVERSE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +267,12 @@ def main() -> None:
         print(f"sector_map.json written: {len(payload['sectors'])} codes")
     else:
         universe = build_universe(config)
-        print(f"universe.json written: {universe['size']} stocks")
+        thr = universe.get("min_trading_value")
+        thr_txt = f", min_trading_value={thr / 1e8:.2f}億円" if thr else ""
+        print(
+            f"universe.json written: {universe['size']} stocks "
+            f"(scanned {universe['candidates_scanned']}{thr_txt})"
+        )
 
 
 if __name__ == "__main__":

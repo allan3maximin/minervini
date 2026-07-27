@@ -42,6 +42,10 @@ jobs:
         if: steps.check.outputs.run == 'true'
         uses: ./.github/actions/restore-site-data
 
+      - name: Restore price cache
+        if: steps.check.outputs.run == 'true'
+        uses: ./.github/actions/restore-price-cache
+
       - name: Rebuild universe and run pipeline
         if: steps.check.outputs.run == 'true'
         env:
@@ -76,3 +80,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           message: "deploy: monthly universe rebuild ${{ github.run_id }}"
+
+      # 月次リビルドはユニバースの顔ぶれが入れ替わる = 新規採用銘柄の履歴が
+      # ここで初めてキャッシュに入る。必ず公開しておかないと翌日の日次が取り直す。
+      - name: Publish price cache
+        if: steps.check.outputs.run == 'true'
+        uses: ./.github/actions/publish-price-cache
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "cache: monthly universe rebuild ${{ github.run_id }}"

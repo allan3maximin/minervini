@@ -20,7 +20,8 @@ See design doc section 1.1 / 1.4. Key behaviors implemented here:
   cause an extra (harmless) full re-fetch that normalizes the cache back to
   a single basis.
 - stooq fallback (direct CSV endpoint, custom User-Agent, 2s/ticker sleep)
-  for tickers that fail all yfinance retries
+  for tickers that fail all yfinance retries, capped per run at
+  config data.stooq_max_codes so a wide universe cannot blow up the runtime
 - job-level failure if more than `max_fail_ratio` of the universe has no data
 """
 from __future__ import annotations
@@ -271,7 +272,20 @@ def update_prices(codes: list[str], config: dict | None = None) -> PriceUpdateRe
         if i + chunk_size < len(diverged_codes):
             time.sleep(random.uniform(sleep_lo, sleep_hi))
 
+    # stooq は1銘柄ずつ2秒スリープの逐次フォールバックなので、失敗銘柄が増えると
+    # そのまま実行時間に効く(500銘柄失敗すれば17分)。ユニバースを売買代金閾値方式に
+    # 広げた分、上場直後・売買不成立日が多い銘柄など「そもそもデータが薄い」失敗が
+    # 常時混じるため、1回の run で試す上限を設ける。打ち切られた銘柄はキャッシュが
+    # あれば stale、無ければ failed 扱いで単にその日の対象から外れるだけ
+    # (翌日以降の run で再度リトライされる)。
     stooq_needed = [c for c in codes if fetched.get(c) is None]
+    stooq_max = data_cfg.get("stooq_max_codes")
+    if stooq_max and len(stooq_needed) > int(stooq_max):
+        print(
+            f"stooq fallback needed for {len(stooq_needed)} codes; "
+            f"capping at {stooq_max} this run."
+        )
+        stooq_needed = stooq_needed[: int(stooq_max)]
     for code in stooq_needed:
         fetched[code] = fetch_stooq(code)
         time.sleep(data_cfg.get("stooq_sleep_sec", 2.0))

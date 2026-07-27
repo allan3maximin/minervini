@@ -21,6 +21,97 @@
 
 ---
 
+## 2026-07-27 (127): ユニバースを売買代金1億円の閾値方式へ + 価格キャッシュを専用ブランチへ
+
+### 発端
+
+ユーザーから「対象銘柄を広げたい」。当初は全上場(約3700)まで開ける案だったが、
+副作用を実測して提示したうえで**「20日平均売買代金1億円以上」の閾値方式**に落ち着いた。
+
+**なぜ全上場を採らなかったか**: 実測で現ユニバース1000位の20日平均売買代金は **3.57億円**
+(500位=16.25億、100位=133億、1位=3.4兆)。ここから下は崖で、全上場まで開けると日商
+数百万円の板が薄い銘柄が入る。そういう銘柄はピボットをブレイクしても成行が滑り、
+ストップも板の薄さで機能しない = 「候補には出るが建てられない」ノイズにしかならない。
+ミネルヴィニがユニバースに最低流動性を課しているのと同じ理由。
+
+### ① ユニバース: size 固定 → min_trading_value 閾値
+
+- `config.yaml`: `min_trading_value: 100000000` を新設、`size: null`(上限キャップ扱い、
+  null で無制限)。`size` は消さずに残した — 暴走時の安全弁として使えるため。
+- `src/universe.py`: `select_liquid_codes(ranking, config)` を新設(閾値→キャップの順に適用)。
+  ネットワーク不要なので単体テストできる。`build_universe` は `ranking.head(size)` を
+  これに差し替え。`size` を参照していたのはここ1箇所だけだった
+  (`universe_size` は全て `len(codes)` の動的値なので無影響)。
+- `data/universe.json` に `min_trading_value` / `size_cap` を出力。**銘柄数が市況で変動する
+  方式になったので、後から「この時どの閾値で何銘柄だったか」を追えないと breadth や RS の
+  履歴の断絶を説明できなくなる。**
+- 現ユニバース1000銘柄は全て1億円以上 = 閾値は現1000位より下にある。よって次回の
+  月次リビルドで銘柄数は**増える**(概算1600〜1900)。
+
+### ② 銘柄数増でコケる箇所を先回りで潰した
+
+- `max_fail_ratio` 0.10 → **0.15**。裾野には上場直後・売買不成立日が多いといった
+  「構造的にデータが薄い」銘柄が常時混じる。このガードの本来の目的は「yfinanceが今日
+  丸ごと壊れている」の検知なので、恒常的な取りこぼしで全体abortさせない。
+  **★初回フルrun後に実際の失敗率を必ず実測して締め直すこと。**
+- `data.stooq_max_codes: 150` を新設。stooqフォールバックは1銘柄2秒の逐次なので、
+  失敗が増えるとそのまま実行時間に効く(500銘柄失敗で17分)。1 run の試行上限を設けた。
+  打ち切られた銘柄はキャッシュがあれば stale、無ければ failed でその日の対象から
+  外れるだけ(翌日以降にリトライされる)。
+- `fetch_shares_outstanding` を `ThreadPoolExecutor` で並列化(`universe.shares_workers: 6`)。
+  yfinance の fast_info を銘柄ごとに1リクエスト叩くので、逐次だと 0.5秒×2000銘柄 = 17分。
+
+### ③ 価格キャッシュを price-cache ブランチへ(126のやり残しが実は主犯だった)
+
+**126 の実測は誤っていた。** log.md (126) の表は日次コミット1件の `data/prices` を 0.02MB と
+書いているが、これは部分更新のコミットをたまたま拾ったもの。あらためて `git diff-tree` +
+`cat-file --batch-check` で数え直すと、**全1001ファイルが書き換わるコミットが平日1日1回
+あり、1回あたり 18.0MB の新規 blob** が積まれている(月400MB)。parquet はバイナリで
+git の差分圧縮がほぼ効かない。`.git` 806MB の主犯は docs/data だけではなかった。
+銘柄数が倍になれば 36MB/日 になるので、拡大の前提条件として対処した。
+
+- `.github/actions/publish-price-cache` (新規): `data/prices/` をコミット1個の orphan
+  ブランチ `price-cache` へ force push。publish-site と同じ手口。parquet が0件なら
+  **わざと落とす**(空で上書きすると全銘柄の全履歴再取得になるため)。
+  親リポジトリの index を触らないよう mktemp -d にコピーしてから作業する。
+- `.github/actions/restore-price-cache` (新規): 実行前に復元。**取り出せることを確かめて
+  から既存を消す**(順序を逆にすると、ブランチ側が壊れていたとき手元のキャッシュまで
+  道連れになる)。ブランチがあるのに復元できなければ落とす。
+- daily / universe / maezyou に restore → 実行 → publish を追加。maezyou のキャッシュには
+  途中足が混じるが、master にコミットしていた頃と同じ状態で夕方の日次が RECHECK_DAYS=30
+  で自己修復する(既存設計)。
+
+### ★残作業: price-cache の切替は2段階。まだ半分しか終わっていない
+
+`data/prices` は**まだ master に追跡されたまま**。ここで先に `.gitignore` + `git rm --cached`
+してしまうと、checkout にキャッシュが無く price-cache ブランチもまだ無い状態になり、
+初回 run が全銘柄 × 520日 を取りに行って timeout する。順序は必ず:
+
+1. **(この変更)** actions と wiring だけ入れて push。次の daily run で
+   `price-cache` ブランチが現ユニバースのキャッシュから seed される
+   (restore はブランチ不在時、作業ツリーの data/prices をそのまま使う)。
+2. **ブランチが出来たのを確認してから**、別コミットで `.gitignore` に `data/prices/` を
+   足して `git rm -r --cached data/prices` する。
+
+順番を守ること。1 を飛ばして 2 をやると初回 run が破綻する。
+
+### 検証
+
+- `pytest -q`: **441 passed / 3 failed**。失敗は全て sandbox に pyarrow が無いことによる
+  parquetエンジンのImportError(test_indices ×1, test_prices ×2)で、126 と同じ既知ベースライン。
+  新規テストは `tests/test_universe.py` に4件(閾値/キャップ/閾値なし/両方なし、境界は `>=`)。
+- workflow・action の YAML パース 全12ファイルOK。両 action の bash を抜き出して `bash -n` OK。
+- 実 `data/universe.json` に対して `select_liquid_codes` を通し、1000/1000 が閾値通過を確認。
+
+### 次にやること
+
+- 上の★2段階切替の 2 を、price-cache ブランチ確認後に実施。
+- ユーザーが `universe.yml` を workflow_dispatch で手動起動 → 実際の銘柄数を確認。
+  そのあと初回 daily の実行時間(timeout 60分)と失敗率を実測し、`max_fail_ratio` と
+  `chunk_size`/`sleep_range` を締め直す。
+
+---
+
 ## 2026-07-27 (126): リポジトリ軽量化(gh-pages公開) + 履歴の追記専用JSONL化 + DuckDB分析
 
 ### 発端と、前提のひっくり返り
@@ -35,7 +126,7 @@
 |---|---|
 | `docs/data/charts` | 14.9 MB |
 | `docs/data/*.json` | 2.4 MB |
-| `data/prices` | 0.02 MB |
+| `data/prices` | 0.02 MB | ← **誤り。127で18.0MBと判明**(部分更新のコミットを拾っていた) |
 | `data/*.json` | 0.007 MB |
 
 計 16.9MB / コミット × 1日2〜3コミット。`.git` は **804MB**。

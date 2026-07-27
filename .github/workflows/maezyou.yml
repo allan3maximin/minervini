@@ -80,6 +80,10 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: ./.github/actions/restore-site-data
 
+      - name: Restore price cache
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/restore-price-cache
+
       - name: Run screener pipeline (morning session, snapshot)
         if: steps.check.outputs.skip != 'true'
         env:
@@ -120,3 +124,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           message: "deploy: maezyou screener run ${{ github.run_id }}"
+
+      # 前場 run のキャッシュには途中足が混じるが、これは master にコミットして
+      # いた頃と同じ状態で、夕方の日次 run が RECHECK_DAYS=30 で自己修復する
+      # (既存設計)。publish しないと前場ぶんの取得が丸ごと無駄になる。
+      - name: Publish price cache
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/publish-price-cache
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "cache: maezyou screener run ${{ github.run_id }}"

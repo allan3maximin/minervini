@@ -1,0 +1,62 @@
+name: Restore price cache
+description: >
+  price-cache ブランチに置かれている data/prices/ (parquet 価格キャッシュ) を
+  作業ツリーへ復元する。
+
+  価格取得は「キャッシュにある分は取りに行かず、直近 RECHECK_DAYS 日ぶんだけ
+  再取得してマージする」増分方式なので、キャッシュが無い状態で日次 run を回すと
+  全銘柄 × history_days(520日) を取りに行くことになり、実行時間が跳ね上がる。
+  ブランチがあるのに復元できなかった場合はわざとジョブを落とす。
+
+inputs:
+  branch:
+    description: 価格キャッシュ用ブランチ名
+    required: false
+    default: price-cache
+  require-existing:
+    description: >
+      "true" のとき、ブランチは存在するのに data/prices の取り出しに失敗したら
+      ジョブを失敗させる。
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch and restore data/prices from ${{ inputs.branch }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch="${{ inputs.branch }}"
+
+        if ! git fetch --depth=1 origin "$branch" 2>/dev/null; then
+          # 初回(移行直後)は master にまだ data/prices が残っているのでそれを使う。
+          # ブランチへの seed は同じ run の最後の publish-price-cache が行う。
+          echo "::notice::ブランチ '$branch' がまだ存在しない。作業ツリーの data/prices をそのまま使う。"
+          mkdir -p data/prices
+          echo "作業ツリーの銘柄数: $(find data/prices -type f -name '*.parquet' | wc -l)"
+          exit 0
+        fi
+
+        # 取り出せることを確かめてから既存を消す。順序を逆にすると、ブランチ側が
+        # 壊れていたときに手元のキャッシュまで道連れにしてしまう。
+        if ! git cat-file -e "FETCH_HEAD:data/prices" 2>/dev/null; then
+          if [ "${{ inputs.require-existing }}" = "true" ]; then
+            echo "::error::'$branch' に data/prices が無い。全銘柄の全履歴再取得を避けるため中断する。"
+            exit 1
+          fi
+          echo "::warning::'$branch' に data/prices が無い。作業ツリーのまま続行する。"
+          mkdir -p data/prices
+          exit 0
+        fi
+
+        rm -rf data/prices
+        mkdir -p data/prices
+        git archive FETCH_HEAD data/prices | tar -x
+        n=$(find data/prices -type f -name '*.parquet' | wc -l)
+        echo "復元した銘柄数: ${n}"
+
+        if [ "${{ inputs.require-existing }}" = "true" ] && [ "$n" -eq 0 ]; then
+          echo "::error::価格キャッシュを1銘柄も復元できなかった。中断する。"
+          exit 1
+        fi
