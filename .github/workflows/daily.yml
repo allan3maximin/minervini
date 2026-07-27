@@ -60,6 +60,13 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
+      # docs/data/** は master にコミットせず gh-pages(公開ブランチ)にのみ置く構成
+      # (2026-07-27〜)。パイプラインは breadth.json の history を読み戻して追記する
+      # ため、実行前に前回の生成物を必ず復元しておく必要がある。
+      - name: Restore generated site data
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/restore-site-data
+
       - name: Run daily pipeline
         if: steps.check.outputs.skip != 'true'
         env:
@@ -75,7 +82,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ docs/
+          # docs/ の生成物は gh-pages へ直接 publish するので master には積まない
+          # (docs/ 配下のソース = index.html / assets/ はパイプラインが触らない)。
+          git add data/
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -99,8 +108,18 @@ jobs:
       # ローカルcommitした内容)」を採用してjob失敗を防ぐ。
       # 注意: rebase中の ours/theirs はmergeと逆で、「ours」=rebase先(=origin)、
       # 「theirs」=replayされる自分のコミット、という意味になる。
+      # 2026-07-27: docs/ を master にコミットしなくなったので上記の競合源自体は
+      # 消えたが、data/ 側 (universe.json 等) の競合に対する保険として据え置く。
       - name: Pull latest and push
         if: steps.commit.outputs.has_changes == 'true'
         run: |
           git pull --rebase -X theirs origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}
+
+      # master への push 可否とは独立に、生成できたサイトは必ず公開する。
+      - name: Publish site
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/publish-site
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "deploy: daily screener run ${{ github.run_id }}"

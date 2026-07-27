@@ -38,6 +38,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # indices.json だけを差し替えるワークフローだが、公開ブランチへは docs/ を
+      # まるごと force push するため、他の生成物 (report.json / charts/ 等) を
+      # 消さないよう前回の生成物一式を先に復元しておく必要がある。
+      - name: Restore generated site data
+        uses: ./.github/actions/restore-site-data
+
       - name: Refresh indices only
         env:
           # docs/data/indices.json の暗号化鍵 (daily.ymlと同じ)。未設定なら平文出力。
@@ -49,7 +55,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/indices/ docs/data/indices.json
+          # docs/data/indices.json は gh-pages 側にだけ置く (master には積まない)。
+          git add data/indices/
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -65,3 +72,10 @@ jobs:
         run: |
           git pull --rebase origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}
+
+      # indices.json の更新は master のコミット有無に関係なく公開する。
+      - name: Publish site
+        uses: ./.github/actions/publish-site
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "deploy: intraday index refresh ${{ github.run_id }}"

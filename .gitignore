@@ -5,3 +5,14 @@ __pycache__/
 venv/
 *.egg-info/
 .DS_Store
+
+# パイプラインの生成物 (2026-07-27〜)。
+# これらは master にはコミットせず、公開ブランチ gh-pages にのみ置く。
+# 理由: charts/*.json だけで1回のrunあたり約15MB増え、日に2〜3回コミットされて
+# いたため .git が804MBまで肥大化していた。gh-pages は毎回コミット1個の orphan
+# ブランチとして force push するので履歴が積み上がらない。
+# 復元/公開は .github/actions/{restore-site-data,publish-site} が担当する。
+docs/data/
+
+# publish-site アクションが公開ブランチ用に作る一時ファイル
+docs/.git/

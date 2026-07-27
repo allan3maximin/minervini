@@ -1,0 +1,55 @@
+name: Restore generated site data
+description: >
+  gh-pages ブランチ(Pages公開ブランチ)に置かれている前回の生成物 data/ を
+  作業ツリーの docs/data/ へ復元する。パイプラインは breadth.json の history 等を
+  「読み戻して追記」するため、生成物を master にコミットしない構成では
+  この復元を必ず先に通す必要がある。
+
+inputs:
+  branch:
+    description: 公開ブランチ名
+    required: false
+    default: gh-pages
+  require-existing:
+    description: >
+      "true" のとき、公開ブランチは存在するのに data/ の取り出しに失敗したら
+      ジョブを失敗させる。履歴ファイル(breadth.json 等)の静かな消失を防ぐガード。
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch and restore docs/data from ${{ inputs.branch }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch="${{ inputs.branch }}"
+
+        if ! git fetch --depth=1 origin "$branch" 2>/dev/null; then
+          echo "::notice::公開ブランチ '$branch' がまだ存在しない。初回実行として空の docs/data から開始する。"
+          mkdir -p docs/data
+          exit 0
+        fi
+
+        # 公開ブランチはあるので、ここから先の失敗は「履歴の消失」を意味する。
+        rm -rf docs/data
+        mkdir -p docs/data
+
+        if git cat-file -e "FETCH_HEAD:data" 2>/dev/null; then
+          git archive FETCH_HEAD data | tar -x -C docs/
+          echo "復元したファイル数: $(find docs/data -type f | wc -l)"
+        else
+          echo "::warning::'$branch' に data/ ディレクトリが無い。"
+          if [ "${{ inputs.require-existing }}" = "true" ]; then
+            echo "::error::公開ブランチは存在するのに生成物が取り出せなかった。履歴を上書きしないよう中断する。"
+            exit 1
+          fi
+        fi
+
+        # breadth.json は地合い履歴の蓄積先で、失うと過去分を再構築できない。
+        # 公開ブランチがあるのにこれが無い場合は異常とみなす。
+        if [ "${{ inputs.require-existing }}" = "true" ] && [ ! -f docs/data/breadth.json ]; then
+          echo "::error::docs/data/breadth.json を復元できなかった。地合い履歴が消えるため中断する。"
+          exit 1
+        fi

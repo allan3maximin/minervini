@@ -47,6 +47,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # breadth.json は master ではなく公開ブランチ gh-pages にのみ存在するので、
+      # backfill 対象を先に復元する (2026-07-27〜)。
+      - name: Restore generated site data
+        uses: ./.github/actions/restore-site-data
+
       - name: Run breadth backfill
         env:
           # docs/data/breadth.json の暗号化鍵。これが無いと復号できず失敗するため必須。
@@ -58,23 +63,11 @@ jobs:
             python scripts/backfill_breadth_history.py
           fi
 
-      - name: Commit results
-        id: commit
+      # breadth.json は gh-pages 側の生成物なので master へのコミットは行わず、
+      # 公開ブランチへの publish だけで反映する。
+      - name: Publish site
         if: inputs.dry_run != true
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/data/breadth.json
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            git commit -m "chore: backfill breadth history detail metrics $(date -u +%Y-%m-%d)"
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Pull latest and push
-        if: steps.commit.outputs.has_changes == 'true'
-        run: |
-          git pull --rebase -X theirs origin ${{ github.ref_name }}
-          git push origin HEAD:${{ github.ref_name }}
+        uses: ./.github/actions/publish-site
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "deploy: backfill breadth history ${{ github.run_id }}"

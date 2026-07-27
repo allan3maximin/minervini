@@ -1,0 +1,46 @@
+name: Publish site (docs source change)
+
+# docs/ 配下の「ソース」(index.html / assets/*.js / style.css / auth/vault.json 等) が
+# master で更新されたときに、公開ブランチ gh-pages へ即座に反映するためのワークフロー。
+#
+# 背景 (2026-07-27): 生成物 docs/data/** を master にコミットしない構成へ移行したため、
+# サイトの公開は各パイプラインの最後の publish ステップ頼みになった。しかし
+# フロントの webauthn-vault.js は GitHub Contents API で master の docs/auth/vault.json を
+# 直接書き換えるため、これが公開ブランチへ載るのが「次のパイプライン実行まで」だと
+# パスキー登録直後に解錠できない。ソース変更を検知して即publishすることでこれを塞ぐ。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/**"
+      - ".github/actions/publish-site/**"
+      - ".github/actions/restore-site-data/**"
+      - ".github/workflows/pages-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: minervini-pages-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # 生成物 (report.json / charts/ 等) は master に無いので、公開ブランチの
+      # 現行内容から復元してからソースを重ねる。これをしないと publish の
+      # force push でダッシュボードのデータが全部消える。
+      - name: Restore generated site data
+        uses: ./.github/actions/restore-site-data
+
+      - name: Publish site
+        uses: ./.github/actions/publish-site
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "deploy: docs source ${{ github.sha }}"

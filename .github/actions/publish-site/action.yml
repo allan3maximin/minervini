@@ -1,0 +1,57 @@
+name: Publish docs/ to Pages branch
+description: >
+  docs/ の中身をそのまま公開ブランチ(既定 gh-pages)のルートへ、
+  毎回「コミット1個だけの orphan ブランチ」として force push する。
+  履歴を積まないので、日次で生成される charts/*.json (1回あたり約15MB) が
+  リポジトリを永続的に肥大化させることがなくなる。
+
+inputs:
+  branch:
+    description: 公開ブランチ名
+    required: false
+    default: gh-pages
+  message:
+    description: コミットメッセージ
+    required: false
+    default: deploy
+  token:
+    description: push に使うトークン (secrets.GITHUB_TOKEN)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Force-push docs/ as a single-commit orphan branch
+      shell: bash
+      env:
+        PUBLISH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        branch="${{ inputs.branch }}"
+
+        if [ ! -d docs ]; then
+          echo "::error::docs/ が存在しない。"
+          exit 1
+        fi
+
+        # 誤って前回の作業用リポジトリが残っていた場合に備えて掃除
+        rm -rf docs/.git
+
+        # Jekyll のビルドを止める (_ で始まるファイルが無視されるのを防ぐ)
+        touch docs/.nojekyll
+
+        pushd docs >/dev/null
+        git init -q
+        git checkout -q -b "$branch"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git commit -q -m "${{ inputs.message }}"
+        git push -q --force \
+          "https://x-access-token:${PUBLISH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          "$branch"
+        popd >/dev/null
+
+        # 親リポジトリが docs/ を gitlink (submodule) と誤認しないよう必ず消す
+        rm -rf docs/.git
+        echo "公開完了: $branch ($(date -u +%FT%TZ))"

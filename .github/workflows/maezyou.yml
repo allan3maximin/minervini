@@ -73,6 +73,13 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
+      # docs/data/** は master ではなく gh-pages にのみ置く構成 (2026-07-27〜)。
+      # 前場スナップショットは canonical の breadth.json history をベースに
+      # *_maezyou.json を組み立てるため、前回生成物の復元が必須。
+      - name: Restore generated site data
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/restore-site-data
+
       - name: Run screener pipeline (morning session, snapshot)
         if: steps.check.outputs.skip != 'true'
         env:
@@ -89,7 +96,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ docs/
+          # docs/ は gh-pages へ直接 publish するので master には積まない。
+          git add data/
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -105,3 +113,10 @@ jobs:
         run: |
           git pull --rebase -X theirs origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}
+
+      - name: Publish site
+        if: steps.check.outputs.skip != 'true'
+        uses: ./.github/actions/publish-site
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          message: "deploy: maezyou screener run ${{ github.run_id }}"
