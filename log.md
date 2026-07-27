@@ -21,6 +21,97 @@
 
 ---
 
+## 2026-07-27 (129): UI刷新 — 黒背景 / 透明Dock / 起動画面風ロック / 指追従スワイプ / フィルタ再設計
+
+ユーザーから6点の要望。触ったのは `docs/index.html` `docs/assets/style.css`
+`docs/assets/app.js` `docs/manifest.json` の4ファイルのみ(フロント表示層だけ)。
+
+### ① 背景を完全な黒に
+
+`--bg: #000000`。`body` の radial-gradient 積層をやめて単色に。
+黒の上でも段差が読めるよう `--panel` 系と `--border` 系は**少しだけ持ち上げた**
+(真っ黒背景だと従来の階調では境界が消えるため)。`manifest.json` の
+`background_color` / `theme_color` と `<meta name="theme-color">` も #000 に統一。
+
+### ② Dock/タブバーを透明に
+
+`.dock-nav` `.stock-tabs` `.list-tabs` `.market-tabs` `.stock-nav-btn` `.list-tool-btn`
+は全部 `background: rgba(19,23,32,0.88)` の**不透明な黒い箱**だった。これを
+`--glass` / `--glass-border`(白の極薄ティント)+ `backdrop-filter: blur() saturate()`
+に置換。黒く塗るのではなく背景が透けるすりガラスにしたので、コンテンツが下を
+流れているのが見える = 浮いている感じが出る。
+
+### ③ ロック画面を「アプリ起動画面」に
+
+`.lock-card` の枠・🔐絵文字・暗号化の説明文(`#lock-prompt`)は全削除。
+枠なしの純黒の上に、SVGのチャート型マーク(stroke-dasharray で描画アニメ →
+最後の点がふわっと出て脈打つ)+ `Minervini**Screener**` のワードマーク +
+`TAP TO UNLOCK` の小さいCTA(呼吸アニメ)だけ。iOSのスプラッシュのイメージ。
+`prefers-reduced-motion` で全アニメ停止。
+
+**ハマりどころ2つ(将来のために残す)**:
+- このコードベースには**グローバルな `[hidden] { display: none }` が無い**
+  (`.view-section[hidden]` のように個別指定しかない)。`.lock-cta` は
+  `display: inline-flex` なので、そのままだと `hidden` 属性が効かず
+  LOADING と TAP TO UNLOCK が同時表示される。→ `.lock-cta[hidden]` を明示追加。
+- 旧コードは認証中に `unlockBtn.textContent = "認証中..."` していたが、新ボタンは
+  中に `<i class="bi bi-fingerprint">` を持つのでアイコンが消し飛ぶ。
+  → `btnHtmlIdle` / `btnHtmlBusy` を持って `innerHTML` で差し替えるようにした。
+
+### ④ 銘柄の横スワイプを指追従ドラッグに
+
+`wireStockSwipe` を書き直し。Pointer Events を capture で拾い、`translate3d` +
+`opacity` だけ(合成のみでレイアウトを起こさない)でパネルを指に追従させる。
+- 次/前の銘柄が無い方向は `RUBBER=0.28` のラバーバンドで抵抗をかける
+  (端であることが指で分かる)。
+- しきい値未満で離したら `cubic-bezier(0.22,1.2,0.36,1)` で少しオーバーシュート
+  させて戻す。しきい値(55px)超 & 横優勢(1.4倍)なら 150ms で振り抜いて `navigateStock`。
+- `.stock-panel` の `touch-action: pan-y` は既存のまま。縦パンはブラウザに渡って
+  `pointercancel` が来るので、縦スクロールを奪わない。
+
+**確定時の落とし穴**: `navigateStock` は `location.hash` を書くだけで、`hashchange` は
+次のタスクで発火する。確定直後に `reset(false)` すると**古い銘柄が中央に戻った絵が
+1フレーム出る**。→ 通常は再描画時の `playPanelSlide` に後始末させ、保険として
+400ms 後のガード付き reset だけ残した。`playPanelSlide` 側もドラッグが残した
+インラインスタイルを消すようにしてある。
+
+### ⑤ 「表示している市場」の下の余白の正体
+
+`.lf-field { flex: 1 1 140px }` は**横flexの `.lf-row` の子として使う前提**の指定
+(flex-basis = 幅)。これを縦flexの `.list-filter-form` 直下に置いていたので
+flex-basis が**高さ**として解釈され、中身より遥かに高い箱になっていた。
+→ `.list-filter-form > .lf-field { flex: 0 0 auto; }` を追加。一時/永久とも解消。
+
+### ⑥ フィルタUI/UX再設計(一時・永久 共通)
+
+- 株価/時価総額の上限下限が4つの独立ラベル付きフィールドだったのを、
+  `.lf-range`(下限 〜 上限 [単位])の1行に集約。
+- チェックボックス(`.lf-check*`)を廃して**チップ(`.lf-chip`)**に。`:has(input:checked)`
+  + JS同期の `.is-on` フォールバック。押下時 `scale(0.96)`。
+- グループごとに「全て/解除」トグル(`.lf-toggle-all`)を追加。全ON⇄全OFFで
+  ラベルも切り替わる(`wireChipGroup`)。
+- 一時フィルタ(ボトムシート)の適用/リセットは `position: sticky` でシート下端に固定。
+  スクロールしても常に押せる。「クリア」→「リセット」に改名。
+
+### 永久フィルターに「ステータス」が無いのは実装漏れか? → 漏れではない
+
+`app.js` のコメント通り、**恒久フィルタ(設定画面)はユニバースの絞り込み専用**で、
+ステータス(伸びすぎ・鮮度切れ等)は日々切り替える表示トグルなので一時フィルタ側に
+だけ置く、という設計判断。ユーザーも「今のままでいい」。代わりに永久フィルタの
+末尾に「ステータスの切替はリスト画面の漏斗アイコンにある」旨の1行案内を追加した。
+
+### 検証
+
+Chrome拡張が繋がらず(`Claude in Chrome is not connected`)、sandboxにもブラウザが
+無いのでスクリーンショット検証は未実施。代わりに静的検証:
+`node --check app.js` OK / CSSの波括弧収支0(負に潜る箇所なし) / 参照している
+26個の要素IDが全てHTMLに1つずつ存在 / `lock-prompt` `lock-card` `lock-icon`
+`lock-note` `lf-check` `lf-checks` の残骸参照ゼロ。
+`tools/update_cache_busters.py` でキャッシュバスター再生成済み。
+**★実機での見た目確認は次回ユーザーに触ってもらうこと。**
+
+---
+
 ## 2026-07-27 (128): data/prices を master から追跡解除(127の★残作業の完了)
 
 127 が「2段階切替の 1 だけやった」と書いて残していた **2 を実施**。127 のコミット

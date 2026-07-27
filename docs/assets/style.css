@@ -1,9 +1,17 @@
+/* 2026-07-27 UI: 背景は完全な黒(#000)。パネル階調は黒の上でも段差が読める
+   よう少しだけ持ち上げ、Dock/タブバーは「黒い箱」ではなく背景が透ける
+   すりガラス(--glass / --glass-strong)で浮かせる。 */
 :root {
-  --bg: #0b0e14;
-  --panel: #131720;
-  --panel-2: #1a2030;
-  --border: #232a38;
-  --border-strong: #2e3748;
+  --bg: #000000;
+  --panel: #0e1118;
+  --panel-2: #161b25;
+  --border: #222835;
+  --border-strong: #303849;
+  /* 浮いているUI(Dock・タブバー・ナビボタン)の共通ガラス。背景色は敷かず、
+     わずかな白のティント + blur だけで奥が透ける。 */
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-strong: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.12);
   --text: #e8eaf0;
   --text-dim: #98a2b3;
   --accent: #34d399;
@@ -30,9 +38,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(1200px 400px at 50% -200px, rgba(96, 165, 250, 0.07), transparent),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
   font-size: 14px;
@@ -174,14 +180,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 5px;
   min-height: 38px;
   padding: 0 12px;
-  background: rgba(19, 23, 32, 0.88);
-  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: 999px;
   color: var(--text-dim);
   font-size: 12.5px;
   cursor: pointer;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
   touch-action: manipulation;
 }
 .list-tool-btn:active { color: var(--text); }
@@ -1448,13 +1454,17 @@ a.nav-btn:hover { border-color: var(--link); }
   transform: translateX(-50%);
   display: flex;
   gap: 2px;
-  background: rgba(19, 23, 32, 0.88);
-  border: 1px solid var(--border-strong);
+  /* 黒い箱にせず、背景が透けるすりガラス。塗りは白のごく薄いティントだけで、
+     形は縁のハイライト(--glass-border)と内側1pxの白線で見せる。 */
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: 24px;
   padding: 5px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   z-index: 50;
   touch-action: none;
 }
@@ -1511,11 +1521,12 @@ a.nav-btn:hover { border-color: var(--link); }
   max-width: 100%;
   margin: 8px 0 2px;
   padding: 4px;
-  background: rgba(19, 23, 32, 0.88);
-  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: 999px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -1544,14 +1555,15 @@ a.nav-btn:hover { border-color: var(--link); }
   width: 40px;
   height: 40px;
   padding: 0;
-  background: rgba(19, 23, 32, 0.88);
-  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: 999px;
   color: var(--text-dim);
   font-size: 18px;
   cursor: pointer;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   transition: color 0.18s, opacity 0.18s;
 }
 .stock-nav-btn:active { color: var(--text); }
@@ -1631,12 +1643,21 @@ a.nav-btn:hover { border-color: var(--link); }
   touch-action: pan-y;
 }
 .stock-panel.active { display: block; }
-/* パネル切替時のスライドイン(約150ms)。個別株の前後銘柄・市況データ/分析・
-   セクター詳細/簡易で共通利用する。slide-next=次(右から) / slide-prev=前(左から)。 */
-@keyframes panel-slide-next { from { transform: translateX(22px); opacity: 0.35; } to { transform: none; opacity: 1; } }
-@keyframes panel-slide-prev { from { transform: translateX(-22px); opacity: 0.35; } to { transform: none; opacity: 1; } }
-.stock-panels.slide-next, .market-panels.slide-next, .hm-panels.slide-next { animation: panel-slide-next 150ms ease-out; }
-.stock-panels.slide-prev, .market-panels.slide-prev, .hm-panels.slide-prev { animation: panel-slide-prev 150ms ease-out; }
+/* パネル切替時のスライドイン。個別株の前後銘柄・市況データ/分析・セクター
+   詳細/簡易で共通利用する。slide-next=次(右から) / slide-prev=前(左から)。
+   個別株の指追従ドラッグ(app.js wireStockSwipe)は「指の勢いのまま画面外へ抜ける」
+   ので、その続きとして反対側から入ってくるよう開始位置を深く(28%)取り、
+   減速主体のイージング(cubic-bezier)で受け止める。 */
+@keyframes panel-slide-next { from { transform: translate3d(28%, 0, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes panel-slide-prev { from { transform: translate3d(-28%, 0, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+.stock-panels.slide-next, .market-panels.slide-next, .hm-panels.slide-next {
+  animation: panel-slide-next 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stock-panels.slide-prev, .market-panels.slide-prev, .hm-panels.slide-prev {
+  animation: panel-slide-prev 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* ドラッグ中の transform を合成レイヤーで処理させ、テキストのにじみを防ぐ */
+.stock-panels { backface-visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .stock-panels.slide-next, .stock-panels.slide-prev,
   .market-panels.slide-next, .market-panels.slide-prev,
@@ -2068,29 +2089,33 @@ a.nav-btn:hover { border-color: var(--link); }
 .list-filter-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
 }
 /* ボトムシート内のフィルタは、シート自体が枠と余白を持つので、内側フォームの
-   二重の背景/枠/内側パディングを消してタイトに。表示市場の下に空く余白を詰める。 */
+   二重の背景/枠/内側パディングを消してタイトに。 */
 #adhoc-filter-form.list-filter-form {
   background: transparent;
   border: none;
   padding: 0;
-  gap: 12px;
+  gap: 16px;
 }
-#adhoc-filter-form .lf-actions { border-top: none; padding-top: 4px; }
-.lf-row { display: flex; flex-wrap: wrap; gap: 14px; }
+.lf-row { display: flex; flex-wrap: wrap; gap: 12px; }
 .lf-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1 1 160px;
+  flex: 1 1 140px;
   min-width: 0;
 }
+/* .lf-field は .lf-row(横flex)の子として flex-basis=幅 で使う前提の指定。
+   縦flexである .list-filter-form の直下に置くと flex-basis が「高さ」として
+   効いてしまい、中身より遥かに高い箱になって下に大きな空白ができる
+   (「表示している市場」の下に空いていた余白の正体)。直下では固定にする。 */
+.list-filter-form > .lf-field { flex: 0 0 auto; }
 .lf-field-wide { flex-basis: 100%; }
 .lf-label { font-size: 12px; color: var(--text-dim); }
 .lf-label small { color: var(--text-dim); opacity: 0.75; font-size: 11px; }
@@ -2099,25 +2124,94 @@ a.nav-btn:hover { border-color: var(--link); }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
-  padding: 8px 10px;
-  font-size: 14px;
+  padding: 9px 10px;
+  font-size: 15px; /* iOSで16px未満だとフォーカス時にズームするが、他入力と揃える */
   width: 100%;
 }
-.lf-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 2px; }
-/* ステータスは11項目あるので2列グリッドで縦に積み、ボトムシートの高さを抑える。 */
-.lf-checks-status {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 6px 12px;
+.lf-field input[type="number"]:focus-visible,
+.lf-range input[type="number"]:focus-visible {
+  outline: none;
+  border-color: var(--accent);
 }
-.lf-checks-status .lf-check { font-size: 12px; }
-.lf-check {
+
+/* 見出し + 中身 の小さなまとまり。項目を「株価」「時価総額」「市場」…と
+   グルーピングして、ラベル行の情報量を減らす。 */
+.lf-group { display: flex; flex-direction: column; gap: 7px; }
+.lf-group-head { display: flex; align-items: center; gap: 8px; }
+.lf-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+/* 「全て / 解除」トグル。チップ群の右端に小さく置く。 */
+.lf-toggle-all {
+  margin-left: auto;
+  min-height: 0;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lf-toggle-all:hover, .lf-toggle-all:focus-visible { color: var(--text); border-color: var(--accent); }
+
+/* 下限〜上限を1行に。ラベルは .lf-group-title 側に1つだけ持たせる。 */
+.lf-range { display: flex; align-items: center; gap: 8px; }
+.lf-range input[type="number"] {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 9px 10px;
+  font-size: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.lf-range-sep { flex: 0 0 auto; color: var(--text-dim); font-size: 13px; }
+.lf-unit { flex: 0 0 auto; color: var(--text-dim); font-size: 12px; min-width: 2.4em; }
+
+/* チップ型の表示トグル。チェックボックスは視覚的に隠し、ラベル全体を
+   タップターゲットにする(指で押しやすく、on/offが面で読める)。 */
+.lf-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* ステータスは11項目あるので、詰めて2〜3列に流し込む。 */
+.lf-chips-status .lf-chip { font-size: 12px; padding: 6px 11px; }
+.lf-chip {
+  position: relative; /* 中の input を absolute で隠すため */
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text);
+  min-height: 32px;
+  padding: 6px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
+.lf-chip input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.lf-chip:has(input:checked) {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: var(--accent);
+  font-weight: 600;
+}
+.lf-chip:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 2px; }
+.lf-chip:active { transform: scale(0.96); }
+/* :has() 非対応ブラウザ向けの保険。JSで .is-on を同期する(app.js syncChipStates)。 */
+.lf-chip.is-on {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .lf-actions {
   display: flex;
   align-items: center;
@@ -2126,10 +2220,25 @@ a.nav-btn:hover { border-color: var(--link); }
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+/* ボトムシートは縦に長くなるので、操作(リセット/適用)は下端に貼り付けて
+   スクロール位置に関わらず届くようにする。 */
+#adhoc-filter-form .lf-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: -4px;
+  padding: 12px 0 2px;
+  background: linear-gradient(to bottom, rgba(14, 17, 24, 0), var(--panel) 22%);
+  border-top: 1px solid var(--border);
+}
+#adhoc-filter-form .lf-actions button { flex: 1 1 0; min-height: 42px; }
 /* 適用ボタンは常に右端へ寄せる(クリア/ステータスは左寄せのまま) */
-.lf-actions .lf-apply, .lf-actions #alf-apply-btn { margin-left: auto; }
+.lf-actions .lf-apply { margin-left: auto; }
 .lf-status { font-size: 12px; color: var(--text-dim); }
 .lf-status.lf-status-active { color: var(--accent, #4ea1ff); }
+/* 恒久フィルタ下の「ステータスはリスト画面側」案内 */
+.lf-foot-note { margin: 10px 2px 0; line-height: 1.7; }
+.lf-foot-note strong { color: var(--text); font-weight: 600; }
 
 /* リスト画面の「N件除外中」小バナー */
 .list-filter-note {
@@ -2327,7 +2436,11 @@ a.nav-btn:hover { border-color: var(--link); }
 .market-modal-range { font-size: 12.5px; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
 .market-modal-date { font-size: 11px; color: var(--text-dim); margin: 12px 0 0; }
 
-/* 起動時パスキーゲート (app.js ensureDataAccess / index.html #lock-screen) */
+/* 起動時パスキーゲート (app.js ensureDataAccess / index.html #lock-screen)
+   ネイティブアプリの起動スプラッシュ相当。真っ黒の全画面にマークとワードマーク
+   だけを置き、操作の合図は "TAP TO UNLOCK" の1行に集約する。画面のどこを
+   タップしても解錠が走る(app.js側でoverlayにclickを配線)ので、ボタンは
+   「押せる場所の目印」であって唯一の導線ではない。 */
 .lock-screen {
   position: fixed;
   inset: 0;
@@ -2335,25 +2448,123 @@ a.nav-btn:hover { border-color: var(--link); }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  /* 中央にごく淡いグリーンのグローだけ乗せた黒。周囲は完全な #000。 */
+  background:
+    radial-gradient(60vmin 60vmin at 50% 44%, rgba(52, 211, 153, 0.07), transparent 70%),
+    #000;
   padding: 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 /* display:flex が hidden属性のUAスタイル(display:none)より強いため明示的に消す */
 .lock-screen[hidden] { display: none; }
-.lock-card {
+
+.lock-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 32px 28px;
-  max-width: 360px;
-  width: 100%;
+  /* 起動直後にふわっと立ち上がる。要素ごとに遅延をずらして順に現れる。 */
+  animation: lock-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.lock-card h2 { margin: 0 0 8px; font-size: 16px; }
-.lock-icon { font-size: 40px; margin-bottom: 12px; }
-.lock-note { color: var(--text-dim); font-size: 12.5px; line-height: 1.7; margin: 0 0 20px; }
-.lock-card button { width: 100%; margin-top: 8px; padding: 10px 0; }
-.lock-card .form-error { margin-top: 12px; }
+@keyframes lock-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.lock-mark { width: 84px; height: 84px; margin-bottom: 22px; }
+.lock-mark-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* 折れ線を左から描いていく(起動アニメ)。dasharray長は経路長より十分長く取る。 */
+.lock-mark-line {
+  stroke-dasharray: 140;
+  stroke-dashoffset: 140;
+  animation: lock-draw 900ms cubic-bezier(0.4, 0, 0.2, 1) 120ms forwards;
+  filter: drop-shadow(0 0 10px rgba(52, 211, 153, 0.35));
+}
+@keyframes lock-draw { to { stroke-dashoffset: 0; } }
+/* 線が引き終わってから先端のドットが点灯し、以後ゆっくり脈打つ。 */
+.lock-mark-dot {
+  opacity: 0;
+  transform-origin: 58px 12px;
+  animation:
+    lock-dot-in 320ms ease-out 900ms forwards,
+    lock-dot-pulse 2.6s ease-in-out 1220ms infinite;
+  filter: drop-shadow(0 0 8px rgba(74, 222, 159, 0.8));
+}
+@keyframes lock-dot-in { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes lock-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.lock-wordmark {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  white-space: nowrap;
+}
+.lock-wordmark span { font-weight: 700; }
+
+/* 解錠の合図。判定中はLOADING、暗号化+未解錠になったらボタンに差し替わる。
+   高さを固定しておき、差し替わってもワードマークの位置がズレないようにする。 */
+.lock-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  margin-top: 30px;
+}
+.lock-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  min-height: 0;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em; /* letter-spacingで右に付く余白ぶん、見た目の中央を戻す */
+  cursor: pointer;
+}
+/* display:inline-flex は hidden属性のUAスタイル(display:none)より強いので明示的に消す
+   (LOADING⇄TAP TO UNLOCK の出し分けは hidden 属性で行っている) */
+.lock-cta[hidden] { display: none; }
+.lock-cta .bi { font-size: 16px; letter-spacing: normal; color: var(--accent); }
+/* タップを促すため、ゆっくり明滅させる */
+.lock-cta-btn { animation: lock-breathe 2.4s ease-in-out infinite; }
+.lock-cta-btn:hover { border: none; color: var(--text); }
+.lock-cta-btn:disabled { opacity: 1; cursor: default; animation: none; }
+@keyframes lock-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* LOADING 表示の小さいリング */
+.lock-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: lock-spin 700ms linear infinite;
+}
+@keyframes lock-spin { to { transform: rotate(360deg); } }
+
+.lock-err {
+  max-width: 300px;
+  margin-top: 18px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.lock-err[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lock-stage, .lock-mark-line, .lock-mark-dot, .lock-cta-btn, .lock-spinner { animation: none; }
+  .lock-mark-line { stroke-dashoffset: 0; }
+  .lock-mark-dot { opacity: 1; }
+}
 
 /* 用語ヘルプ(？ボタン→ポップアップ説明。2026-07-19タスク)。表示専用。 */
 .help-btn {

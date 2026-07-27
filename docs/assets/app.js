@@ -1285,6 +1285,53 @@ let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses
 // ときに記録し、個別株画面の ＜/＞ で同ティアのフィルタ済み並び順を前後移動する。
 let listNavTier = null;
 
+// ---- フィルタフォームのチップUI共通ヘルパ (2026-07-27 UI刷新) --------------
+// 市場/ステータスの表示トグルは、小さいチェックボックスから「押せるチップ」に
+// 変えた。中の <input type=checkbox> は視覚的に隠すだけで、値の読み書きは従来
+// どおり input.checked を見る(既存の readForm / applyAdhocFilterFromForm は無改修)。
+
+// チェック状態を .is-on クラスへ反映する。見た目は基本 CSS の :has() で付くが、
+// :has() 非対応環境(古いFirefox等)でもチップが点灯するようにする保険。
+function syncChipStates(wrap) {
+  if (!wrap) return;
+  wrap.querySelectorAll(".lf-chip").forEach((chip) => {
+    const cb = chip.querySelector("input[type=checkbox]");
+    chip.classList.toggle("is-on", !!(cb && cb.checked));
+  });
+}
+
+// チップ群の「全て / 解除」トグルを配線する。全部onなら押下で全部off、
+// それ以外(一部on/全部off)なら全部onにする。ラベルも状態に追従させる。
+// onChange は反映が必要なフォーム(恒久フィルタ)から渡す。
+function wireChipGroup(wrap, toggleBtn, onChange) {
+  if (!wrap) return;
+  const allOn = () => {
+    const cbs = wrap.querySelectorAll("input[type=checkbox]");
+    return cbs.length > 0 && Array.from(cbs).every((cb) => cb.checked);
+  };
+  const refresh = () => {
+    syncChipStates(wrap);
+    if (toggleBtn) toggleBtn.textContent = allOn() ? "解除" : "全て";
+  };
+  wrap.addEventListener("change", refresh);
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      const next = !allOn();
+      wrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = next; });
+      refresh();
+      if (onChange) onChange();
+    });
+  }
+  wrap._refreshChips = refresh;
+  refresh();
+}
+
+// フォームの値を流し込んだ後に呼ぶ(チップの点灯とトグルのラベルを合わせる)。
+function refreshChipGroup(wrap) {
+  if (wrap && typeof wrap._refreshChips === "function") wrap._refreshChips();
+  else syncChipStates(wrap);
+}
+
 function loadListFilters() {
   const def = emptyListFilter();
   try {
@@ -1347,6 +1394,7 @@ function initListFilterSettings() {
     segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
       cb.checked = f.showSegments.includes(cb.value);
     });
+    refreshChipGroup(segWrap);
   }
   updateListFilterStatus();
 
@@ -1393,6 +1441,13 @@ function initListFilterSettings() {
     }
   });
 
+  // 市場チップの「全て / 解除」トグル
+  wireChipGroup(
+    segWrap,
+    form.querySelector('.lf-toggle-all[data-target="lf-show-segments"]'),
+    persistAndRerender
+  );
+
   const clearBtn = document.getElementById("lf-clear-btn");
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
@@ -1400,6 +1455,7 @@ function initListFilterSettings() {
       if (segWrap) {
         // クリア=絞り込みなし=全市場表示なので全チェック。
         segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
+        refreshChipGroup(segWrap);
       }
       persistAndRerender();
     });
@@ -1446,7 +1502,7 @@ function initAdhocFilter() {
     statWrap.dataset.built = "1";
     statWrap.innerHTML = STATUS_ORDER.map(
       (st) =>
-        `<label class="lf-check"><input type="checkbox" value="${st}"> ${escapeHtml(STATUS_LABELS[st] || st)}</label>`
+        `<label class="lf-chip"><input type="checkbox" value="${st}"><span>${escapeHtml(STATUS_LABELS[st] || st)}</span></label>`
     ).join("");
   }
 
@@ -1471,10 +1527,17 @@ function initAdhocFilter() {
       cb.checked = shown.includes(cb.value);
     });
   }
+  refreshChipGroup(segWrap);
+  refreshChipGroup(statWrap);
   updateAdhocFilterBadge();
 
   if (form.dataset.wired) return;
   form.dataset.wired = "1";
+
+  // 市場/ステータスチップの「全て / 解除」トグル。一時フィルタは「適用」を
+  // 押したときだけ反映する仕様なので、ここでは再描画を呼ばない。
+  wireChipGroup(segWrap, form.querySelector('.lf-toggle-all[data-target="alf-show-segments"]'), null);
+  wireChipGroup(statWrap, form.querySelector('.lf-toggle-all[data-target="alf-show-statuses"]'), null);
 
   // 反映は「適用」ボタン(initListTools側で配線)だけ。入力の都度反映はしない。
   const clearBtn = document.getElementById("alf-clear-btn");
@@ -1494,6 +1557,8 @@ function initAdhocFilter() {
           cb.checked = def.includes(cb.value);
         });
       }
+      refreshChipGroup(segWrap);
+      refreshChipGroup(statWrap);
     });
   }
 }
@@ -2184,8 +2249,13 @@ function navigateStock(dir) {
 
 // パネル切替のスライドインを再生する共通ヘルパ。dir>0=次(右から)/dir<0=前(左から)。
 // 同方向連続でも必ず再生されるよう reflow を強制してからクラスを付ける。
+// 指追従ドラッグ(wireStockSwipe)で付いたインラインの transform / transition は
+// アニメーションと競合するので、再生前に必ず剥がす。
 function playPanelSlide(container, dir) {
   if (!container || !dir) return;
+  container.style.transition = "";
+  container.style.transform = "";
+  container.style.opacity = "";
   const cls = dir > 0 ? "slide-next" : "slide-prev";
   container.classList.remove("slide-next", "slide-prev");
   void container.offsetWidth;
@@ -2238,35 +2308,136 @@ function wireLoopSwipe(el, onSwipe) {
 // ブラウザがポインタを奪って pointercancel が飛ぶため誤爆しない。グラフの canvas が
 // ポインタキャプチャしても panels は祖先なのでキャプチャ段階のリスナーには届く。
 // マウスは対象外(デスクトップは矢印キーで操作。マウスドラッグはグラフの時間軸パン用)。
+//
+// 2026-07-27: 「指を離した瞬間にパッと切り替わる」離散的な挙動をやめ、指追従の
+// ドラッグにした。ドラッグ中はパネルが指と一緒に動いて薄くなり、閾値を超えて離すと
+// そのまま画面外へ抜けて次の銘柄が反対側から入る(playPanelSlide)。閾値未満、または
+// その方向に銘柄が無いときはゴムのように戻る。transform/opacity だけを触るので
+// レイアウトを起こさず60fpsに乗る。
 function wireStockSwipe(panels) {
   const TH = 55;            // 銘柄切替とみなす最小横移動量(px)
   const H_DOMINANCE = 1.4;  // 横 > 縦*係数 でないと縦スクロール扱いで無視
+  const START = 10;         // これを超えたら「横ドラッグ中」と確定する移動量(px)
+  const RUBBER = 0.28;      // 行き先が無い方向へ引いたときの追従率(ゴム感)
+  const EASE_OUT = "cubic-bezier(0.32, 0, 0.67, 0)";       // 画面外へ抜ける
+  const EASE_BACK = "cubic-bezier(0.22, 1.2, 0.36, 1)";    // 戻る(軽く行き過ぎる)
+
   let activeId = null;
   let sx = 0;
   let sy = 0;
+  let dragging = false;  // 横ドラッグと確定したか
+  let locked = false;    // 縦スクロールと確定した(このジェスチャは無視)
+  let committing = false; // 遷移アニメ再生中(多重発火防止)
+
+  // 行き先があるか。dx<0(左へ引く)=次の銘柄、dx>0(右へ引く)=前の銘柄。
+  const hasTarget = (dx) => !!(dx < 0 ? stockNavNextCode : stockNavPrevCode);
+
+  const setOffset = (dx) => {
+    // 行き先が無ければ引きを大きく減衰させ、「ここで終わり」を手応えで伝える。
+    const x = hasTarget(dx) ? dx : dx * RUBBER;
+    const w = panels.offsetWidth || 320;
+    // 閾値の2倍引いたところで 0.45 まで落ちる程度の減光。切替の予告として使う。
+    const fade = Math.min(Math.abs(x) / (w * 0.6), 0.55);
+    panels.style.transform = `translate3d(${x}px,0,0)`;
+    panels.style.opacity = String(1 - fade);
+  };
+
+  const reset = (animated) => {
+    panels.style.transition = animated ? `transform 260ms ${EASE_BACK}, opacity 200ms ease-out` : "";
+    panels.style.transform = "";
+    panels.style.opacity = "";
+    if (animated) {
+      window.setTimeout(() => {
+        panels.style.transition = "";
+        panels.style.willChange = "";
+      }, 280);
+    } else {
+      panels.style.willChange = "";
+    }
+  };
+
   panels.addEventListener(
     "pointerdown",
     (e) => {
-      if (activeId !== null || e.pointerType === "mouse") return;
+      if (activeId !== null || e.pointerType === "mouse" || committing) return;
       activeId = e.pointerId;
       sx = e.clientX;
       sy = e.clientY;
+      dragging = false;
+      locked = false;
     },
     true
   );
+
+  panels.addEventListener(
+    "pointermove",
+    (e) => {
+      if (activeId === null || e.pointerId !== activeId || locked) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+      if (!dragging) {
+        // 方向が決まるまでは何もしない。先に縦が優勢になったらこのジェスチャは
+        // 縦スクロールとして手放す(以降 pointermove を無視)。
+        if (Math.abs(dy) > START && Math.abs(dy) >= Math.abs(dx)) {
+          locked = true;
+          return;
+        }
+        if (Math.abs(dx) < START || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
+        dragging = true;
+        panels.style.transition = "";
+        panels.style.willChange = "transform, opacity";
+      }
+      setOffset(dx);
+    },
+    true
+  );
+
   const finish = (e) => {
     if (activeId === null || e.pointerId !== activeId) return;
     activeId = null;
     const dx = e.clientX - sx;
     const dy = e.clientY - sy;
-    if (Math.abs(dx) < TH || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
-    navigateStock(dx < 0 ? -1 : 1);
+    const wasDragging = dragging;
+    dragging = false;
+    if (locked) { locked = false; return; }
+
+    const commit =
+      Math.abs(dx) >= TH && Math.abs(dx) >= Math.abs(dy) * H_DOMINANCE && hasTarget(dx);
+    if (!commit) {
+      if (wasDragging) reset(true);
+      return;
+    }
+
+    // 閾値超え: 指の勢いを引き継いでそのまま画面外へ抜き、抜けきってから遷移する。
+    // 遷移後の描画で setupStockPanels が playPanelSlide を呼び、反対側から入る。
+    committing = true;
+    const w = panels.offsetWidth || 320;
+    panels.style.transition = `transform 150ms ${EASE_OUT}, opacity 150ms linear`;
+    panels.style.transform = `translate3d(${dx < 0 ? -w * 0.45 : w * 0.45}px,0,0)`;
+    panels.style.opacity = "0";
+    window.setTimeout(() => {
+      committing = false;
+      navigateStock(dx < 0 ? -1 : 1);
+      // hashchange→再描画は次のタスク以降なので、ここで即 reset すると一瞬だけ
+      // 「抜けたはずの元の銘柄」が中央に戻って見えてしまう。通常は再描画時の
+      // playPanelSlide がインラインスタイルを剥がすので、ここは保険として
+      // 遅らせて置くだけにする(再描画が走らなかったときの復帰用)。
+      window.setTimeout(() => {
+        if (activeId === null && !dragging && panels.style.opacity === "0") reset(false);
+      }, 400);
+    }, 150);
   };
   panels.addEventListener("pointerup", finish, true);
   panels.addEventListener(
     "pointercancel",
     (e) => {
-      if (e.pointerId === activeId) activeId = null;
+      if (e.pointerId !== activeId) return;
+      activeId = null;
+      locked = false;
+      if (dragging) {
+        dragging = false;
+        reset(true);
+      }
     },
     true
   );
@@ -4727,14 +4898,18 @@ async function ensureDataAccess() {
   }
 
   // 暗号化+未解錠 → アクセスしたこのタイミングでパスキー解錠を促す。
+  // LOADING 表示を "TAP TO UNLOCK" ボタンに差し替えるだけ(説明文は持たない)。
   const loadingEl = document.getElementById("lock-loading");
-  const promptEl = document.getElementById("lock-prompt");
   const unlockBtn = document.getElementById("lock-unlock-btn");
   const errEl = document.getElementById("lock-error");
   if (loadingEl) loadingEl.hidden = true;
-  if (promptEl) promptEl.hidden = false;
   if (unlockBtn) unlockBtn.hidden = false;
   if (!overlay || !unlockBtn) return;
+
+  // ボタンの中身はアイコン+ラベルなので、状態表示で差し替える際は innerHTML を
+  // 使う(textContent で書き換えるとアイコンが消える)。初期HTMLを控えておく。
+  const btnHtmlIdle = unlockBtn.innerHTML;
+  const btnHtmlBusy = '<span class="lock-spinner" aria-hidden="true"></span>AUTHENTICATING';
 
   let vault = null;
   try {
@@ -4766,8 +4941,7 @@ async function ensureDataAccess() {
       busy = true;
       if (errEl) errEl.hidden = true;
       unlockBtn.disabled = true;
-      const original = unlockBtn.textContent;
-      unlockBtn.textContent = "認証中...";
+      unlockBtn.innerHTML = btnHtmlBusy;
       try {
         if (!vault) vault = await window.MinerviniVault.fetchVault();
         if (!vault) {
@@ -4793,7 +4967,7 @@ async function ensureDataAccess() {
       } finally {
         busy = false;
         unlockBtn.disabled = false;
-        unlockBtn.textContent = original;
+        unlockBtn.innerHTML = btnHtmlIdle;
       }
     };
     overlay.addEventListener("click", doUnlock);

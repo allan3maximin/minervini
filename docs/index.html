@@ -4,26 +4,47 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MinerviniScreener</title>
-<meta name="theme-color" content="#0b0e14">
+<meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=3c9a71e5">
+<link rel="stylesheet" href="assets/style.css?v=088160b5">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <!-- 起動時パスキーゲート: 初回描画から不透明オーバーレイで全画面を覆い、
      アクセス判定(暗号化か平文か・鍵の有無)が済むまでダッシュボードを隠す
      (中身のチラ見え防止)。判定後、平文/解錠済みなら消し、暗号化+未解錠なら
-     パスキー解錠を促す (app.js ensureDataAccess)。 -->
+     パスキー解錠を促す (app.js ensureDataAccess)。
+
+     2026-07-27 UI刷新: 「暗号化されています…」といった説明文は読まれないので廃止。
+     ネイティブアプリのスプラッシュに寄せ、ロゴ+ワードマーク+"TAP TO UNLOCK" だけの
+     ミニマル構成にした。カード枠は無く、真っ黒背景にコンテンツだけが浮かぶ。 -->
 <div id="lock-screen" class="lock-screen">
-  <div class="lock-card">
-    <div class="lock-icon">🔐</div>
-    <h2>MinerviniScreener</h2>
-    <p class="lock-note" id="lock-loading">読み込み中…</p>
-    <p class="lock-note" id="lock-prompt" hidden>このダッシュボードのデータは暗号化されています。<br>画面のどこでもタップするとパスキー(Face ID / Touch ID)で解錠します。</p>
-    <button type="button" id="lock-unlock-btn" class="primary" hidden>タップして解錠</button>
-    <div id="lock-error" class="form-error" hidden></div>
+  <div class="lock-stage">
+    <div class="lock-mark" aria-hidden="true">
+      <!-- 上昇するステージ2の足取りを模したマーク(SVG。外部依存なし) -->
+      <svg viewBox="0 0 64 64" class="lock-mark-svg">
+        <defs>
+          <linearGradient id="lockMarkGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0f8f6a"/>
+            <stop offset="100%" stop-color="#4ade9f"/>
+          </linearGradient>
+        </defs>
+        <path class="lock-mark-line" d="M6 50 L20 38 L30 44 L44 22 L58 12"
+              fill="none" stroke="url(#lockMarkGrad)" stroke-width="4"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <circle class="lock-mark-dot" cx="58" cy="12" r="4.5" fill="#4ade9f"/>
+      </svg>
+    </div>
+    <h1 class="lock-wordmark">Minervini<span>Screener</span></h1>
+    <div class="lock-action">
+      <p class="lock-cta" id="lock-loading"><span class="lock-spinner" aria-hidden="true"></span>LOADING</p>
+      <button type="button" id="lock-unlock-btn" class="lock-cta lock-cta-btn" hidden>
+        <i class="bi bi-fingerprint" aria-hidden="true"></i>TAP TO UNLOCK
+      </button>
+    </div>
+    <div id="lock-error" class="lock-err" hidden></div>
   </div>
 </div>
 <header class="page-header">
@@ -179,53 +200,61 @@
       <span class="sheet-title"><i class="bi bi-funnel"></i> フィルタ <small>リロードで解除</small></span>
       <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
+    <!-- 2026-07-27 UI刷新: 「下限/上限」を別ラベルの入力欄に分けると4行ぶんの
+         ラベルを読ませることになるので、レンジ(min 〜 max)を1行に統合した。
+         市場/ステータスは小さいチェックボックスをやめ、指で押せるチップにして
+         「押した=表示する」を面で示す。操作(リセット/適用)はシート下端に固定。 -->
     <div class="sheet-body list-filter-form" id="adhoc-filter-form">
-      <div class="lf-row">
-        <label class="lf-field">
-          <span class="lf-label">株価の下限(円)</span>
-          <input type="number" id="alf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限なし">
-        </label>
-        <label class="lf-field">
-          <span class="lf-label">株価の上限(円)</span>
-          <input type="number" id="alf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限なし">
-        </label>
+      <div class="lf-group">
+        <span class="lf-group-title">株価</span>
+        <div class="lf-range">
+          <input type="number" id="alf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="株価の下限(円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="alf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="株価の上限(円)">
+          <span class="lf-unit">円</span>
+        </div>
+      </div>
+      <div class="lf-group">
+        <span class="lf-group-title">時価総額</span>
+        <div class="lf-range">
+          <input type="number" id="alf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="時価総額の下限(億円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="alf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="時価総額の上限(億円)">
+          <span class="lf-unit">億円</span>
+        </div>
       </div>
       <div class="lf-row">
         <label class="lf-field">
-          <span class="lf-label">RSレーティングの下限</span>
+          <span class="lf-label">RSレーティング <small>以上</small></span>
           <input type="number" id="alf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
         </label>
         <label class="lf-field">
-          <span class="lf-label">総合スコアの下限</span>
+          <span class="lf-label">総合スコア <small>以上</small></span>
           <input type="number" id="alf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
         </label>
       </div>
-      <div class="lf-row">
-        <label class="lf-field">
-          <span class="lf-label">時価総額の下限(億円)</span>
-          <input type="number" id="alf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限なし">
-        </label>
-        <label class="lf-field">
-          <span class="lf-label">時価総額の上限(億円)</span>
-          <input type="number" id="alf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限なし">
-        </label>
-      </div>
-      <div class="lf-field">
-        <span class="lf-label">表示している市場</span>
-        <div class="lf-checks" id="alf-show-segments">
-          <label class="lf-check"><input type="checkbox" value="プライム" checked> プライム</label>
-          <label class="lf-check"><input type="checkbox" value="スタンダード" checked> スタンダード</label>
-          <label class="lf-check"><input type="checkbox" value="グロース" checked> グロース</label>
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">市場</span>
+          <button type="button" class="lf-toggle-all" data-target="alf-show-segments">全て</button>
+        </div>
+        <div class="lf-chips" id="alf-show-segments">
+          <label class="lf-chip"><input type="checkbox" value="プライム" checked><span>プライム</span></label>
+          <label class="lf-chip"><input type="checkbox" value="スタンダード" checked><span>スタンダード</span></label>
+          <label class="lf-chip"><input type="checkbox" value="グロース" checked><span>グロース</span></label>
         </div>
       </div>
       <!-- 表示するエントリーステータス。中身は app.js initAdhocFilter が
            STATUS_ORDER から生成する。既定は EXTENDED/STALE (追いかけ禁止) だけ off。 -->
-      <div class="lf-field">
-        <span class="lf-label">表示しているステータス</span>
-        <div class="lf-checks lf-checks-status" id="alf-show-statuses"></div>
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">ステータス</span>
+          <button type="button" class="lf-toggle-all" data-target="alf-show-statuses">全て</button>
+        </div>
+        <div class="lf-chips lf-chips-status" id="alf-show-statuses"></div>
       </div>
       <div class="lf-actions">
-        <button type="button" id="alf-clear-btn" class="secondary">クリア</button>
+        <button type="button" id="alf-clear-btn" class="secondary">リセット</button>
         <button type="button" id="alf-apply-btn" class="primary">適用</button>
       </div>
     </div>
@@ -508,50 +537,55 @@
     <h3>銘柄リストのフィルタ</h3>
     <p class="tier-note">ここで設定した条件は、次に変更するまで銘柄リスト(本命/候補/監視)に永続で適用されます。空欄の項目は無視します。指標データが無い銘柄はそのフィルタでは除外しません。</p>
     <div class="list-filter-form" id="list-filter-form">
-      <div class="lf-row">
-        <label class="lf-field">
-          <span class="lf-label">株価の下限(円)</span>
-          <input type="number" id="lf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限なし">
-        </label>
-        <label class="lf-field">
-          <span class="lf-label">株価の上限(円)</span>
-          <input type="number" id="lf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限なし">
-        </label>
+      <div class="lf-group">
+        <span class="lf-group-title">株価</span>
+        <div class="lf-range">
+          <input type="number" id="lf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="株価の下限(円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="lf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="株価の上限(円)">
+          <span class="lf-unit">円</span>
+        </div>
+      </div>
+      <div class="lf-group">
+        <span class="lf-group-title">時価総額</span>
+        <div class="lf-range">
+          <input type="number" id="lf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="時価総額の下限(億円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="lf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="時価総額の上限(億円)">
+          <span class="lf-unit">億円</span>
+        </div>
       </div>
       <div class="lf-row">
         <label class="lf-field">
-          <span class="lf-label">RSレーティングの下限</span>
+          <span class="lf-label">RSレーティング <small>以上</small></span>
           <input type="number" id="lf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
         </label>
         <label class="lf-field">
-          <span class="lf-label">総合スコアの下限</span>
+          <span class="lf-label">総合スコア <small>以上</small></span>
           <input type="number" id="lf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
         </label>
       </div>
-      <div class="lf-row">
-        <label class="lf-field">
-          <span class="lf-label">時価総額の下限(億円)</span>
-          <input type="number" id="lf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限なし">
-        </label>
-        <label class="lf-field">
-          <span class="lf-label">時価総額の上限(億円)</span>
-          <input type="number" id="lf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限なし">
-        </label>
-      </div>
-      <div class="lf-field">
-        <span class="lf-label">表示している市場</span>
-        <div class="lf-checks" id="lf-show-segments">
-          <label class="lf-check"><input type="checkbox" value="プライム" checked> プライム</label>
-          <label class="lf-check"><input type="checkbox" value="スタンダード" checked> スタンダード</label>
-          <label class="lf-check"><input type="checkbox" value="グロース" checked> グロース</label>
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">市場</span>
+          <button type="button" class="lf-toggle-all" data-target="lf-show-segments">全て</button>
+        </div>
+        <div class="lf-chips" id="lf-show-segments">
+          <label class="lf-chip"><input type="checkbox" value="プライム" checked><span>プライム</span></label>
+          <label class="lf-chip"><input type="checkbox" value="スタンダード" checked><span>スタンダード</span></label>
+          <label class="lf-chip"><input type="checkbox" value="グロース" checked><span>グロース</span></label>
         </div>
       </div>
       <div class="lf-actions">
-        <button type="button" id="lf-clear-btn" class="secondary">フィルタをクリア</button>
+        <button type="button" id="lf-clear-btn" class="secondary">クリア</button>
         <span id="lf-status" class="lf-status">フィルタなし</span>
         <button type="button" id="lf-apply-btn" class="primary lf-apply">適用</button>
       </div>
     </div>
+    <!-- ステータス(監視A/ブレイクアウト/伸びすぎ 等)の表示切替は、日々変わる
+         「今日どれを見るか」の話なので恒久フィルタには置かず、リスト画面側の
+         一時フィルタに集約している。ここに無いのは実装漏れではないので明記する。 -->
+    <p class="tier-note lf-foot-note"><i class="bi bi-info-circle"></i> ステータス(伸びすぎ・鮮度切れ等)の表示切替は、日々切り替える設定なので<strong>リスト画面の <i class="bi bi-funnel"></i> フィルタ</strong>にあります。</p>
   </section>
   </div>
 
@@ -777,8 +811,8 @@
 <script src="assets/github-api.js?v=85463b38"></script>
 <script src="assets/webauthn-vault.js?v=9c0129c2"></script>
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
-<script src="assets/heatmap.js?v=7b41f0a2"></script>
+<script src="assets/heatmap.js?v=78ef6740"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=5a6ef3d1"></script>
+<script src="assets/app.js?v=7d8fa253"></script>
 </body>
 </html>
