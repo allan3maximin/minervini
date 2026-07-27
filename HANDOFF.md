@@ -79,10 +79,18 @@ docs/                       GitHub Pages ルート
                             .prio-badge/.priority-* は削除済み。
   data/                     パイプライン出力 (report.json, breadth.json, heatmap.json, indices.json, charts/{code}.json,
                             positions.json ※manual/positions.csvに行がある場合のみ)
+                            ★2026-07-27〜 .gitignore 済み = master にコミットしない。実体は gh-pages
+                            ブランチ(単一コミットを毎回force-push)にのみ存在する。詳細は §8。
 data/                       中間データ (universe.json, prices/*.parquet, indices/*.parquet,
-                            status_history.json, sector_history.json, sector_map.json,
+                            history/status.jsonl, history/sector.jsonl ← 追記専用履歴(2026-07-27〜。詳細は §9)、
+                            status_history.json / sector_history.json ← 旧形式。移行フォールバック用に残置、
+                            sector_map.json,
                             trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
                             ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
+src/history_store.py        追記専用JSONLの読み書き基盤 (append_records / load_deduped / compact)
+src/analyze.py              履歴JSONLをDuckDBでSQL分析するCLI (--list / --preset / --sql)
+scripts/migrate_history_to_jsonl.py  旧履歴JSON → JSONL への一括変換 (冪等・--dry-run あり)
+.github/actions/            composite action 2種 (restore-site-data / publish-site)。詳細は §8。
 manual/fundamentals.csv     手動ファンダ (code,fiscal_quarter,eps,revenue,monthly_yoy,checked_date)
 manual/positions.csv        保有ポジション手動入力 (code,entry_date,entry_price,shares,initial_stop,current_stop,memo。
                             2026-07-11追加。書き込みUI無し、GitHub web編集/ローカル編集で運用)
@@ -745,10 +753,41 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
 
 | workflow | トリガ | 内容 | 所要時間 |
 |---|---|---|---|
-| daily.yml | 平日 07:00-11:00 UTC(16:00-20:00 JST)毎時 + 手動 | 当日実行済みチェック→未実行なら`python -m src.pipeline` → data/ docs/ をコミット→ pull --rebase → push | 15-30分(スキップ時は数秒) |
-| universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` | **40-60分** (timeout 120分) |
+| daily.yml | 平日 07:00-11:00 UTC(16:00-20:00 JST)毎時 + 手動 | 当日実行済みチェック→未実行なら restore-site-data →`python -m src.pipeline` → **data/ のみ**コミット→ pull --rebase → push → publish-site | 15-30分(スキップ時は数秒) |
+| universe.yml | 月初土曜 + 手動 | `python -m src.pipeline --universe-rebuild` (同上のrestore→publish付き) | **40-60分** (timeout 120分) |
 | jquants-backfill.yml | 手動のみ | `python -m src.data.jquants --backfill` → data/fundamentals_auto.json, data/jquants_state.json コミット | 全銘柄で20分前後 (timeout 120分) |
-| intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → data/indices/ docs/data/indices.json をコミット→ pull --rebase → push | 数分 |
+| intraday-indices.yml | 平日15分間隔(東証+米国市場時間帯、手動可) | `python -m src.data.indices` のみ実行 → **data/indices/ のみ**コミット→ pull --rebase → push → publish-site | 数分 |
+| pages-deploy.yml | master の `docs/**` push + 手動 | restore-site-data → publish-site。フロントのソース(html/js/css)やパスキー vault.json の更新を即Pagesへ反映する | 1分未満 |
+| backfill-breadth.yml | 手動のみ | 地合い履歴の再計算 → **コミットせず** publish-site のみ (breadth.json は gh-pages にしか存在しないため) | 数分 |
+
+### GitHub Pages の公開方式 (2026-07-27 変更 — 重要)
+
+**変更前**: `docs/` を master にコミットし、Pages のソースを `master / docs` にしていた。
+**問題**: 1日ぶんのコミットで `docs/data/charts` が約15MB、`docs/data/*.json` が約2.4MB 増える
+(実測: commit 37ef244a で計16.9MB / 1コミット。1日2〜3コミット)。これが積み上がり `.git` が
+**804MB** まで肥大していた。`data/` 配下の中間JSONは合計0.03MB程度で、肥大の原因ではなかった。
+
+**変更後**: `docs/data/` を `.gitignore` に入れて master から外し(`git rm -r --cached docs/data` 済み)、
+`docs/` 全体を **gh-pages ブランチへ単一コミットで force-push** する。
+毎回 orphan ブランチを作り直すので、公開ブランチ側の履歴は永久に1コミット = リポジトリは
+生成物ぶんだけ肥大しなくなる。
+
+composite action 2種で実現している:
+
+- `.github/actions/restore-site-data` — パイプライン実行**前**に gh-pages から `docs/data/` を復元する。
+  **これは必須**。`update_breadth()` は `docs/data/breadth.json` を読み戻して履歴を伸ばす実装なので、
+  復元せずに走らせると地合い履歴が毎回リセットされる。ブランチが存在するのに breadth.json を
+  復元できなかった場合は**わざとジョブを失敗させる**(静かに履歴を失うより止める)。
+  ブランチがまだ無い初回だけは空の `docs/data` で続行する。
+- `.github/actions/publish-site` — `docs/` に一時的な git リポジトリを作り、orphan ブランチとして
+  `--force` push する。`.nojekyll` もここで置く。
+
+**ユーザーが手で1回だけやること**: GitHub の Settings → Pages → Source を
+`gh-pages` ブランチ / `/ (root)` に切り替える。切り替えるまで公開内容は更新されない。
+
+**パスキー vault との関係**: フロントは `docs/auth/vault.json` を GitHub Contents API 経由で
+**master へ**書き込み、読むときは Pages の相対URLから取る。master に置いただけでは Pages に
+反映されないので、`pages-deploy.yml`(`docs/**` の push で発火)を追加して差を埋めている。
 
 - daily.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` と `EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}` を env に設定済み。
   `edinetdb.enabled: true`(2026-07-08〜)のため、**`EDINETDB_API_KEY` の GitHub Secret 登録が
@@ -786,8 +825,47 @@ heatmap.html / stock.html は本文自体がリダイレクトスタブ化され
 ### docs/data/breadth.json
 `{history: [{date, template_pass_rate, watch_count, breakout_success_rate, p1_count..p4_count}]}`
 
-### data/status_history.json
-エントリー状態の履歴 (ピボットのロック、EXTENDEDクールダウン、ブレイク成功率算出に使用)
+### data/history/*.jsonl — 追記専用の履歴ストア (2026-07-27〜)
+
+エントリー状態の履歴 (ピボットのロック、EXTENDEDクールダウン、ブレイク成功率算出に使用) と
+セクター履歴を、**1行1レコードのJSONL**として追記だけしていく方式に変えた。
+
+| ファイル | 1行の形 | 重複排除キー | 旧ファイル(移行元) |
+|---|---|---|---|
+| `data/history/status.jsonl` | `{code, date, status, pivot, stop_ref_low}` | `(code, date)` | `data/status_history.json` |
+| `data/history/sector.jsonl` | `{date, topix_d1, sectors: {業種名: {...}}}` | `(date)` | `data/sector_history.json` |
+
+**なぜ変えたか**: 旧方式は `{code: [エントリ...]}` の全量を毎回書き戻すので、1日ぶんの追記でも
+ファイル全行が書き換わり、日次コミットの差分が毎回数千行に膨れていた。追記だけなら差分は
+追記行のみになる。加えて JSONL は DuckDB の `read_json_auto()` がそのまま読めるので、
+中間ETLもDBファイルも無しでSQL分析できる。
+
+**「同日再実行は上書き」の互換性**: 追記専用なので同じキーの行が複数ありうる。
+`load_deduped()` が**後勝ち (last-write-wins)** で畳むため、外から見た挙動は旧方式と同じ。
+`load_status_history()` / `load_sector_history()` の返り値の形も移行前と完全に同一なので、
+呼び出し側 (`record_status`, `publish_sector_history` など) には手を入れていない。
+
+**compaction は遅延実行**: 毎回書き直すと追記専用の意味が無いので、行数がしきい値を超えたときだけ
+`compact()` で dedup + 期限切れ間引きをする(status は 2000行かつ想定キー数の4倍、sector は
+`max(keep_days*2, 100)` 行)。したがって**ディスク上には一時的に古い行や重複行が残る**。
+公開データ(`docs/data/sector_history.json`)側は `history_keep_days` で別途間引いているので、
+公開内容は移行前と一致する。
+
+**旧JSONの扱い**: 削除していない。JSONLが存在しない場合のみ自動で取り込む
+(`_migrate_legacy_status_history` / `_migrate_legacy_sector_history`)。手動移行は
+`python scripts/migrate_history_to_jsonl.py`(`--dry-run` あり、冪等)。
+
+**SQL分析**:
+```bash
+pip install duckdb
+python -m src.analyze --list                    # ビューとプリセット一覧
+python -m src.analyze --preset status-daily     # 日別ステータス件数
+python -m src.analyze --preset status-streak    # 同ステータス継続日数
+python -m src.analyze --preset sector-strength  # 直近日のセクター相対強度
+python -m src.analyze --sql "SELECT ... FROM status_latest"
+```
+生ビュー `status` / `sector` は**重複行を含む**。dedup済みを見たいときは必ず
+`status_latest` / `sector_latest` を使うこと(プリセットは全てこちらを使用)。
 
 ## 10. テスト・検証
 

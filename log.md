@@ -21,6 +21,94 @@
 
 ---
 
+## 2026-07-27 (126): リポジトリ軽量化(gh-pages公開) + 履歴の追記専用JSONL化 + DuckDB分析
+
+### 発端と、前提のひっくり返り
+
+ユーザーから「データをDBに移したい。管理をJSONからDBにしたい」。動機は
+(a) gitの差分が汚い / リポジトリが重い、(b) 履歴を貯めて分析したい、の2つ。
+対象は `data/` 配下の中間データ、DBは「無料で入れやすいやつ」という条件。
+
+**まず実測したら前提が違った。** 日次コミット1件(37ef244a)が追加する blob バイト数:
+
+| パス | サイズ |
+|---|---|
+| `docs/data/charts` | 14.9 MB |
+| `docs/data/*.json` | 2.4 MB |
+| `data/prices` | 0.02 MB |
+| `data/*.json` | 0.007 MB |
+
+計 16.9MB / コミット × 1日2〜3コミット。`.git` は **804MB**。
+つまり肥大の原因は `data/` ではなく `docs/data/`(生成物)だった。しかも SQLite の
+バイナリファイルを git に置くと差分が効かず**さらに悪化**する。よって「DBファイルを
+コミットする」案は却下し、原因側を潰す方針に切り替えてユーザー承認を得た。
+
+### ① リポジトリ軽量化: docs/ を master から外し gh-pages へ force-push
+
+- `.gitignore` に `docs/data/` を追加。`git rm -r --cached docs/data` で291ファイルを追跡解除。
+- `.github/actions/publish-site` (新規): `docs/` に一時gitリポジトリを作り、orphanブランチを
+  単一コミットで `--force` push。公開ブランチの履歴は永久に1コミット = 肥大しない。
+- `.github/actions/restore-site-data` (新規): パイプライン実行**前**に gh-pages から
+  `docs/data/` を復元。**これが無いと地合い履歴が消える** — `update_breadth()` は
+  `docs/data/breadth.json` を読み戻して履歴を伸ばす実装なので、artifactデプロイのような
+  「毎回まっさらから生成」方式は取れない(ここに気付かず進めていたら履歴を失っていた)。
+  ブランチがあるのに breadth.json を復元できなければ**わざとジョブを落とす**。
+- daily / universe / intraday-indices / maezyou を restore → 実行 → `data/` のみコミット →
+  push → publish の形に統一。
+- backfill-breadth.yml は commit/push ステップ自体を publish-site に**置き換え**
+  (breadth.json はもう master に存在しないため)。
+- `pages-deploy.yml` (新規): master の `docs/**` push で発火。パスキー vault.json は
+  フロントが Contents API で **master へ**書き、読むのは Pages の相対URL、という
+  経路の食い違いがあるため、これが無いと解錠情報の反映がラグる。
+
+**ユーザーが手で1回だけやること**: Settings → Pages → Source を `gh-pages` / `/ (root)` に変更。
+
+### ② 履歴を追記専用JSONL化 + DuckDB
+
+- `src/history_store.py` (新規): `append_records` / `load_deduped` (後勝ちdedup) /
+  `compact` / `needs_compaction` / `calendar_keep_days`。
+- `status_history.json` → `data/history/status.jsonl` (キー `code`+`date`)、
+  `sector_history.json` → `data/history/sector.jsonl` (キー `date`)。
+- **「同日再実行は上書き」は読み出し時の後勝ちdedupで再現**。`load_status_history()` /
+  `load_sector_history()` の返り値の形は移行前と完全に同一なので、`record_status` や
+  `publish_sector_history` は無改修。
+- compaction は遅延実行(毎回書き直したら追記専用の意味が無い)。ディスク上に古い行が
+  残ることは許容し、公開データ側は従来どおり `history_keep_days` で間引く。
+- `scripts/migrate_history_to_jsonl.py` (新規、冪等・`--dry-run` あり)。旧JSONは残す。
+- `src/analyze.py` (新規): DuckDB `read_json_auto()` で JSONL を直接SQL。
+  `--list` / `--preset` / `--sql`。dedup済みビュー `status_latest` / `sector_latest` を
+  `row_number() OVER (PARTITION BY ... ORDER BY rowid DESC)` で用意。
+  `requirements.txt` に `duckdb>=1.0` 追加。
+- `tests/test_history_store.py` (新規、14件)。
+
+**ハマった点**: `sector-strength` プリセットが `map_entries(sectors)` で落ちた。
+`read_json_auto` は キー数が `map_inference_threshold` (既定200) 未満だと MAP ではなく
+**STRUCT** と推論する(33業種なので必ずSTRUCT側)。STRUCT は列名固定なので動的に舐められない。
+`to_json(sectors)::MAP(VARCHAR, JSON)` で入れ直してから unnest するよう修正。
+
+### 実データ汚染をやらかして復旧
+
+テストのfixtureに新パス `SECTOR_HISTORY_JSONL` / `STATUS_HISTORY_JSONL` の monkeypatch を
+足す前に pytest を回してしまい、**実リポジトリの `data/history/*.jsonl` にテスト用の
+ダミー行(code 1111、fixtureのセクター)が書かれた**。log.md (51) と同じ事故。
+気付いたのは移行スクリプトの `--dry-run` が「既存JSONL 8行 / 23行」と出したため。
+JSONLを退避して再移行し、status 42行 (7銘柄 / 19営業日)・sector 18行のクリーンな状態を確認。
+fixture修正済み。**新しいモジュールレベルのパス定数を足したら、必ず全fixtureに追加すること。**
+
+### 検証
+
+- `pytest -q`: 437 passed / 3 failed。失敗は全て sandbox に pyarrow が無いことによる
+  parquetエンジンのImportError(test_indices ×1, test_prices ×2)で、変更前からの既知ベースライン。
+- `node --check` app.js / heatmap.js → OK。workflow・action の YAML パース → 全10ファイルOK。
+- `python -m src.analyze --preset` 3種とも実データで期待どおり出力。
+
+### 残: sandboxで消せなかったゴミ
+
+`data/_trash/{sector,status}.jsonl.bak`(汚染JSONLの退避)は sandbox から削除できなかった。
+未追跡なのでコミットには入らないが、手で `rm -rf data/_trash` しておくこと。
+
+---
+
 ## 2026-07-27 (125): UI改善7点(ステータスフィルタ / バッジ / グラフ軸 / パスキー / 振り返り)
 
 ### 背景
