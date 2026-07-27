@@ -405,3 +405,69 @@ def test_margin_badge_none_when_ratio_high_but_dtc_below_warn():
 def test_margin_none_when_no_store_data():
     record = _assemble_with_margin(margin_store=None)
     assert record["margin"] is None
+
+
+# ---------------------------------------------------------------------------
+# cooled ティア改修テスト (2026-07-27)
+# ---------------------------------------------------------------------------
+
+def test_tier_order_includes_cooled():
+    """TIER_ORDER に cooled が追加され、watchlist(2)より後(3)であること"""
+    from src.report.build_site import TIER_ORDER
+    assert "cooled" in TIER_ORDER
+    assert TIER_ORDER["cooled"] > TIER_ORDER["watchlist"]
+    assert TIER_ORDER["cooled"] == 3
+
+
+def test_assemble_stock_record_cooled_tier_override():
+    """tier_override='cooled' でレコードが cooled ティアになり、ピボット情報が入ること"""
+    tt_flags = {"cond1": True}
+    vcp_result = {
+        "status": "WATCH_A",
+        "vcp_score": 70.0,
+        "footprint": "6W 20/10/4 3T",
+        "must_flags": {"V1": True},
+        "contractions": [{"high_price": 1010.0, "low_price": 960.0, "depth": 0.05}],
+    }
+    entry_result = {
+        "status": "EXTENDED",
+        "pivot": 1010.0,
+        "buy_stop": 1011.0,
+        "stop_loss": 960.0,
+        "risk_pct": 5.0,
+        "dist_to_pivot": -8.0,
+    }
+    record = assemble_stock_record(
+        "8418",
+        "Cooled Co",
+        CONFIG_LATEST,
+        tt_flags,
+        vcp_result,
+        entry_result,
+        _fund_info(tier="pool", tech_score=65.0, full_score=80.0),
+        tier_override="cooled",
+    )
+    assert record["tier"] == "cooled"
+    assert record["status"] == "EXTENDED"
+    # ピボット・損切りがレコードに載っていること
+    assert record["pivot"] == 1010.0
+    assert record["stop_loss"] == 960.0
+    assert record["risk_pct"] == 5.0
+
+
+def test_build_report_cooled_sorts_after_watchlist(tmp_path, monkeypatch):
+    """cooled ティアは watchlist より後にソートされること"""
+    import src.report.build_site as bs
+
+    monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(bs, "REPORT_PATH", tmp_path / "report.json")
+
+    stocks = [
+        {"code": "A", "tier": "cooled", "status": "EXTENDED", "total_score": 99},
+        {"code": "B", "tier": "watchlist", "status": "IMMATURE", "total_score": 50},
+        {"code": "C", "tier": "confirmed", "status": "BREAKOUT", "total_score": 80},
+    ]
+    report = build_report(stocks, universe_size=1000, template_pass=50)
+    codes = [s["code"] for s in report["stocks"]]
+    # confirmed -> watchlist -> cooled (スコアに関係なく)
+    assert codes == ["C", "B", "A"]

@@ -21,6 +21,69 @@
 
 ---
 
+## 2026-07-27 (124): EXTENDED/STALE を cooled ティアへ隔離 + VCPトグル初期チェック
+
+### 背景
+
+EXTENDED/STALE は両方とも「追いかけ禁止」なのに、`ACTIONABLE_ENTRY_STATUSES` に含まれていたため
+本命/候補ティアに混ざって表示され、本当に見るべき候補の順位を汚していた。別枠に隔離する。
+
+### 変更点
+
+1. **`src/pipeline.py`**
+   - `ACTIONABLE_ENTRY_STATUSES` を `{"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B"}` の4つに絞る。
+   - `COOLED_ENTRY_STATUSES = {"EXTENDED", "STALE"}` を新定数として追加。
+   - 銘柄ループに `is_cooled` 分岐を追加。EXTENDED/STALE はピボット・損切り情報を
+     保ちつつ `tier_override="cooled"` で `assemble_stock_record` を呼ぶ。
+   - `cooled_count` を独立カウント、末尾 print に出す。
+   - `stop_ref_low` 解決ロジックを内部関数 `_resolve_stop_ref_low()` にくくり出し
+     actionable と cooled で共有。
+
+2. **`src/screener/entry.py`**
+   - `evaluate_entry` のブレイク鮮度チェック (行298付近): `if from_lock and status_info["status"] != "EXTENDED":` から
+     `and status_info["status"] != "EXTENDED"` を除去し `if from_lock:` に変更。
+     EXTENDED も age >= breakout_stale_days なら STALE に倒す(時間切れの方が理由として正確)。
+   - `POST_BREAKOUT_STATUSES` / `extended_cooldown_ready` / `lock_drop_reason` / `record_status` は無変更。
+
+3. **`src/report/build_site.py`**
+   - `TIER_ORDER` に `"cooled": 3` を追加 (watchlist=2 の次)。
+   - `assemble_stock_record` の docstring の `tier_override` 説明を更新。
+
+4. **`docs/assets/app.js`**
+   - `REVIEW_ACTIONABLE` から `"EXTENDED"` と `"STALE"` を削除、コメント更新。
+   - `TIER_COPY_LABELS` に `cooled` を追加。
+   - `renderCooledTier(report)` 関数を新設。件数0のときは details ごと hidden。
+   - `rerenderTierBody` に cooled 分岐を追加(watchlist タブ再描画時も cooled を更新)。
+   - `renderPriorityTier` の後に `renderCooledTier(report)` 呼び出しを追加。
+   - `vcpToggleSticky` を `false` → `true` に変更(VCPトグル初期チェック済み)。
+
+5. **`docs/index.html`**
+   - watchlist パネル内 `#watchlist-tier-body` の直後に `<details id="cooled-details">` を追加。
+     デフォルトは閉じた状態(open 属性なし)。中身は `#cooled-tier-body`。
+   - `<input id="toggle-vcp">` に `checked` 属性を付与。
+   - cache-buster: style.css `d6e99931`→`78d8a638` / app.js `e411a829`→`9ed89fde`。
+
+6. **`docs/assets/style.css`**
+   - `#cooled-details` / `#cooled-tier-body` の最小限スタイルを追加。
+
+### 検証
+
+- `python -m pytest tests/ -q`: **423 passed**, 3 failed (既存のネットワーク/pyarrow依存、変化なし)。
+- 新規テスト10本(test_entry 4本、test_build_site 3本、test_pipeline 3本)追加。
+- `node --check docs/assets/*.js`: ALL OK。
+- 実データ(`data/status_history.json`)での cooled 移動対象:
+  **EXTENDED 1件(8418)、STALE 1件(9247)** = 計2件が cooled ティアへ移動。
+
+### コミット対象
+
+`src/screener/entry.py` `src/pipeline.py` `src/report/build_site.py`
+`docs/assets/app.js` `docs/assets/style.css` `docs/index.html`
+`HANDOFF.md` `skills/minervini-analysis/SKILL.md`
+`tests/test_entry.py` `tests/test_build_site.py` `tests/test_pipeline.py`
+`log.md`。data/・docs/data/ は含めない。push はユーザー。
+
+---
+
 ## 2026-07-26 (123): (122)を撤回 — 両床を 1 に戻し、収縮に日付・期間を持たせた
 
 **(122) の `min_rally_bars: 2` は俺のミス。撤回する。** 以下は (122) の

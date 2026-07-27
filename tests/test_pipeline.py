@@ -304,3 +304,100 @@ def test_run_daily_aborts_when_too_many_failed_tickers(wired, monkeypatch):
     rc = pipeline.run_daily(config=pipeline.load_config())
     assert rc == 1
     assert not (tmp_path / "report.json").exists()
+
+# ---------------------------------------------------------------------------
+# cooled ティア改修テスト (2026-07-27)
+# ---------------------------------------------------------------------------
+
+def test_run_daily_cooled_tier_for_extended_stale(wired, monkeypatch):
+    """EXTENDED/STALE 銘柄が cooled ティアで出力され actionable_count に含まれないこと"""
+    tmp_path, codes = wired
+
+    # "1111" を EXTENDED ステータスにする: WATCH_A ベースのピボット(1010)より+8%上
+    def fake_evaluate_entry_extended(code, latest_row, vcp_result, history, config):
+        if code == "1111":
+            return {
+                "status": "EXTENDED",
+                "pivot": 1010.0,
+                "buy_stop": 1011.0,
+                "stop_loss": 959.5,
+                "risk_pct": 5.0,
+                "dist_to_pivot": -7.9,
+            }
+        # その他はデフォルト(ピボットなし)
+        return {"status": vcp_result.get("status", "NO_SETUP"), "pivot": None}
+
+    monkeypatch.setattr(pipeline.entry_mod, "evaluate_entry", fake_evaluate_entry_extended)
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    stocks_by_code = {s["code"]: s for s in report["stocks"]}
+
+    # "1111" は cooled ティアに落ちる
+    assert stocks_by_code["1111"]["tier"] == "cooled"
+    assert stocks_by_code["1111"]["status"] == "EXTENDED"
+    # ピボット・損切りがレコードに載っていること
+    assert stocks_by_code["1111"]["pivot"] == 1010.0
+    assert stocks_by_code["1111"]["stop_loss"] == 959.5
+
+    # "3333" は watchlist に留まる
+    assert stocks_by_code["3333"]["tier"] == "watchlist"
+
+
+def test_run_daily_actionable_count_excludes_cooled(wired, monkeypatch, capsys):
+    """EXTENDED/STALE は actionable_count に含まれず cooled_count で集計されること"""
+    tmp_path, codes = wired
+
+    def fake_evaluate_entry_stale(code, latest_row, vcp_result, history, config):
+        if code == "1111":
+            return {
+                "status": "STALE",
+                "pivot": 1010.0,
+                "buy_stop": 1011.0,
+                "stop_loss": 959.5,
+                "risk_pct": 5.0,
+                "dist_to_pivot": 2.0,
+            }
+        return {"status": vcp_result.get("status", "NO_SETUP"), "pivot": None}
+
+    monkeypatch.setattr(pipeline.entry_mod, "evaluate_entry", fake_evaluate_entry_stale)
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+
+    captured = capsys.readouterr()
+    # 出力に "0 actionable" かつ "1 cooled" が含まれること
+    assert "0 actionable" in captured.out
+    assert "1 cooled" in captured.out
+
+
+def test_run_daily_cooled_pivot_included_in_record(wired, monkeypatch):
+    """cooled 銘柄のレコードにピボット・損切りが載ること (実装内容2の (f))"""
+    tmp_path, codes = wired
+
+    def fake_evaluate_entry_ext(code, latest_row, vcp_result, history, config):
+        if code == "1111":
+            return {
+                "status": "EXTENDED",
+                "pivot": 1010.0,
+                "buy_stop": 1011.0,
+                "stop_loss": 960.0,
+                "risk_pct": 5.0,
+                "dist_to_pivot": -8.0,
+                "breakout_age_days": 10,
+            }
+        return {"status": vcp_result.get("status", "NO_SETUP"), "pivot": None}
+
+    monkeypatch.setattr(pipeline.entry_mod, "evaluate_entry", fake_evaluate_entry_ext)
+
+    rc = pipeline.run_daily(config=pipeline.load_config())
+    assert rc == 0
+
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    cooled = [s for s in report["stocks"] if s["tier"] == "cooled"]
+    assert len(cooled) == 1
+    assert cooled[0]["pivot"] is not None
+    assert cooled[0]["stop_loss"] is not None
+    assert cooled[0]["breakout_age_days"] == 10

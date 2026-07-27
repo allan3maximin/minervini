@@ -61,7 +61,7 @@ STATUS_ORDER = {
     "TOO_VOLATILE": 9,
     "NO_BASE": 10,
 }
-TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2}
+TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2, "cooled": 3}
 
 # セクター強度(機能B)の複合ソート順: 強 -> 中 -> 弱 -> 不明
 SECTOR_STRENGTH_ORDER = {"強": 0, "中": 1, "弱": 2}
@@ -86,9 +86,12 @@ def assemble_stock_record(
     """Combine the outputs of trend_template/vcp/entry/fundamentals into one
     report.json stock record.
 
-    `tier_override` lets the caller place a stock in the "watchlist" tier
-    (trend template passed, but no actionable VCP/entry setup yet) instead
-    of the fundamentals-coverage-derived confirmed/pool tier.
+    `tier_override` lets the caller place a stock in a non-standard tier
+    instead of the fundamentals-coverage-derived confirmed/pool tier:
+    - "watchlist": trend template passed, but no actionable VCP/entry setup yet
+    - "cooled": breakout already happened but it's too late to enter
+      (EXTENDED=伸びすぎ / STALE=ブレイク鮮度切れ). Pivot/stop levels are
+      still computed and included in the record.
 
     `margin_store` is data/margin_weekly.json's dict, pre-loaded once by the
     caller (pipeline.py) so this per-stock function doesn't re-read the file

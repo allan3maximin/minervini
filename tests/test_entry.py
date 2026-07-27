@@ -216,12 +216,25 @@ def test_evaluate_entry_fresh_breakout_not_stale():
     assert result["status"] == "BREAKOUT"
 
 
-def test_evaluate_entry_extended_stays_extended_even_if_old():
+def test_evaluate_entry_extended_becomes_stale_when_old():
+    # 実装内容3: EXTENDED も from_lock かつ age >= breakout_stale_days なら STALE に倒す。
+    # 「伸びすぎ + 時間切れ」は理由として STALE の方が正確。
     history = _daily_history("8418", [
         ("2026-07-10", "BREAKOUT"),
         ("2026-07-20", "EXTENDED"),
     ])
     latest_row = {"close": 1080.0, "volume": 100_000, "vol_ma50": 100_000, "date": "2026-07-21"}
+    result = evaluate_entry("8418", latest_row, REJECTED_VCP, history, CONFIG)
+    assert result["status"] == "STALE"
+
+
+def test_evaluate_entry_extended_stays_extended_when_fresh():
+    # age < breakout_stale_days の EXTENDED はまだ STALE に倒さない
+    history = _daily_history("8418", [
+        ("2026-07-20", "BREAKOUT"),
+        ("2026-07-21", "EXTENDED"),
+    ])
+    latest_row = {"close": 1080.0, "volume": 100_000, "vol_ma50": 100_000, "date": "2026-07-22"}
     result = evaluate_entry("8418", latest_row, REJECTED_VCP, history, CONFIG)
     assert result["status"] == "EXTENDED"
 
@@ -276,3 +289,49 @@ def test_evaluate_entry_fresh_vcp_watch_a_ignores_stale_streak():
     latest_row = {"close": 990.0, "volume": 80_000, "vol_ma50": 100_000, "date": "2026-07-21"}
     result = evaluate_entry("1111", latest_row, vcp_result, history, CONFIG)
     assert result["status"] == "WATCH_A"
+
+
+# ---------------------------------------------------------------------------
+# 実装内容3の追加テスト(cooled ティア改修 2026-07-27)
+# ---------------------------------------------------------------------------
+
+def test_evaluate_entry_extended_fresh_stays_extended():
+    """age < breakout_stale_days の EXTENDED は STALE に倒さない (fresh EXTENDED)"""
+    # ブレイクが今日 -> age=0 -> stale_days(7)未満なので EXTENDED のまま
+    history = _daily_history("7777", [("2026-07-22", "BREAKOUT")])
+    latest_row = {"close": 1080.0, "volume": 100_000, "vol_ma50": 100_000, "date": "2026-07-22"}
+    result = evaluate_entry("7777", latest_row, REJECTED_VCP, history, CONFIG)
+    assert result["status"] == "EXTENDED"
+
+
+def test_evaluate_entry_extended_old_becomes_stale():
+    """age >= breakout_stale_days の EXTENDED は STALE になる"""
+    stale_days = CONFIG["entry"]["breakout_stale_days"]
+    # stale_days 日前にブレイク: age = stale_days >= stale_days なので STALE
+    history = _daily_history("7777", [
+        (f"2026-07-{1:02d}", "BREAKOUT"),
+        (f"2026-07-{stale_days:02d}", "EXTENDED"),
+    ])
+    today = f"2026-07-{stale_days + 1:02d}"
+    latest_row = {"close": 1080.0, "volume": 100_000, "vol_ma50": 100_000, "date": today}
+    result = evaluate_entry("7777", latest_row, REJECTED_VCP, history, CONFIG)
+    assert result["status"] == "STALE"
+
+
+def test_evaluate_entry_fresh_vcp_watch_a_extended_not_stale():
+    """from_lock=False (フレッシュVCP由来)の EXTENDED はSTALE変換の対象外"""
+    # フレッシュVCPが WATCH_A を返し価格が上: extended = True だが from_lock=False
+    vcp_result = {
+        "status": "WATCH_A",
+        "contractions": [{"high_price": 1000.0, "low_price": 950.0, "depth": 0.05}],
+    }
+    history = _daily_history("9999", [
+        ("2026-07-01", "BREAKOUT"),
+        ("2026-07-20", "EXTENDED"),
+    ])
+    latest_row = {"close": 1080.0, "volume": 100_000, "vol_ma50": 100_000, "date": "2026-07-21"}
+    result = evaluate_entry("9999", latest_row, vcp_result, history, CONFIG)
+    # フレッシュVCPの新ピボット = contractions[-1].high_price = 1000.0
+    # close(1080) > pivot(1000) * extended_pct(1.05~) なら EXTENDED
+    # いずれにせよ from_lock=False なので STALE 変換は起きない
+    assert result["status"] != "STALE"

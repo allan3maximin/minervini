@@ -2417,3 +2417,29 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .session-review-btns button:active { transform: translateY(1px); }
 .session-review-status { margin-top: 8px; min-height: 16px; font-size: 12px; color: var(--text-dim); }
+
+/* cooled tier: 追いかけ禁止 (EXTENDED/STALE) の折りたたみエリア */
+#cooled-details {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+#cooled-details > summary {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+#cooled-details > summary::before {
+  content: "▶ ";
+  font-size: 10px;
+}
+#cooled-details[open] > summary::before {
+  content: "▼ ";
+}
+#cooled-tier-body {
+  padding: 4px 0 8px;
+}

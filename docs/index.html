@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=d6e99931">
+<link rel="stylesheet" href="assets/style.css?v=78d8a638">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -122,6 +122,10 @@
       <section class="tier-section">
         <div class="tier-head"><span class="tier-head-title">監視</span><button type="button" class="help-btn" data-help="tier_watchlist" aria-label="用語説明: 監視">?</button></div>
         <div id="watchlist-tier-body"></div>
+        <details id="cooled-details" hidden>
+          <summary id="cooled-summary">追いかけ禁止 (0件)</summary>
+          <div id="cooled-tier-body"></div>
+        </details>
       </section>
     </div>
   </div>
@@ -627,7 +631,7 @@
         <div class="chart-card-head">
           <h2>株価・移動平均線</h2>
           <div class="line-toggles">
-            <label class="line-toggle"><input type="checkbox" id="toggle-vcp"> VCP</label><button type="button" class="help-btn" data-help="vcp_line" aria-label="用語説明: VCPライン">?</button>
+            <label class="line-toggle"><input type="checkbox" id="toggle-vcp" checked> VCP</label><button type="button" class="help-btn" data-help="vcp_line" aria-label="用語説明: VCPライン">?</button>
             <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label><button type="button" class="help-btn" data-help="pivot" aria-label="用語説明: ピボット">?</button>
             <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label><button type="button" class="help-btn" data-help="stop" aria-label="用語説明: 損切り(ストップ)">?</button>
           </div>
@@ -746,6 +750,6 @@
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
 <script src="assets/heatmap.js?v=d0d4bcee"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=e411a829"></script>
+<script src="assets/app.js?v=9ed89fde"></script>
 </body>
 </html>

@@ -290,12 +290,14 @@ def evaluate_entry(
     levels = compute_pivot_levels(pivot, stop_ref_low, config)
 
     # ブレイク鮮度チェック(ゾンビピボット対策): ロック済みピボットの初回ブレイクから
-    # breakout_stale_days 暦日を超えたら、BREAKOUT/BREAKOUT_WEAK/WATCH_A を STALE に
-    # 落とす(EXTENDED は価格ベースの追いかけ禁止としてそのまま)。STALE は
-    # extended_cooldown_ready のカウント対象なので、cooldown 日数後にロック自体が
-    # 破棄され、新しいベース形成(WATCH_A)を待つ状態に戻る。フレッシュなVCPスキャンが
-    # WATCH_A を返した場合(from_lock=False)は新ベースなので対象外。
-    if from_lock and status_info["status"] != "EXTENDED":
+    # breakout_stale_days 暦日を超えたら、BREAKOUT/BREAKOUT_WEAK/WATCH_A/EXTENDED を
+    # 全て STALE に落とす。EXTENDED も「伸びすぎ」と「時間切れ」を組み合わせた状態
+    # であり、どうせ追いかけ禁止なので理由として正確な STALE に倒す。
+    # STALE は extended_cooldown_ready のカウント対象(POST_BREAKOUT_STATUSES に含む)
+    # なので、cooldown 日数後にロック自体が破棄され、新しいベース形成(WATCH_A)を
+    # 待つ状態に戻る。フレッシュなVCPスキャンが WATCH_A を返した場合(from_lock=False)
+    # は新ベースなので対象外。
+    if from_lock:
         stale_days = config["entry"].get("breakout_stale_days")
         age = breakout_age_days(history, code, today)
         if stale_days is not None and age is not None and age >= stale_days:

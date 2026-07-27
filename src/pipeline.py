@@ -45,11 +45,14 @@ from src.utils_io import safe_load_json
 
 DEBUG_PATH = REPO_ROOT / "data" / "trend_template_debug.json"
 
-# Statuses worth surfacing on the dashboard: an active setup, or a stock
-# that's already broken out of one (tracked via the locked historical pivot).
-# STALE (2026-07-21追加) = ブレイク鮮度切れ。表示・履歴記録は続ける(cooldownの
-# カウントに必要)が、EXTENDEDと同じ「追いかけ禁止」扱い。
-ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED", "STALE"}
+# 今日エントリー判断ができるステータス(セットアップが生きていて追いかけ禁止でない)。
+# EXTENDED(伸びすぎ)と STALE(ブレイク鮮度切れ)は両方とも追いかけ禁止なので
+# ここには含めず、別途 COOLED_ENTRY_STATUSES で管理し cooled ティアへ隔離する。
+ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B"}
+
+# 追いかけ禁止ステータス: ブレイク済みで既に手遅れ。ピボット情報はあるが
+# エントリー不可。watchlist(セットアップ形成待ち)とは意味が違うため別ティア。
+COOLED_ENTRY_STATUSES = {"EXTENDED", "STALE"}
 
 
 def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int:
@@ -225,6 +228,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     dryup_records = []  # 本番フォワード検証: WATCH_A/B の枯れ度レイヤーを毎日追記
     watch_count = 0
     actionable_count = 0
+    cooled_count = 0
     # VCP評価対象(P1)の origin/status 分布を地合い観測用に集計。
     vcp_status_counts = Counter()
 
@@ -244,17 +248,20 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         entry_result = entry_mod.evaluate_entry(code, latest_by_code[code], vcp_result, history, config)
         fund_info = score_stock(code, latest_by_code[code], fundamentals_by_code, today, config)
 
-        is_actionable = entry_result.get("pivot") is not None and entry_result["status"] in ACTIONABLE_ENTRY_STATUSES
+        has_pivot = entry_result.get("pivot") is not None
+        is_actionable = has_pivot and entry_result["status"] in ACTIONABLE_ENTRY_STATUSES
+        is_cooled = has_pivot and entry_result["status"] in COOLED_ENTRY_STATUSES
+
+        # stop_ref_low の解決(actionable と cooled で共通)。
+        def _resolve_stop_ref_low():
+            if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
+                return vcp_result["contractions"][-1]["low_price"]
+            locked = entry_mod.locked_pivot(history, code)
+            return locked.get("stop_ref_low") if locked else None
 
         if is_actionable:
             actionable_count += 1
-            stop_ref_low = None
-            if vcp_result.get("status") == "WATCH_A" and vcp_result.get("contractions"):
-                stop_ref_low = vcp_result["contractions"][-1]["low_price"]
-            else:
-                locked = entry_mod.locked_pivot(history, code)
-                if locked:
-                    stop_ref_low = locked.get("stop_ref_low")
+            stop_ref_low = _resolve_stop_ref_low()
 
             history = entry_mod.record_status(
                 history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
@@ -297,6 +304,31 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
                 record["new_breakout_today"] = previous_status_by_code.get(code) == "WATCH_A"
                 if topix_return is not None and entry_mod.market_guard_triggered(topix_return, config):
                     record["market_guard_warning"] = True
+
+        elif is_cooled:
+            # Cooled tier: ブレイク済みで追いかけ禁止(EXTENDED/STALE)。ピボット情報は
+            # あるが新規エントリーは不可。watchlist(セットアップ形成待ち)とは意味が
+            # 違うため別ティアに隔離する。チャートJSONは actionable と同様に出力する。
+            cooled_count += 1
+            stop_ref_low = _resolve_stop_ref_low()
+
+            history = entry_mod.record_status(
+                history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
+            )
+
+            record = build_site.assemble_stock_record(
+                code,
+                name_by_code.get(code, ""),
+                latest_by_code[code],
+                tt_result["must_flags"],
+                vcp_result,
+                entry_result,
+                fund_info,
+                config,
+                tier_override="cooled",
+                margin_store=margin_store,
+            )
+
         else:
             # Watchlist: passed the trend template, but VCP hasn't produced
             # an actionable base yet (still building, too recent, or the
@@ -445,10 +477,10 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     if is_snapshot:
         build_site.snapshot_docs_json("indices", snapshot_suffix)
 
-    watchlist_count = len(stock_records) - actionable_count
+    watchlist_count = len(stock_records) - actionable_count - cooled_count
     print(
         f"Done. {template_pass}/{len(codes)} passed trend template, "
-        f"{actionable_count} actionable, {watchlist_count} watchlist "
+        f"{actionable_count} actionable, {cooled_count} cooled, {watchlist_count} watchlist "
         f"(P1:{pr_counts['p1']} P2:{pr_counts['p2']} P3:{pr_counts['p3']} P4:{pr_counts['p4']})."
     )
     return 0

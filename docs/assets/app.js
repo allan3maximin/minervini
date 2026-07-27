@@ -526,6 +526,7 @@ async function initDashboard() {
   renderTier(report, "confirmed", "confirmed-tier-body");
   renderTier(report, "pool", "pool-tier-body");
   renderPriorityTier(report, "watchlist-tier-body");
+  renderCooledTier(report);
   wireSessionReview(report, indices, breadth, positionsData);
   startLiveIndices();
 }
@@ -1552,11 +1553,29 @@ function renderStatusSection(status, stocks, tier, sortKey) {
 // (adhocListFilter)のためSPA内では維持、リロードで解除。
 // ---------------------------------------------------------------------------
 
+function renderCooledTier(report) {
+  const details = document.getElementById("cooled-details");
+  const summary = document.getElementById("cooled-summary");
+  const body = document.getElementById("cooled-tier-body");
+  if (!details || !summary || !body) return;
+  const stocks = (report.stocks || []).filter((s) => s.tier === "cooled");
+  if (!stocks.length) {
+    details.hidden = true;
+    return;
+  }
+  details.hidden = false;
+  summary.textContent = `追いかけ禁止 (${stocks.length}件)`;
+  renderTier(report, "cooled", "cooled-tier-body");
+}
+
 function rerenderTierBody(tier) {
   const report = reportCache && reportCache.data;
   if (!report) return;
   if (tier === "watchlist") {
     renderPriorityTier(report, "watchlist-tier-body");
+    renderCooledTier(report);
+  } else if (tier === "cooled") {
+    renderCooledTier(report);
   } else {
     renderTier(report, tier, `${tier}-tier-body`);
   }
@@ -2873,6 +2892,7 @@ const TIER_COPY_LABELS = {
   confirmed: "本命 (ファンダ強度確認済み: EPS YoY+25%/売上YoY+20%以上)",
   pool: "候補プール (VCPセットアップあり・ファンダ未確認または基準未達)",
   watchlist: "候補 (トレンドテンプレート8条件合格・セットアップ形成待ち)",
+  cooled: "追いかけ禁止 (ブレイク済みで手遅れ: EXTENDED=伸びすぎ / STALE=鮮度切れ)",
 };
 
 function copyNum(v, digits = 2) {
@@ -3081,9 +3101,10 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
 // breadth/positions を使う(再フェッチしない)。
 // ---------------------------------------------------------------------------
 
-// エントリーステータスのうち「当日見るべき」アクション対象。バックエンドの
-// pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
-const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B", "EXTENDED", "STALE"]);
+// エントリーステータスのうち「今日エントリー判断ができる」アクション対象。
+// バックエンドの pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
+// EXTENDED(伸びすぎ)と STALE(鮮度切れ)は追いかけ禁止なので除外。
+const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B"]);
 
 // ピックアップ銘柄の一覧テーブル(市場サマリー用の共通フォーマット)。
 function reviewStockTable(stocks, limit) {
@@ -3744,7 +3765,7 @@ let stockChartState = null;
 // VCPトグルのチェック状態は銘柄切替をまたいで維持する(ユーザー要望 2026-07-23:
 // チェックしたまま＞で銘柄を送りたい。描画データが無い銘柄ではチェックあり
 // のままdisabledになり、データがある銘柄に戻れば自動で線が復帰する)。
-let vcpToggleSticky = false;
+let vcpToggleSticky = true;
 
 function teardownCharts() {
   if (!stockChartState) return;
