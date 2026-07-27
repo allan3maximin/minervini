@@ -445,10 +445,10 @@ function openSectorHistoryPopup(sec) {
     const d1Last = lastNonNull(d1);
     historyHtml = `
       <h4>対TOPIX相対強度の推移 <span class="hm-hist-sub">(直近${dates.length}営業日)</span></h4>
-      <div class="hm-hist-spark">${histSparkline(rel, true)}</div>
+      <div class="hm-hist-spark">${histSparkline(rel, true, dates)}</div>
       <p class="hm-none">最新: 相対強度 ${relLast != null ? (relLast > 0 ? "+" : "") + relLast.toFixed(1) + "%" : "-"} / 前日比 ${d1Last != null ? (d1Last > 0 ? "+" : "") + d1Last.toFixed(2) + "%" : "-"}</p>
       <h4>前日比(d1)の推移</h4>
-      <div class="hm-hist-spark">${histSparkline(d1, false)}</div>`;
+      <div class="hm-hist-spark">${histSparkline(d1, false, dates)}</div>`;
   }
 
   overlay.innerHTML = `
@@ -475,8 +475,17 @@ function lastNonNull(arr) {
   return null;
 }
 
+// 日付ラベル(YYYY-MM-DD)を軸表示用の M/D に短縮する。
+function axisDateLabel(d) {
+  if (!d) return "";
+  const m = String(d).match(/(\d{1,2})-(\d{1,2})$/);
+  return m ? `${Number(m[1])}/${Number(m[2])}` : String(d);
+}
+
 // 依存なしのSVGスパークライン。0ラインを基準に、上=緑/下=赤で塗り分ける。
-function histSparkline(values, colorByLast) {
+// 軸ラベルは preserveAspectRatio="none" で文字が歪むのでSVG外のHTMLに置き、
+// app.js の .spark-box グリッド(縦軸=左/横軸=下)をそのまま流用する。
+function histSparkline(values, colorByLast, dates) {
   const W = 280;
   const H = 64;
   const pad = 4;
@@ -502,11 +511,24 @@ function histSparkline(values, colorByLast) {
   const up = colorByLast ? last >= 0 : last >= 0;
   const stroke = up ? "var(--accent)" : "var(--danger)";
   const zeroY = yAt(0).toFixed(1);
+  const fmt = (v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img">
-    <line x1="${pad}" y1="${zeroY}" x2="${W - pad}" y2="${zeroY}" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 3"/>
-    <path d="${dPath.trim()}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  const ds = dates || [];
+  const xLeft = axisDateLabel(ds[0]);
+  const xRight = axisDateLabel(ds[ds.length - 1]);
+
+  const svg = `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img">
+    <line class="spark-grid" x1="${pad}" y1="${zeroY}" x2="${W - pad}" y2="${zeroY}"/>
+    <line class="spark-axis" x1="0.5" y1="0" x2="0.5" y2="${H}"/>
+    <line class="spark-axis" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>
+    <path d="${dPath.trim()}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
   </svg>`;
+
+  return `<div class="spark-box spark-box-lg">
+    <div class="spark-yaxis"><span>${fmt(max)}</span><span>${fmt((min + max) / 2)}</span><span>${fmt(min)}</span></div>
+    ${svg}
+    <div class="spark-xaxis"><span>${xLeft}</span><span>${xRight}</span></div>
+  </div>`;
 }
 
 function updateLegend() {

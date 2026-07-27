@@ -21,6 +21,91 @@
 
 ---
 
+## 2026-07-27 (125): UI改善7点(ステータスフィルタ / バッジ / グラフ軸 / パスキー / 振り返り)
+
+### 背景
+
+124 で入れた「追いかけ禁止」アコーディオンが、ユーザーからは
+「アコーディオンではなくフィルタで出し分けたい」との指摘。あわせてカードの
+バッジ崩れ・グラフの軸なし・パスキー解錠の手間・振り返りUIなど計7点をまとめて対応。
+
+### 変更点
+
+1. **ステータスフィルタ化 + アコーディオン撤廃** (`app.js` / `index.html` / `style.css`)
+   - `LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["EXTENDED", "STALE"]`、`defaultShownStatuses()`、
+     `statusFilterCustom(f)` を新設。
+   - `showStatuses` は**アドホックフィルタ(ボトムシート)専用**。恒久フィルタ
+     (`emptyListFilter` / `loadListFilters`) には持たせない = 設定画面側では
+     ステータス絞り込みをしない、という設計。
+   - `applyListFilter` を書き換え: ステータス絞り込みは他フィルタの有無に関係なく
+     **常に適用**(早期returnの前で filter する)。かつ `excluded` にはカウントしない
+     (カウントすると「フィルタでN件を除外中」バナーが常時点灯してしまうため)。
+   - `renderCooledTier` は `#cooled-tier-body` を素の div として描画。`<details>` 撤廃。
+   - ボトムシートに `#alf-show-statuses` を追加。チェックボックスは `initAdhocFilter` が
+     `STATUS_ORDER` から動的生成(`dataset.built` で二重生成ガード)。
+   - 「クリア」は全チェックではなく `defaultShownStatuses()` に戻す(伸びすぎが復活しないように)。
+   - CSS: 11項目あるので `.lf-checks-status` はグリッド2列。
+
+2. **バッジ短縮 + スコア左へ移動** (`app.js` / `style.css`)
+   - `MARGIN_BADGE_LABELS` に `short` を追加。`marginBadgeHtml` / `fundVerdictBadgeHtml` に
+     `{detail}` オプション。カード上は「買重」「F不」、詳細画面は従来通り「買残重い」「F不合格 取止」。
+   - カード1段目に `.sc-flags` を新設し、スコアチップの**左**に配置。`.sc-margin` は廃止。
+
+3. **ファンダ未入力の黄色背景を撤廃** — カードの `fund-stale` クラス付与を削除、
+   `.stock-card.fund-stale` の CSS も削除。エントリー時に必ず確認するのでノイズでしかない。
+   (テーブル用の legacy `tbody tr.fund-stale` は死にルールとして残置)
+
+4. **個別株グラフのピボット/損切りラベルを左へ** (`app.js`)
+   - Lightweight Charts の `createPriceLine({title})` は右のプライスケール側にしか
+     描画できず、左寄せオプションが無い。プライスケール自体を左に移すと3ペインの
+     同期に影響するため、`title: ""` にして **Series Primitive で自前描画**する
+     `createEdgeLabelPrimitive(getItems)` を新設(`createVcpZigzagPrimitive` と同じ手法)。
+   - トグル切替時に `edgeLabelPrimitive.requestUpdate()` を呼んで再描画。
+
+5. **スパークラインに縦横軸を追加** (`app.js` / `heatmap.js` / `style.css`)
+   - 折れ線SVGは `preserveAspectRatio="none"` で横に伸ばすため、SVG内に文字を置くと潰れる。
+     → **軸ラベルはSVGの外にHTMLで置き**、`.spark-box` グリッドで「左=縦軸 / 下=横軸」に配置。
+     線は `vector-effect="non-scaling-stroke"` で太さを保つ。
+   - `sparklineSvg(series, isUp, opts)` に `format` / `xLeft` / `xRight` を追加。
+     `sparkNum()` で万単位・桁数を自動整形。
+   - 適用先: 市況カード、地合い詳細 (`MARKET_SPARK_ITEMS` に個別 `format`)、VCPファネル(「件」)、
+     セクター履歴ポップアップ (`heatmap.js histSparkline`、y軸は%、x軸は `SECTOR_HISTORY.dates` の
+     最初と最後を M/D 表記)。高さ64pxの大きめ版は `.spark-box-lg`。
+
+6. **パスキー解錠の手間を削減** (`app.js` / `index.html`)
+   - **仕様上、完全な自動要求は不可**: `navigator.credentials.get()` はユーザー
+     アクティベーション(タップ等)を必須とするため、ページロード時に勝手に Face ID を
+     出すことはどのブラウザでもできない。
+   - 次善策として、解錠ボタンだけでなく**ロック画面のどこをタップしても解錠**するようにした
+     (`doUnlock` を抽出 + `busy` 再入ガード、overlay に click / Enter・Space ハンドラ、
+     `tabIndex`/`role=button`/`focus()`)。
+   - なお同一セッション内のリロードは `restoreDataKey()` が効くので元々ボタン不要。
+
+7. **振り返り・作戦データUIの見直し** (`index.html` / `style.css`)
+   - 3つのコピーボタンをタイル型 (`.session-btn` > `.session-btn-main` >
+     `.session-btn-title` + `.session-btn-sub`、右に `.session-btn-icon`) に変更。
+     `.session-review-btns` は `repeat(auto-fit, minmax(210px, 1fr))` のグリッド。
+   - 見出しに `.session-review-hint`、下部に `.session-review-foot` の一行説明を追加。
+   - ボタンID (`copy-zaraba-mae-btn` / `copy-maezyou-btn` / `copy-goba-btn`) と
+     `#session-review-status` は据え置きなので JS 側は無変更。
+
+8. **キャッシュバスター更新** — `style.css?v=3c9a71e5` / `heatmap.js?v=7b41f0a2` / `app.js?v=5a6ef3d1`。
+
+### 検証
+
+- `node --check docs/assets/app.js` / `docs/assets/heatmap.js` → OK。
+- `pytest -q` → 423 passed / 3 failed(既知の parquet エンジン未導入によるサンドボックス環境依存。
+  `tests/test_indices.py` 1件・`tests/test_prices.py` 2件)。
+- 撤廃したクラス/idの残骸 grep (`sc-margin` / `cooled-details` / `cooled-summary` /
+  カードの `fund-stale`) → コメント以外の参照なし。
+
+### 次にやること
+
+- 実機(iPhone Safari)で確認: ステータスチェックボックスのボトムシート高さ、
+  スパークライン軸ラベルの可読性、ピボット/損切りラベルの左端描画位置。
+
+---
+
 ## 2026-07-27 (124): EXTENDED/STALE を cooled ティアへ隔離 + VCPトグル初期チェック
 
 ### 背景

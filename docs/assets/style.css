@@ -474,7 +474,45 @@ tbody tr.row-static:hover { background: transparent; }
 .market-card-change { font-size: 11px; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
 .chg-up { color: var(--accent); }
 .chg-down { color: var(--danger); }
-.sparkline { display: block; width: 100%; height: 32px; }
+/* スパークライン + 目盛 (2026-07-27)。折れ線SVGは preserveAspectRatio="none" で
+   横に伸ばすため、文字を入れると潰れる。そこで軸ラベルはSVGの外にHTMLで置き、
+   grid で「左=縦軸ラベル / 下=横軸ラベル」に配置する。 */
+.spark-box {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 3px;
+  min-width: 0;
+}
+.spark-yaxis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.spark-xaxis {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.sparkline { grid-column: 2; grid-row: 1; display: block; width: 100%; height: 32px; }
+/* セクター履歴ポップアップ用の大きめ版 (heatmap.js histSparkline)。 */
+.spark-box-lg .sparkline { height: 64px; }
+.spark-box-lg .spark-yaxis,
+.spark-box-lg .spark-xaxis { font-size: 10px; }
+.spark-axis { stroke: var(--border-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 .market-card-date { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
 
 /* --------------------------------------------------------------- charts */
@@ -1780,7 +1818,8 @@ a.nav-btn:hover { border-color: var(--link); }
   outline-offset: -2px;
 }
 /* ファンダ古いカード: 背景の薄い黄色に加え、左ボーダーでも一目で分かるようにする */
-.stock-card.fund-stale { background: rgba(251, 191, 36, 0.08); border-left-color: var(--warn); }
+/* 2026-07-27: ファンダ未入力(fund-stale)の黄色背景は撤廃(app.js側でクラスも
+   付けていない)。エントリー時に必ず確認する項目なので、一覧では表示ノイズ。 */
 .stock-card.row-static { cursor: default; }
 .stock-card.row-static:hover { background: var(--panel); }
 
@@ -1805,6 +1844,17 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 .sc-code { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
 .sc-metrics { flex: 0 0 auto; display: flex; align-items: baseline; gap: 5px; }
+
+/* 2026-07-27: 買重(信用買残)/F不(ファンダ不合格)バッジは短縮表記にしてSCチップの
+   左横へ移動。3段目のバッジ行に置くとカード幅を食って折り返しが起きていた。 */
+.sc-flags { display: inline-flex; align-items: baseline; gap: 4px; }
+.sc-flags:empty { display: none; }
+.sc-flags .sell-signal-badge,
+.sc-flags .fund-badge {
+  padding: 1px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 
 /* SC/RSチップ: 総合スコアは順位付け用の数値であって合否判定ではないため
    (help_key: total_score参照)、緑/赤などの色は付けず、太さ・濃さの差だけで
@@ -1838,8 +1888,7 @@ a.nav-btn:hover { border-color: var(--link); }
   text-align: right;
 }
 .sc-dryup { flex: 0 0 auto; white-space: nowrap; }
-.sc-margin { flex: 0 0 auto; white-space: nowrap; }
-.sc-margin:empty { display: none; }
+/* .sc-margin / .sc-fund は 2026-07-27 に .sc-flags(1段目)へ移動して廃止。 */
 
 /* ------------------------------------------------------- 投資法ページ */
 
@@ -2055,6 +2104,13 @@ a.nav-btn:hover { border-color: var(--link); }
   width: 100%;
 }
 .lf-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 2px; }
+/* ステータスは11項目あるので2列グリッドで縦に積み、ボトムシートの高さを抑える。 */
+.lf-checks-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 12px;
+}
+.lf-checks-status .lf-check { font-size: 12px; }
 .lf-check {
   display: inline-flex;
   align-items: center;
@@ -2394,6 +2450,9 @@ a.nav-btn:hover { border-color: var(--link); }
 }
 
 /* ダッシュボード: 前場/後場 振り返りデータのコピー(session-review) */
+/* 振り返り・作戦データ (2026-07-27 刷新)。説明パラグラフ+平坦な3ボタンから、
+   セッション名を主役にしたタイル型に。各タイルは「見出し(いつの断面か)」と
+   「補足(何に使うか)」の2行構成で、押す前に判断できるようにしている。 */
 .session-review {
   margin-top: 16px;
   padding: 14px;
@@ -2401,45 +2460,46 @@ a.nav-btn:hover { border-color: var(--link); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.session-review h2 { margin: 0 0 6px; font-size: 16px; }
-.session-review-btns { display: flex; flex-wrap: wrap; gap: 10px; }
-.session-review-btns button {
-  flex: 1 1 auto;
-  min-width: 150px;
-  padding: 11px 14px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid var(--accent);
+.session-review-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 10px;
+}
+.session-review h2 { margin: 0; font-size: 16px; }
+.session-review h2 .bi { color: var(--accent); margin-right: 4px; }
+.session-review-hint { font-size: 11.5px; color: var(--text-dim); }
+.session-review-btns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+.session-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.session-review-btns button:active { transform: translateY(1px); }
-.session-review-status { margin-top: 8px; min-height: 16px; font-size: 12px; color: var(--text-dim); }
+.session-btn:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.session-btn:active { transform: translateY(1px); }
+.session-btn-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.session-btn-title { font-size: 14px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+.session-btn-sub { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+.session-btn-icon { flex: 0 0 auto; font-size: 15px; color: var(--text-dim); }
+.session-review-foot { margin: 10px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+.session-review-status { margin-top: 6px; min-height: 16px; font-size: 12px; color: var(--text-dim); }
 
-/* cooled tier: 追いかけ禁止 (EXTENDED/STALE) の折りたたみエリア */
-#cooled-details {
-  margin-top: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-#cooled-details > summary {
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-dim);
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-}
-#cooled-details > summary::before {
-  content: "▶ ";
-  font-size: 10px;
-}
-#cooled-details[open] > summary::before {
-  content: "▼ ";
-}
-#cooled-tier-body {
-  padding: 4px 0 8px;
+/* cooled tier: 追いかけ禁止 (EXTENDED/STALE)。2026-07-27にアコーディオンを廃止し、
+   フィルタのステータスチェックで出し分ける方式に変更。既定では中身が空。 */
+#cooled-tier-body:not(:empty) {
+  margin-top: 10px;
 }

@@ -128,7 +128,9 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 - `tier: "cooled"` → 〔追いかけ禁止〕ブレイク済みで手遅れ (EXTENDED=伸びすぎ / STALE=鮮度切れ)。
   watchlist とは意味が違う(watchlist=形成待ち、cooled=ブレイク後)ので別ティアに隔離。
   ピボット・損切りレコードは保持(チャート表示・クールダウン管理に必要)。
-  フロントでは監視パネル内の折りたたみ `<details>` に表示し、デフォルトは閉じた状態。
+  フロントでは監視パネル内の `#cooled-tier-body` に表示するが、**表示可否はステータスフィルタが決める**
+  (2026-07-27改定: 折りたたみ `<details>` は撤廃)。既定で EXTENDED/STALE のチェックが外れているため
+  通常は空 = 描画されず、ボトムシートでチェックを入れると出る。
   `ACTIONABLE_ENTRY_STATUSES` からは外れ、`COOLED_ENTRY_STATUSES = {"EXTENDED", "STALE"}` で管理。
   TIER_ORDER では watchlist(2) の次の 3 に配置。
 - 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。**2026-07-22改定: full_score は表示専用**となり、ランキング(total_score の phase1 側)は全ティアとも tech_score を使う(純セットアップ品質で順位付け。RSが業績を織り込むためスコアへのファンダ加点は二重計上、という整理)。
@@ -588,6 +590,17 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
     fund_status列(fund_stale/fund_coverageの表示)自体はダッシュボードに残っている。
 - `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
   上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
+- **一覧フィルタは2層 (恒久 + アドホック、AND結合)**: 恒久=設定画面、localStorage
+  `minervini_list_filters`。アドホック=ボトムシート、メモリ上の `adhocListFilter`(リロードで消える)。
+  両方を `stockPassesListFilter` に通し、`applyListFilter` が `{kept, excluded}` を返す。
+  - **表示ステータス (`showStatuses`) はアドホック側だけが持つ** (2026-07-27追加)。既定は
+    `defaultShownStatuses()` = `STATUS_ORDER` から `LIST_FILTER_DEFAULT_HIDDEN_STATUSES`
+    (= EXTENDED/STALE = 追いかけ禁止) を除いたもの。チェックボックスは `initAdhocFilter` が
+    `STATUS_ORDER` から動的生成する(`#alf-show-statuses`)ので、ステータスを増やしてもHTML修正不要。
+  - 実装上の注意2点: (a) ステータス絞り込みは他フィルタが未設定でも効く必要があるため、
+    `applyListFilter` の早期returnより**前**で filter する。(b) 除外件数 `excluded` には
+    **含めない**(含めると「フィルタでN件を除外中」バナーが常時点灯する)。同じ理由で
+    `statusFilterCustom()` は全ステータスではなく**既定セット**との差分でカスタム判定する。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
 - `renderMarketSignal(breadth)` (2026-07-11追加、2026-07-18に地合い詳細パネル+
   market_score/score_trendバッジ+スパークライン2本を追加): breadth.jsonのhistory
@@ -601,6 +614,13 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   失敗事故(1週間ダッシュボード未更新)を受けた対策。
 - `renderBreadth`: テンプレ通過率 / セットアップ数 / ブレイク成功率 / 候補(8条件合格)件数
 - `renderMarketOverview`: indices.json → カード + SVGスパークライン
+- **スパークラインの軸 (2026-07-27)**: `sparklineSvg(series, isUp, {format, xLeft, xRight})` は
+  `preserveAspectRatio="none"` で横に伸ばす都合上、SVG内にテキストを置くと文字が潰れる。
+  そこで**軸ラベルはSVGの外にHTMLで出し**、`.spark-box` のCSSグリッドで「左=縦軸 / 下=横軸」に
+  配置する(線は `vector-effect="non-scaling-stroke"`)。縦軸ラベルは max / 中央値 / min の3点。
+  同じ `.spark-box` 一式を `heatmap.js` の `histSparkline(values, colorByLast, dates)`
+  (セクター履歴ポップアップ、高さ64pxなので `.spark-box-lg`) でも流用している。
+  新しくスパークラインを足すときはこの2関数のどちらかを使うこと(独自実装を増やさない)。
 - `startLiveIndices`: 指数カードの擬似リアルタイム更新。60秒間隔で indices.json を再fetch (`cache: "no-store"`) して
   `renderMarketOverview` を再実行するだけ(ページリロード不要)。バックグラウンドタブ (`document.hidden`) では止める。
   データ自体の更新頻度は intraday-indices.yml 側の15分間隔が上限 (静的サイトなのでティック単位の真のリアルタイムではない)。
@@ -623,9 +643,14 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   イベントを発火(起動ゲートを閉じる合図)。**data/*.json のfetchは必ずこれを通すこと**(素のfetchだと
   暗号化時に壊れる)。
 - **起動ゲート** (`app.js ensureDataAccess` + index.html `#lock-screen`): report.jsonが封筒なら全ビュー
-  初期化前にロック画面を表示。「パスキーで解錠」→ vault解錠(PRF)→ dataKey注入 → ゲート解除+書き込み系も
+  初期化前にロック画面を表示。「タップして解錠」→ vault解錠(PRF)→ dataKey注入 → ゲート解除+書き込み系も
   同時解錠。平文なら素通し(=暗号化を有効にした時点でゲートが自動的に立ち上がる。ロールバックも
   Secretを消して1回再生成するだけ)。
+- **なぜ自動でパスキーを要求できないか (2026-07-27)**: `navigator.credentials.get()` は
+  **ユーザーアクティベーション必須**の仕様で、ページロード時に自動で Face ID を出すことは
+  どのブラウザでもできない。次善策として解錠処理 `doUnlock` をロック画面**全体**の
+  click / Enter / Space に紐づけ、「どこをタップしても解錠」にしてある(`busy` で再入ガード)。
+  なお同一セッション内のリロードは `restoreDataKey()` が効くため元々パスキー不要。
 - **保管庫v2** (`webauthn-vault.js`): 平文ペイロードが `{"pat","dataKey"}` のJSONに(v1=生PAT文字列も
   解錠のみ後方互換)。セットアップモーダル(fundamentals-modal.js)にデータ鍵入力欄を追加。
   データ鍵は GitHub Secret `DASHBOARD_DATA_KEY` と同じ値を入れる。
@@ -660,7 +685,13 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   `.latest-date-label` (absolute配置, style.css参照) を各ペイン右下にオーバーレイ。
   縦位置は決め打ちpxではなく `alignLatestDateLabel` が各ペインの時間軸canvas(最後のcanvas要素)の
   実測bottom/heightを取得して合わせている(以前は下にズレて見えていた不具合の修正。resize時も再計測)。
-- ピボット/損切りの水平線トグル (#toggle-pivot / #toggle-stop)
+- ピボット/損切りの水平線トグル (#toggle-pivot / #toggle-stop)。
+  **ラベルは左端に自前描画 (2026-07-27)**: Lightweight Charts の `createPriceLine({title})` は
+  右のプライスケール側にしか文字を出せず左寄せオプションが無い。プライスケール自体を左に
+  移すと3ペイン同期に影響するため、`title: ""` にした上で Series Primitive
+  `createEdgeLabelPrimitive(getItems)` がキャンバス左端(x≈7)に「ピボット」「損切り」を
+  自前描画する(`createVcpZigzagPrimitive` と同じ手法)。トグル切替時は
+  `edgeLabelPrimitive.requestUpdate()` を呼ぶこと。
 - データは docs/data/charts/{code}.json (candles, volumes, rs_line, ma各種, pivot, stop_loss, 収縮マーカー)
 - **SPA化に伴う再初期化の後始末 (2026-07-08)**: 以前はページ遷移のたびにフルリロードされていたため
   `renderCharts()` の中身は使い捨てで良かったが、SPA化で同じDOMのまま銘柄を切り替えるようになったため、

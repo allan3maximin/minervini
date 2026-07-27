@@ -369,15 +369,19 @@ function dryupBadgeHtml(s) {
 // バッジ種別(margin.badge)はサーバ側(build_site.margin_badge)がconfig閾値で確定済み。
 // カード(一覧)では「買残重い」のみ表示し、「売り長」は個別銘柄詳細ページの
 // 需給カードでのみ表示する(3段目のバッジ行が混み合うのを避けるため)。
+// short: カード一覧用の短縮表記(2026-07-27)。フル表記だとカードの1段目が
+// 折り返してレイアウトが崩れるため、一覧では2文字に詰める(詳細画面はフル表記)。
 const MARGIN_BADGE_LABELS = {
-  heavy_buy: { label: "買残重い", className: "signal-badge-warn" },
-  short: { label: "売り長", className: "signal-badge-accent" },
+  heavy_buy: { label: "買残重い", short: "買重", className: "signal-badge-warn" },
+  short: { label: "売り長", short: "売長", className: "signal-badge-accent" },
 };
 function marginBadgeHtml(m, { detail = false } = {}) {
   if (!m || !m.badge) return "";
   if (!detail && m.badge !== "heavy_buy") return "";
   const meta = MARGIN_BADGE_LABELS[m.badge];
-  return meta ? `<span class="sell-signal-badge ${meta.className}">${meta.label}</span>` : "";
+  if (!meta) return "";
+  const text = detail ? meta.label : meta.short;
+  return `<span class="sell-signal-badge ${meta.className}" title="${meta.label}">${text}</span>`;
 }
 
 // ファンダのサイズ係数バッジ (2026-07-22)。表示専用(ランキングには一切使わない)。
@@ -385,9 +389,12 @@ function marginBadgeHtml(m, { detail = false } = {}) {
 // unknown(0.5)はユニバースの大半が該当してバッジだらけになるため一覧では非表示
 // (2026-07-23 ユーザー要望)。ハーフサイズの情報は個別画面の株数計算機・
 // ヘルプ・分析用コピーで引き続き表示される。
-function fundVerdictBadgeHtml(s) {
-  if (s.fund_verdict === "fail") return '<span class="fund-badge fund-badge-fail">F不合格 取止</span>';
-  return "";
+// 2026-07-27: カード一覧では「F不」に短縮(スコアチップの左に置くため)。
+// title属性でフル表記を残す。
+function fundVerdictBadgeHtml(s, { detail = false } = {}) {
+  if (s.fund_verdict !== "fail") return "";
+  const text = detail ? "F不合格 取止" : "F不";
+  return `<span class="fund-badge fund-badge-fail" title="ファンダ不合格 (エントリー取り止め)">${text}</span>`;
 }
 
 // リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
@@ -654,20 +661,54 @@ function indexEdgeStyle(entry) {
   return `border-color:${edge};box-shadow:inset 0 0 0 1px ${edge},0 0 10px ${glow};`;
 }
 
-function sparklineSvg(series, isUp) {
-  const points = (series || []).slice(-60).map((p) => p.v);
+// スパークライン用のコンパクトな数値表記。桁数が銘柄/指標ごとにバラバラ
+// (指数=数千、比率=0〜1、件数=数十)なので、絶対値の大きさで小数桁を切り替える。
+function sparkNum(v) {
+  if (v == null || !isFinite(v)) return "-";
+  const a = Math.abs(v);
+  if (a >= 10000) return (v / 10000).toFixed(1) + "万";
+  if (a >= 100) return String(Math.round(v));
+  if (a >= 10) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+
+// 依存なしSVGスパークライン + 目盛(2026-07-27)。
+// 折れ線本体は preserveAspectRatio="none" で横に引き伸ばすため、SVG内に文字を
+// 置くと縦横比が崩れて読めない。そこで軸ラベルはSVGの外にHTML(.spark-yaxis /
+// .spark-xaxis)として置き、SVGには軸線と中央のガイド線だけを描く。線幅は
+// vector-effect="non-scaling-stroke" で引き伸ばしの影響を受けないようにする。
+function sparklineSvg(series, isUp, opts = {}) {
+  const points = (series || []).slice(-60).map((p) => p.v).filter((v) => v != null && isFinite(v));
   if (points.length < 2) return "";
   const w = 120;
   const h = 32;
   const min = Math.min(...points);
   const max = Math.max(...points);
   const span = max - min || 1;
+  const mid = (min + max) / 2;
   const step = w / (points.length - 1);
-  const coords = points
-    .map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
-    .join(" ");
+  const yAt = (v) => h - 1 - ((v - min) / span) * (h - 2);
+  const coords = points.map((v, i) => `${(i * step).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
   const color = isUp ? "var(--accent)" : "var(--danger)";
-  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  const midY = yAt(mid).toFixed(1);
+  const fmt = opts.format || sparkNum;
+  const xLeft = opts.xLeft != null ? opts.xLeft : `${points.length}日前`;
+  const xRight = opts.xRight != null ? opts.xRight : "最新";
+  const svg =
+    `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">` +
+    `<line class="spark-grid" x1="0" y1="${midY}" x2="${w}" y2="${midY}"/>` +
+    `<line class="spark-axis" x1="0.5" y1="0" x2="0.5" y2="${h}"/>` +
+    `<line class="spark-axis" x1="0" y1="${h - 0.5}" x2="${w}" y2="${h - 0.5}"/>` +
+    `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` +
+    `</svg>`;
+  return (
+    `<div class="spark-box">` +
+    `<div class="spark-yaxis"><span>${escapeHtml(fmt(max))}</span><span>${escapeHtml(fmt(mid))}</span><span>${escapeHtml(fmt(min))}</span></div>` +
+    svg +
+    `<div class="spark-xaxis"><span>${escapeHtml(xLeft)}</span><span>${escapeHtml(xRight)}</span></div>` +
+    `</div>`
+  );
 }
 
 // "YYYY-MM-DD" -> "M/D" (年なし)。不正値はそのまま返す。
@@ -989,18 +1030,21 @@ function renderMarketDetailHtml(latest, history) {
   // (breadth.json history が keep_days=60 で持っている分をそのまま可視化)。
   // 各フィールドは追加時期がバラバラで旧entryでは欠けるため、系列ごとに null を
   // filter で除外し、2点未満なら sparklineSvg が空文字→「データ蓄積中」に落とす。
+  // format: 縦軸ラベルの表記(未指定は sparkNum の自動桁数)。比率(0〜1)の指標は
+  // %表記にしないと縦軸が "0.550" のようになって読み取りづらい。
+  const pctFmt = (v) => (v * 100).toFixed(0) + "%";
   const MARKET_SPARK_ITEMS = [
     { key: "market_score", label: "地合いスコア" },
-    { key: "pct_above_ma200", label: "MA200上回り率" },
-    { key: "pct_above_ma50", label: "MA50上回り率" },
+    { key: "pct_above_ma200", label: "MA200上回り率", format: pctFmt },
+    { key: "pct_above_ma50", label: "MA50上回り率", format: pctFmt },
     { key: "up_down_ratio_25", label: "騰落レシオ25" },
     { key: "nh_nl_cumulative", label: "NH-NL累積" },
-    { key: "growth_rel_20d", label: "グロース-TOPIX相対" },
+    { key: "growth_rel_20d", label: "グロース-TOPIX相対", format: pctFmt },
   ];
   const sparklinesHtml = MARKET_SPARK_ITEMS.map((item) => {
     const series = history.filter((h) => h && h[item.key] != null).slice(-60).map((h) => ({ v: h[item.key] }));
     const isUp = series.length >= 2 && series[series.length - 1].v >= series[0].v;
-    const spark = sparklineSvg(series, isUp) || '<p class="tier-note">データ蓄積中</p>';
+    const spark = sparklineSvg(series, isUp, { format: item.format }) || '<p class="tier-note">データ蓄積中</p>';
     return `<div class="market-detail-spark"><div class="market-detail-spark-label">${item.label}</div>${spark}</div>`;
   }).join("");
 
@@ -1121,7 +1165,7 @@ function renderVcpFunnel(breadth) {
   // TOO_RECENT の直近60日推移。減少(高値追い→調整入り)を accent、増加を danger 表示。
   const series = withFunnel.slice(-60).map((h) => ({ v: h.vcp_funnel.TOO_RECENT || 0 }));
   const declining = series.length >= 2 && series[series.length - 1].v <= series[0].v;
-  const spark = sparklineSvg(series, declining);
+  const spark = sparklineSvg(series, declining, { format: (v) => String(Math.round(v)) + "件" });
 
   el.hidden = false;
   el.innerHTML = `
@@ -1213,9 +1257,29 @@ function emptyListFilter() {
   };
 }
 
+// 表示するエントリーステータス(2026-07-27)。以前は cooled ティア(追いかけ禁止)を
+// アコーディオンに隔離していたが、「見たいときだけ出す」のはフィルタの仕事なので
+// 一時フィルタのチェックボックスに移した。既定では EXTENDED(伸びすぎ)と
+// STALE(ブレイク鮮度切れ) = 追いかけ禁止だけ非表示にする。
+const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["EXTENDED", "STALE"];
+function defaultShownStatuses() {
+  return STATUS_ORDER.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
+}
+
+// 既定(追いかけ禁止だけ非表示)から変えられているか。既定のままなら「フィルタ適用中」
+// バッジ・除外件数バナーには数えない(常時点灯してノイズになるため)。
+function statusFilterCustom(f) {
+  const st = f && f.showStatuses;
+  if (!st) return false;
+  const def = defaultShownStatuses();
+  return st.length !== def.length || st.some((x) => !def.includes(x));
+}
+
 // リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
 // のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
-let adhocListFilter = emptyListFilter();
+// showStatuses は一時フィルタ側にだけ持つ(恒久フィルタ=設定画面はユニバースの
+// 絞り込み専用で、ステータスは日々切り替える表示トグルのため)。
+let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses() };
 
 // 個別株画面の前後ナビが辿るリストのティア(本命/候補/監視)。カードから遷移した
 // ときに記録し、個別株画面の ＜/＞ で同ティアのフィルタ済み並び順を前後移動する。
@@ -1374,6 +1438,17 @@ function initAdhocFilter() {
   const form = document.getElementById("adhoc-filter-form");
   if (!form) return;
   const segWrap = document.getElementById("alf-show-segments");
+  const statWrap = document.getElementById("alf-show-statuses");
+
+  // ステータスのチェックボックスは STATUS_ORDER から動的生成する
+  // (ステータスを増やしたときにHTML側の追記漏れが起きないように)。
+  if (statWrap && !statWrap.dataset.built) {
+    statWrap.dataset.built = "1";
+    statWrap.innerHTML = STATUS_ORDER.map(
+      (st) =>
+        `<label class="lf-check"><input type="checkbox" value="${st}"> ${escapeHtml(STATUS_LABELS[st] || st)}</label>`
+    ).join("");
+  }
 
   const setVal = (id, v) => {
     const el = document.getElementById(id);
@@ -1388,6 +1463,12 @@ function initAdhocFilter() {
   if (segWrap) {
     segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
       cb.checked = adhocListFilter.showSegments.includes(cb.value);
+    });
+  }
+  if (statWrap) {
+    const shown = adhocListFilter.showStatuses || defaultShownStatuses();
+    statWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = shown.includes(cb.value);
     });
   }
   updateAdhocFilterBadge();
@@ -1405,6 +1486,14 @@ function initAdhocFilter() {
       if (segWrap) {
         segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
       }
+      // ステータスは「全部チェック」ではなく既定(追いかけ禁止だけ非表示)へ戻す。
+      // クリア直後に伸びすぎ銘柄がリストへ混ざるのは意図に反するため。
+      if (statWrap) {
+        const def = defaultShownStatuses();
+        statWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+          cb.checked = def.includes(cb.value);
+        });
+      }
     });
   }
 }
@@ -1415,6 +1504,7 @@ function applyAdhocFilterFromForm() {
   const form = document.getElementById("adhoc-filter-form");
   if (!form) return;
   const segWrap = document.getElementById("alf-show-segments");
+  const statWrap = document.getElementById("alf-show-statuses");
   const num = (id) => {
     const el = document.getElementById(id);
     if (!el || el.value === "") return null;
@@ -1425,6 +1515,10 @@ function applyAdhocFilterFromForm() {
   if (segWrap) {
     segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
   }
+  const stats = [];
+  if (statWrap) {
+    statWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => stats.push(cb.value));
+  }
   adhocListFilter = {
     minClose: num("alf-min-close"),
     maxClose: num("alf-max-close"),
@@ -1433,6 +1527,8 @@ function applyAdhocFilterFromForm() {
     minMcap: num("alf-min-mcap"),
     maxMcap: num("alf-max-mcap"),
     showSegments: segs,
+    // チェックボックスが未描画(旧HTML)の場合は既定へフォールバック。
+    showStatuses: statWrap ? stats : defaultShownStatuses(),
   };
   updateAdhocFilterBadge();
   if (reportCache && reportCache.data) {
@@ -1454,6 +1550,8 @@ function updateAdhocFilterBadge() {
   // 市場: 全表示なら絞り込みなし。チェックを外した数だけ絞り込みとして数える。
   const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
   n += Math.max(0, LIST_FILTER_SEGMENTS.length - shown);
+  // ステータス: 既定(追いかけ禁止だけ非表示)から変えている時のみ1件として数える。
+  if (statusFilterCustom(f)) n += 1;
   if (n > 0) {
     badge.textContent = n;
     badge.hidden = false;
@@ -1468,7 +1566,8 @@ function listFilterActive(f) {
   return (
     f.minClose != null || f.maxClose != null ||
     f.minRs != null || f.minScore != null || f.minMcap != null ||
-    f.maxMcap != null || shown < LIST_FILTER_SEGMENTS.length
+    f.maxMcap != null || shown < LIST_FILTER_SEGMENTS.length ||
+    statusFilterCustom(f)
   );
 }
 
@@ -1490,16 +1589,28 @@ function stockPassesListFilter(s, f) {
 // 与えられた銘柄配列にフィルタを適用し、通過分と除外件数を返す。
 // 恒久フィルタ(設定画面/localStorage)と一時フィルタ(リスト画面/メモリ)の
 // 両方を満たした銘柄だけ通す(AND合成)。
+// 表示中のステータス集合(一時フィルタのチェックボックス。未設定なら既定)。
+function shownStatuses() {
+  return (adhocListFilter && adhocListFilter.showStatuses) || defaultShownStatuses();
+}
+
+function statusVisible(status) {
+  return status == null || shownStatuses().includes(status);
+}
+
 function applyListFilter(stocks) {
   const perm = loadListFilters();
   const adhoc = adhocListFilter;
+  // ステータスの出し分けは「除外件数」には数えない。既定で追いかけ禁止を
+  // 隠している状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
+  const visible = stocks.filter((s) => statusVisible(s.status));
   if (!listFilterActive(perm) && !listFilterActive(adhoc)) {
-    return { kept: stocks, excluded: 0 };
+    return { kept: visible, excluded: 0 };
   }
-  const kept = stocks.filter(
+  const kept = visible.filter(
     (s) => stockPassesListFilter(s, perm) && stockPassesListFilter(s, adhoc)
   );
-  return { kept, excluded: stocks.length - kept.length };
+  return { kept, excluded: visible.length - kept.length };
 }
 
 // 除外件数の小さな告知バナー(除外>0のときだけ返す。設定画面へのリンク付き)。
@@ -1553,18 +1664,17 @@ function renderStatusSection(status, stocks, tier, sortKey) {
 // (adhocListFilter)のためSPA内では維持、リロードで解除。
 // ---------------------------------------------------------------------------
 
+// 追いかけ禁止(cooled ティア = EXTENDED/STALE)。2026-07-27にアコーディオンを廃止し、
+// フィルタのステータスチェックで出し分ける方式へ。既定では非表示なので、
+// 表示対象が1件も無ければセクションごと空にして何も出さない。
 function renderCooledTier(report) {
-  const details = document.getElementById("cooled-details");
-  const summary = document.getElementById("cooled-summary");
   const body = document.getElementById("cooled-tier-body");
-  if (!details || !summary || !body) return;
-  const stocks = (report.stocks || []).filter((s) => s.tier === "cooled");
-  if (!stocks.length) {
-    details.hidden = true;
-    return;
-  }
-  details.hidden = false;
-  summary.textContent = `追いかけ禁止 (${stocks.length}件)`;
+  if (!body) return;
+  body.innerHTML = "";
+  const visible = (report.stocks || []).filter(
+    (s) => s.tier === "cooled" && statusVisible(s.status)
+  );
+  if (!visible.length) return;
   renderTier(report, "cooled", "cooled-tier-body");
 }
 
@@ -1773,7 +1883,9 @@ function renderCardList(stocks, tier, options = {}) {
   for (const s of sorted) {
     const card = document.createElement("div");
     card.className = "stock-card";
-    if (s.fund_stale) card.classList.add("fund-stale");
+    // 2026-07-27: ファンダ未入力(fund_stale)の黄色背景は撤廃。エントリー時には
+    // どのみち必ずファンダを確認するので、一覧段階では表示ノイズにしかならない
+    // (ユーザー要望)。クラス自体を付けないので、CSS側の規則も削除済み。
     // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
     if (s.has_chart !== false) {
       const go = () => {
@@ -1805,6 +1917,7 @@ function renderCardList(stocks, tier, options = {}) {
       <div class="sc-row">
         <span class="sc-name">${escapeHtml(s.name ?? "-")}<span class="sc-code">（${escapeHtml(s.code)}）</span></span>
         <span class="sc-metrics">
+          <span class="sc-flags">${marginBadgeHtml(s.margin)}${fundVerdictBadgeHtml(s)}</span>
           <span class="sc-score-chip">SC ${s.total_score ?? "-"}</span>
           <span class="sc-rs-chip">RS ${s.rs ?? "-"}</span>
         </span>
@@ -1813,8 +1926,6 @@ function renderCardList(stocks, tier, options = {}) {
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
         <span class="sc-sector">${sectorStrengthHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
-        <span class="sc-margin">${marginBadgeHtml(s.margin)}</span>
-        <span class="sc-fund">${fundVerdictBadgeHtml(s)}</span>
       </div>${stageLine}`;
     list.appendChild(card);
   }
@@ -3686,6 +3797,60 @@ function createVcpZigzagPrimitive(points, opts) {
   };
 }
 
+// ピボット/損切りの文字ラベルをチャート「左端」に描く Series Primitive
+// (2026-07-27 ユーザー要望)。Lightweight Charts の createPriceLine({title}) は
+// タイトルを右端(価格軸のすぐ内側)に描き、位置を変えるオプションが無い。右端は
+// 最新足・OHLCVレジェンド・価格軸ラベルと重なって読みづらいので、price line 側の
+// title は空にして、ラベルだけここで左端に描画する(水平線と価格軸の数値ラベルは
+// 従来どおり createPriceLine が描く)。
+// getItems: () => [{price, text, color}] を毎フレーム読む(トグルのON/OFF追従)。
+function createEdgeLabelPrimitive(getItems) {
+  let _series = null;
+  let _requestUpdate = null;
+  const renderer = {
+    draw(target) {
+      if (!_series) return;
+      const items = (getItems() || []).filter((it) => it && it.price != null);
+      if (!items.length) return;
+      target.useMediaCoordinateSpace((scope) => {
+        const ctx = scope.context;
+        ctx.save();
+        ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        for (const it of items) {
+          const y = _series.priceToCoordinate(it.price);
+          if (y == null) continue;
+          const tw = ctx.measureText(it.text).width;
+          // ローソク足に被っても読めるよう、背景を敷いてから文字を置く。
+          ctx.fillStyle = "rgba(11, 14, 20, 0.78)";
+          ctx.fillRect(3, y - 15, tw + 8, 14);
+          ctx.fillStyle = it.color;
+          ctx.fillText(it.text, 7, y - 4);
+        }
+        ctx.restore();
+      });
+    },
+  };
+  const paneView = { renderer: () => renderer, zOrder: () => "top" };
+  return {
+    attached(param) {
+      _series = param.series;
+      _requestUpdate = param.requestUpdate;
+    },
+    detached() {
+      _series = null;
+      _requestUpdate = null;
+    },
+    paneViews() {
+      return [paneView];
+    },
+    requestUpdate() {
+      if (_requestUpdate) _requestUpdate();
+    },
+  };
+}
+
 // ---- 自前の日付軸 (#chart-date-axis) -----------------------------------
 // ライブラリの時間軸(visible:false)の代わりに、目盛・ホバー・最新日の全日付を
 // 1本のstripにDOMで描画する。縦位置はCSS(.chart-date-axis .cda-label の top)で
@@ -3873,6 +4038,20 @@ function renderCharts(chart) {
   let pivotLine = null;
   let stopLine = null;
 
+  // 「ピボット」「損切り」の文字はチャート左端に自前描画する(右端は最新足と
+  // レジェンドで混み合うため)。primitive 非対応の旧CDNではラベル無しで水平線
+  // だけになる(致命的ではないのでフォールバックとして許容)。
+  const edgeLabelPrimitive =
+    typeof candleSeries.attachPrimitive === "function"
+      ? createEdgeLabelPrimitive(() =>
+          [
+            pivotLine ? { price: chart.pivot, text: "ピボット", color: CHART_COLORS.up } : null,
+            stopLine ? { price: chart.stop_loss, text: "損切り", color: CHART_COLORS.down } : null,
+          ].filter(Boolean)
+        )
+      : null;
+  if (edgeLabelPrimitive) candleSeries.attachPrimitive(edgeLabelPrimitive);
+
   function wireLineToggle(id, price, apply, opts = {}) {
     const boxOld = document.getElementById(id);
     if (!boxOld) return;
@@ -3907,21 +4086,24 @@ function renderCharts(chart) {
     },
     { sticky: { get: () => vcpToggleSticky, set: (v) => { vcpToggleSticky = v; } } }
   );
+  // title は空。文字ラベルは edgeLabelPrimitive が左端に描く。
   wireLineToggle("toggle-pivot", chart.pivot, (on) => {
     if (on && !pivotLine) {
-      pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "ピボット" });
+      pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "" });
     } else if (!on && pivotLine) {
       candleSeries.removePriceLine(pivotLine);
       pivotLine = null;
     }
+    if (edgeLabelPrimitive) edgeLabelPrimitive.requestUpdate();
   });
   wireLineToggle("toggle-stop", chart.stop_loss, (on) => {
     if (on && !stopLine) {
-      stopLine = candleSeries.createPriceLine({ price: chart.stop_loss, color: CHART_COLORS.down, lineWidth: 1, lineStyle: 2, title: "損切り" });
+      stopLine = candleSeries.createPriceLine({ price: chart.stop_loss, color: CHART_COLORS.down, lineWidth: 1, lineStyle: 2, title: "" });
     } else if (!on && stopLine) {
       candleSeries.removePriceLine(stopLine);
       stopLine = null;
     }
+    if (edgeLabelPrimitive) edgeLabelPrimitive.requestUpdate();
   });
 
   const charts = [priceChart, volChart, ...(rsChart ? [rsChart] : [])];
@@ -4571,7 +4753,17 @@ async function ensureDataAccess() {
     }
     window.addEventListener("minervini-unlocked", check);
 
-    unlockBtn.addEventListener("click", async () => {
+    // 2026-07-27: 「ボタンを探して押す」手間をなくすため、ロック画面のどこを
+    // タップしても解錠が走るようにした(ボタンは押せる場所の目印として残す。
+    // ボタンのクリックもオーバーレイまでバブリングするので配線は1本でよい)。
+    // なお navigator.credentials.get() はユーザー操作(user activation)が必須で、
+    // ページ読み込みだけで自動的にFace IDを出すことはブラウザ仕様上できない。
+    // 同一セッション内のリロードは上の restoreDataKey() で素通しされるので、
+    // 認証が要るのは新しいセッションの初回だけ。
+    let busy = false;
+    const doUnlock = async () => {
+      if (busy) return;
+      busy = true;
       if (errEl) errEl.hidden = true;
       unlockBtn.disabled = true;
       const original = unlockBtn.textContent;
@@ -4599,10 +4791,22 @@ async function ensureDataAccess() {
           errEl.hidden = false;
         }
       } finally {
+        busy = false;
         unlockBtn.disabled = false;
         unlockBtn.textContent = original;
       }
+    };
+    overlay.addEventListener("click", doUnlock);
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        doUnlock();
+      }
     });
+    overlay.classList.add("is-tappable");
+    overlay.tabIndex = 0;
+    overlay.setAttribute("role", "button");
+    overlay.focus();
   });
 }
 

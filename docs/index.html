@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-<link rel="stylesheet" href="assets/style.css?v=78d8a638">
+<link rel="stylesheet" href="assets/style.css?v=3c9a71e5">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -21,8 +21,8 @@
     <div class="lock-icon">🔐</div>
     <h2>MinerviniScreener</h2>
     <p class="lock-note" id="lock-loading">読み込み中…</p>
-    <p class="lock-note" id="lock-prompt" hidden>このダッシュボードのデータは暗号化されています。<br>パスキー(Face ID / Touch ID)で解錠してください。</p>
-    <button type="button" id="lock-unlock-btn" class="primary" hidden>パスキーで解錠</button>
+    <p class="lock-note" id="lock-prompt" hidden>このダッシュボードのデータは暗号化されています。<br>画面のどこでもタップするとパスキー(Face ID / Touch ID)で解錠します。</p>
+    <button type="button" id="lock-unlock-btn" class="primary" hidden>タップして解錠</button>
     <div id="lock-error" class="form-error" hidden></div>
   </div>
 </div>
@@ -49,14 +49,38 @@
         <div id="market-live-meta" class="market-live-meta"></div>
       </section>
 
+      <!-- 振り返り・作戦データ (2026-07-27 UI刷新)。長い説明文＋横並びの3ボタンを、
+           セッションごとの「タイル」に置き換えた。各タイルにデータ断面と用途を
+           1行で添えることで、本文の説明パラグラフを読まなくても選べるようにする。 -->
       <section class="session-review" id="session-review">
-        <h2>振り返り・作戦データ</h2>
-        <p class="tier-note">市場サマリー(指数・地合い・保有・ピックアップ銘柄)をMarkdownでコピーし、スマホのClaudeに貼り付けて分析させます。各ボタンとも地合い予測とウォッチ銘柄予測の観点付き。ザラ場前=前営業日データで寄り前の作戦、前場=前場断面スナップショット、後場=大引け(EOD)データ。</p>
-        <div class="session-review-btns">
-          <button type="button" id="copy-zaraba-mae-btn">📋 ザラ場前情報をコピー</button>
-          <button type="button" id="copy-maezyou-btn">📋 前場情報をコピー</button>
-          <button type="button" id="copy-goba-btn">📋 後場情報をコピー</button>
+        <div class="session-review-head">
+          <h2><i class="bi bi-clipboard-data"></i> 振り返り・作戦データ</h2>
+          <span class="session-review-hint">タップでMarkdownをコピー → Claudeに貼り付け</span>
         </div>
+        <div class="session-review-btns">
+          <button type="button" id="copy-zaraba-mae-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">ザラ場前</span>
+              <span class="session-btn-sub">前営業日EOD・寄り前の作戦立案</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="copy-maezyou-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">前場</span>
+              <span class="session-btn-sub">前場終了スナップショット・後場の作戦</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="copy-goba-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">後場</span>
+              <span class="session-btn-sub">大引け(EOD)・本日の総括と翌日の作戦</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p class="session-review-foot">内容: 主要指数 / 地合い / 保有ポジション / ピックアップ銘柄。いずれも「地合い予測」「ウォッチ銘柄予測」の指示付き。</p>
         <div id="session-review-status" class="session-review-status" aria-live="polite"></div>
       </section>
     </div>
@@ -122,10 +146,9 @@
       <section class="tier-section">
         <div class="tier-head"><span class="tier-head-title">監視</span><button type="button" class="help-btn" data-help="tier_watchlist" aria-label="用語説明: 監視">?</button></div>
         <div id="watchlist-tier-body"></div>
-        <details id="cooled-details" hidden>
-          <summary id="cooled-summary">追いかけ禁止 (0件)</summary>
-          <div id="cooled-tier-body"></div>
-        </details>
+        <!-- 追いかけ禁止(EXTENDED/STALE)。既定ではフィルタのステータスチェックが
+             外れているので空。チェックを入れたときだけここに出る。 -->
+        <div id="cooled-tier-body"></div>
       </section>
     </div>
   </div>
@@ -194,6 +217,12 @@
           <label class="lf-check"><input type="checkbox" value="スタンダード" checked> スタンダード</label>
           <label class="lf-check"><input type="checkbox" value="グロース" checked> グロース</label>
         </div>
+      </div>
+      <!-- 表示するエントリーステータス。中身は app.js initAdhocFilter が
+           STATUS_ORDER から生成する。既定は EXTENDED/STALE (追いかけ禁止) だけ off。 -->
+      <div class="lf-field">
+        <span class="lf-label">表示しているステータス</span>
+        <div class="lf-checks lf-checks-status" id="alf-show-statuses"></div>
       </div>
       <div class="lf-actions">
         <button type="button" id="alf-clear-btn" class="secondary">クリア</button>
@@ -748,8 +777,8 @@
 <script src="assets/github-api.js?v=85463b38"></script>
 <script src="assets/webauthn-vault.js?v=9c0129c2"></script>
 <script src="assets/fundamentals-modal.js?v=419c69f8"></script>
-<script src="assets/heatmap.js?v=d0d4bcee"></script>
+<script src="assets/heatmap.js?v=7b41f0a2"></script>
 <script src="assets/batch.js?v=e3e065be"></script>
-<script src="assets/app.js?v=9ed89fde"></script>
+<script src="assets/app.js?v=5a6ef3d1"></script>
 </body>
 </html>
