@@ -1988,6 +1988,7 @@ async function initStockPage(codeOverride) {
 
   if (stock) {
     renderMustChecklist(stock.must_flags, stock.vcp_detail);
+    renderContractionTable(stock.vcp_detail);
     renderScoreBreakdown(stock);
   }
 }
@@ -2965,6 +2966,23 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
   if (stock.footprint) {
     const depthLast = vcpDetail && vcpDetail.depth_last_pct;
     L.push(`- フットプリント: ${stock.footprint}${depthLast != null ? ` (最終${depthLast}%)` : ""}`);
+  }
+  // footprint は深さしか持たないので、各収縮が「いつ・何日かけて」形成されたかを
+  // 表で補う。深さ5%でも29営業日かけた収縮と3日で終わった収縮では意味が違う。
+  const cRows = (vcpDetail && vcpDetail.contractions) || [];
+  if (cRows.length) {
+    L.push("");
+    L.push("### 収縮の内訳");
+    L.push("");
+    L.push("| T | 高値日 | 高値 | 安値日 | 安値 | 深さ | 下落(営業日) | 直前の戻し(営業日) |");
+    L.push("|---|---|---|---|---|---|---|---|");
+    for (const r of cRows) {
+      L.push(
+        `| T${r.t}${r.provisional ? " (形成中)" : ""} | ${r.high_date ?? "-"} | ${copyNum(r.high_price, 1)} | ` +
+        `${r.low_date ?? "-"} | ${copyNum(r.low_price, 1)} | ${r.depth_pct != null ? copyNum(r.depth_pct, 1) + "%" : "-"} | ` +
+        `${r.bars ?? "-"} | ${r.rally_bars == null ? "-" : r.rally_bars} |`
+      );
+    }
   }
   L.push("");
 
@@ -4166,6 +4184,44 @@ function renderMustChecklist(mustFlags, vcpDetail) {
     }
     el.appendChild(ul);
   }
+}
+
+// 収縮の内訳テーブル。footprint は深さの列("19/5/3")しか持たないため、
+// 「T2の5%は29営業日かけた収縮」「T3の3%は3日で終わった収縮」といった時間軸が
+// 読めない。build_site._build_contraction_rows() が確定させた行をそのまま描く
+// (T番号もサーバ側で採番済みなので、フロントで数え直さない)。
+function renderContractionTable(vcpDetail) {
+  const el = document.getElementById("contraction-table");
+  if (!el) return;
+  el.innerHTML = "";
+  const rows = (vcpDetail && vcpDetail.contractions) || [];
+  if (!rows.length) {
+    el.textContent = "収縮データなし";
+    return;
+  }
+  const num = (v, d) => (v == null ? "-" : Number(v).toFixed(d));
+  const table = document.createElement("table");
+  table.className = "contraction-table";
+  const head =
+    "<thead><tr><th>T</th><th>高値日</th><th>高値</th><th>安値日</th><th>安値</th>" +
+    "<th>深さ</th><th>下落<br>(営業日)</th><th>直前の戻し<br>(営業日)</th></tr></thead>";
+  const body = rows
+    .map(
+      (r) =>
+        `<tr${r.provisional ? ' class="contraction-provisional"' : ""}>` +
+        `<td>T${r.t}${r.provisional ? " <span class=\"tag-provisional\">形成中</span>" : ""}</td>` +
+        `<td>${r.high_date || "-"}</td><td>${num(r.high_price, 1)}</td>` +
+        `<td>${r.low_date || "-"}</td><td>${num(r.low_price, 1)}</td>` +
+        `<td>${r.depth_pct == null ? "-" : num(r.depth_pct, 1) + "%"}</td>` +
+        `<td>${r.bars == null ? "-" : r.bars}</td>` +
+        `<td>${r.rally_bars == null ? "-" : r.rally_bars}</td></tr>`
+    )
+    .join("");
+  table.innerHTML = head + "<tbody>" + body + "</tbody>";
+  const wrap = document.createElement("div");
+  wrap.className = "table-scroll";
+  wrap.appendChild(table);
+  el.appendChild(wrap);
 }
 
 function renderScoreBreakdown(stock) {

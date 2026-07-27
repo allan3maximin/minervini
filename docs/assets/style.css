@@ -710,6 +710,14 @@ body.modal-open {
 .fund-detail-table { table-layout: auto; margin-top: 8px; }
 .fund-detail-table th, .fund-detail-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 .fund-detail-table th { color: var(--text-dim); font-weight: 600; }
+/* 収縮の内訳表(個別株サマリー)。グローバルの table{min-width:760px} だと
+   detail-card の中で常に横スクロールが出るので、8列ぶんに絞る。 */
+.contraction-table { min-width: 560px; }
+.contraction-table th { color: var(--text-dim); font-weight: 600; }
+.contraction-table th:nth-child(2), .contraction-table td:nth-child(2) { text-align: right; }
+.contraction-table tr.contraction-provisional { color: var(--text-dim); }
+.contraction-table .tag-provisional { font-size: 11px; color: var(--text-dim); }
+
 .yoy-positive { color: var(--accent); }
 .yoy-negative { color: var(--danger); }
 

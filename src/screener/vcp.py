@@ -666,10 +666,15 @@ def footprint_string(contractions: list[dict], base_days: int) -> str:
 def _compute_dated_contractions(
     base_df: pd.DataFrame, latest: dict, config: dict
 ) -> list[dict]:
-    """ZigZag→浅いピボット統合→収縮抽出→日付付与、をまとめて実行する。
+    """ZigZag→浅いピボット統合→収縮抽出→日付・期間付与、をまとめて実行する。
 
     通常評価(status ok)とIMMATURE(描画専用)の両方から使う共通処理。日付は
     report/charts JSON にそのまま乗せられるよう文字列化する。
+
+    footprint("11W 19/5/3 3T")は深さしか持たないので、各収縮が「いつ・何日かけて」
+    形成されたかが読めない。深さ5%でも29営業日かけた収縮と3日で終わった収縮では
+    まったく意味が違うため、bars(下落脚の営業日数)と rally_bars(前の収縮の安値から
+    この収縮の高値までの戻し脚の営業日数。先頭の収縮は None)も併せて持たせる。
     """
     threshold = zigzag_swing_threshold(latest, config)
     pivots = compute_zigzag(base_df, threshold)
@@ -680,6 +685,11 @@ def _compute_dated_contractions(
         config["vcp"].get("min_rally_bars", 0),
     )
     contractions = extract_contractions(pivots)
+    prev_low_idx = None
+    for c in contractions:
+        c["bars"] = c["low_idx"] - c["high_idx"]
+        c["rally_bars"] = None if prev_low_idx is None else c["high_idx"] - prev_low_idx
+        prev_low_idx = c["low_idx"]
     if "date" in base_df.columns:
         dates = base_df["date"]
         for c in contractions:

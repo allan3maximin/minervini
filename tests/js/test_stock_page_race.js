@@ -46,7 +46,8 @@ function makeEl(id) {
 const KNOWN_IDS = [
   "stock-title", "chart-container", "volume-container", "rs-container",
   "fund-detail-body", "margin-detail-body", "stock-meta", "must-checklist",
-  "score-breakdown", "sizing-result", "stock-panels", "chart-date-axis",
+  "score-breakdown", "contraction-table", "sizing-result", "stock-panels",
+  "chart-date-axis",
 ];
 const els = new Map();
 const document = {
@@ -116,7 +117,8 @@ for (const fn of ["teardownCharts", "teardownMarginChart", "initStockNav", "upda
                   "prefetchAdjacentCharts", "setupStockPanels", "renderStockSummary",
                   "renderStockFundamentals", "renderStockMargin", "setupSizingCalculator",
                   "setupStockCopyButton", "renderStockMeta", "setupYahooFinanceLink",
-                  "renderMustChecklist", "renderScoreBreakdown"]) {
+                  "renderMustChecklist", "renderScoreBreakdown",
+                  "renderContractionTable"]) {
   ctx[fn] = () => {};
 }
 

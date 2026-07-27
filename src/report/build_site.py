@@ -216,6 +216,31 @@ def _build_dryup_badge(vcp_result: dict, config: dict) -> dict:
     return {"value": value, "badge": badge}
 
 
+def _build_contraction_rows(vcp_result: dict) -> list[dict]:
+    """収縮テーブル用の1行1収縮データ。
+
+    footprint("11W 19/5/3 3T")は深さしか持たないので、どの収縮がいつ・何日かけて
+    形成されたかが読めない。深さ5%でも29営業日かけた収縮と3日で終わった収縮では
+    意味がまったく違うため、日付と営業日数をフロントに渡す。
+    """
+    rows = []
+    for i, c in enumerate(vcp_result.get("contractions") or []):
+        rows.append({
+            "t": i + 1,
+            "high_date": c.get("high_date"),
+            "low_date": c.get("low_date"),
+            "high_price": round(float(c["high_price"]), 2),
+            "low_price": round(float(c["low_price"]), 2),
+            "depth_pct": round(c["depth"] * 100, 1),
+            # bars = 下落脚(高値→安値)の営業日数、rally_bars = 前収縮の安値から
+            # この収縮の高値までの戻し脚の営業日数(先頭の収縮は None)。
+            "bars": c.get("bars"),
+            "rally_bars": c.get("rally_bars"),
+            "provisional": bool(c.get("provisional", False)),
+        })
+    return rows
+
+
 def _build_vcp_detail(vcp_result: dict, config: dict) -> dict:
     depths_pct = [round(c["depth"] * 100, 1) for c in vcp_result.get("contractions") or []]
     diagnostics = vcp_result.get("vcp_diagnostics") or {}
@@ -225,6 +250,7 @@ def _build_vcp_detail(vcp_result: dict, config: dict) -> dict:
         "days_from_high": vcp_result.get("days_from_high"),
         "t0_date": str(vcp_result["t0_date"])[:10] if vcp_result.get("t0_date") is not None else None,
         "depths_pct": depths_pct,
+        "contractions": _build_contraction_rows(vcp_result),
         "depth_last_pct": depths_pct[-1] if depths_pct else None,
         "last_depth_max_pct": round(config["vcp"]["last_depth_max"] * 100, 1),
         "volume_dryup": {
@@ -557,12 +583,20 @@ def build_chart_data(code: str, df: pd.DataFrame, vcp_result: dict, entry_result
         for row in recent.itertuples(index=False)
     ]
 
+    # t(収縮番号)と bars/rally_bars を載せる。フロントは swing_high の出現回数から
+    # 番号を振っていたが、それだとマージ済みの列と表の行番号がずれ得るので、
+    # 生成側で確定させた番号をそのまま使えるようにする(旧JSON互換のため
+    # フロント側のカウンタは残す)。
     markers = []
-    for c in vcp_result.get("contractions", []) or []:
+    for i, c in enumerate(vcp_result.get("contractions", []) or []):
         markers.append({"type": "swing_high", "time": c.get("high_date"),
-                        "price": round(float(c["high_price"]), 2)})
+                        "price": round(float(c["high_price"]), 2),
+                        "t": i + 1, "bars": c.get("bars"),
+                        "rally_bars": c.get("rally_bars")})
         markers.append({"type": "swing_low", "time": c.get("low_date"),
-                        "price": round(float(c["low_price"]), 2)})
+                        "price": round(float(c["low_price"]), 2),
+                        "t": i + 1, "bars": c.get("bars"),
+                        "rally_bars": c.get("rally_bars")})
 
     return {
         "code": code,
