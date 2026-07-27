@@ -17,7 +17,12 @@ import pandas as pd
 from src.config import REPO_ROOT, load_config
 
 HEATMAP_PATH = REPO_ROOT / "docs" / "data" / "heatmap.json"
+# 旧: 全量書き戻し方式の JSON (2026-07-27 まで)。移行後は読み取り専用の
+# フォールバックとしてのみ参照する。
 SECTOR_HISTORY_PATH = REPO_ROOT / "data" / "sector_history.json"
+# 新: 追記専用 JSONL。1行 = 1日ぶんの {date, topix_d1, sectors{...}}。
+SECTOR_HISTORY_JSONL = REPO_ROOT / "data" / "history" / "sector.jsonl"
+SECTOR_HISTORY_KEY = ("date",)
 # フロント(ヒートマップ簡易ビューの履歴)が読む公開版。市況カードと同じく
 # secure_io で暗号化して配信する。日付軸に揃えたセクター別の系列に整形する。
 SECTOR_HISTORY_PUBLIC_PATH = REPO_ROOT / "docs" / "data" / "sector_history.json"
@@ -281,16 +286,54 @@ def publish_sector_history(history: dict) -> dict:
     return public
 
 
+def _migrate_legacy_sector_history() -> int:
+    """旧 data/sector_history.json が残っていて JSONL 未作成なら一度だけ変換する。
+
+    移行スクリプトを流し忘れても壊れないようにするための保険。旧ファイルは残す。
+    """
+    from src.history_store import append_records
+    from src.utils_io import safe_load_json
+
+    if SECTOR_HISTORY_JSONL.exists() or not SECTOR_HISTORY_PATH.exists():
+        return 0
+    legacy = safe_load_json(SECTOR_HISTORY_PATH, {"history": []})
+    rows = [e for e in (legacy or {}).get("history", []) if isinstance(e, dict)]
+    if not rows:
+        return 0
+    append_records(SECTOR_HISTORY_JSONL, rows)
+    print(f"sector_history: 旧JSONから {len(rows)} 行を {SECTOR_HISTORY_JSONL.name} へ移行しました")
+    return len(rows)
+
+
+def load_sector_history() -> dict:
+    """`{"history": [{date, topix_d1, sectors}, ...]}` を返す(日付昇順)。
+
+    構造は JSONL 移行前と同一。publish_sector_history がこの形をそのまま
+    受け取る(= docs/data/sector_history.json のスキーマに影響しない)。
+    """
+    from src.history_store import load_deduped
+
+    _migrate_legacy_sector_history()
+    entries = load_deduped(SECTOR_HISTORY_JSONL, SECTOR_HISTORY_KEY)
+    entries.sort(key=lambda e: e.get("date") or "")
+    return {"history": entries}
+
+
 def update_sector_history(
     date_str: str, sectors: list[dict], topix_returns: dict, cfg: dict
 ) -> dict:
-    """セクター集計値の日次履歴 (data/sector_history.json)。同日再実行は上書き。
+    """セクター集計値の日次履歴 (data/history/sector.jsonl)。同日再実行は上書き。
 
-    破損時は空履歴から再開する(safe_load_json。当日以降の蓄積は継続できる)。"""
-    from src.utils_io import safe_load_json
-    history = safe_load_json(SECTOR_HISTORY_PATH, {"history": []})
-    if not isinstance(history, dict) or "history" not in history:
-        history = {"history": []}
+    2026-07-27 に「全量書き戻しJSON」から「追記専用JSONL + 読み出し時に後勝ち
+    dedup」へ移行した(理由は src/history_store.py の docstring)。同日再実行時は
+    同じ date の行がもう1行増えるだけで、読み出すと最後の行が採用されるため
+    従来の「上書き」と同じ結果になる。
+
+    破損行は iter_records 側でスキップされるので、1行壊れても全履歴は失われない。
+    """
+    from src.history_store import append_records, compact, count_lines
+
+    history = load_sector_history()
 
     entry = {
         "date": date_str,
@@ -306,10 +349,28 @@ def update_sector_history(
             for s in sectors
         },
     }
+    append_records(SECTOR_HISTORY_JSONL, [entry])
+
+    # 重複行が溜まってきたときだけ dedup + 間引き。毎回やると全行書き戻しになり
+    # 「git 差分は追記行だけ」という利点が消える。
+    keep_days = cfg["history_keep_days"]
+    lines = count_lines(SECTOR_HISTORY_JSONL)
+    if lines > max(keep_days * 2, 100):
+        from src.history_store import calendar_keep_days
+        removed = compact(
+            SECTOR_HISTORY_JSONL,
+            SECTOR_HISTORY_KEY,
+            keep_days=calendar_keep_days(keep_days),
+            today=date_str,
+        )
+        print(f"sector_history: compaction で {removed} 行を削減")
+
+    # 返り値は従来どおり「日付昇順・直近 history_keep_days 件」。呼び出し側
+    # (publish_sector_history) が受け取る形を変えないため、間引きは JSONL の
+    # compaction とは独立にここでも掛ける。ディスク上に一時的に古い行が残って
+    # いても、公開データの内容は移行前と完全に同じになる。
     history["history"] = [e for e in history["history"] if e.get("date") != date_str]
     history["history"].append(entry)
-    history["history"] = history["history"][-cfg["history_keep_days"]:]
-
-    from src.utils_io import atomic_write_json
-    atomic_write_json(SECTOR_HISTORY_PATH, history, indent=2)
+    history["history"].sort(key=lambda e: e.get("date") or "")
+    history["history"] = history["history"][-keep_days:]
     return history

@@ -90,12 +90,17 @@ def wired(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pipeline, "DEBUG_PATH", tmp_path / "debug.json")
     monkeypatch.setattr(pipeline.entry_mod, "STATUS_HISTORY_PATH", tmp_path / "status_history.json")
+    # 実体は追記専用JSONL (2026-07-27〜)。上の旧JSONは移行用フォールバック。
+    monkeypatch.setattr(pipeline.entry_mod, "STATUS_HISTORY_JSONL",
+                        tmp_path / "history" / "status.jsonl")
     monkeypatch.setattr(build_site, "DOCS_DATA_DIR", tmp_path)
     monkeypatch.setattr(build_site, "REPORT_PATH", tmp_path / "report.json")
     monkeypatch.setattr(build_site, "BREADTH_PATH", tmp_path / "breadth.json")
     monkeypatch.setattr(build_site, "CHARTS_DIR", tmp_path / "charts")
     monkeypatch.setattr(pipeline.heatmap_mod, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
+    monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_JSONL",
+                        tmp_path / "history" / "sector.jsonl")
     # 公開版(docs/data/sector_history.json)も実リポジトリを汚さない。
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_HISTORY_PUBLIC_PATH", tmp_path / "sector_history_public.json")
     monkeypatch.setattr(pipeline.heatmap_mod, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
@@ -218,7 +223,7 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     # no vcp_score to combine with -> total_score falls back to tech_score alone
     assert watchlist_stock["total_score"] == watchlist_stock["tech_score"]
 
-    history = json.loads((tmp_path / "status_history.json").read_text(encoding="utf-8"))
+    history = pipeline.entry_mod.load_status_history()
     assert "1111" in history
     assert "2222" not in history
     assert "3333" not in history  # watchlist stocks have no pivot to lock in, so no history entry
@@ -246,7 +251,7 @@ def test_run_daily_wires_pipeline_end_to_end(wired):
     codes_in_hm = {s["code"] for sec in heatmap["sectors"] for s in sec["stocks"]}
     assert codes_in_hm == {"1111", "2222", "3333"}
     assert "sector33" in report["stocks"][0]
-    assert (tmp_path / "sector_history.json").exists()
+    assert (tmp_path / "history" / "sector.jsonl").exists()
 
 
 def test_run_daily_source_freshness_reads_state_files(wired, monkeypatch):

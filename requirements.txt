@@ -11,3 +11,5 @@ jpholiday>=0.1.10
 pytest>=8.0
 cryptography>=42.0
 pdfplumber>=0.11
+# 履歴JSONL (data/history/*.jsonl) を SQL で分析する用。python -m src.analyze
+duckdb>=1.0

@@ -14,9 +14,27 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from src.config import REPO_ROOT, load_config
-from src.utils_io import atomic_write_json, safe_load_json
+from src.history_store import (
+    append_records,
+    calendar_keep_days,
+    compact,
+    count_lines,
+    load_deduped,
+)
+from src.utils_io import safe_load_json
 
+# 旧: 全量書き戻し方式の JSON (2026-07-27 まで)。移行後は読み取り専用の
+# フォールバックとしてのみ参照する。手で消してよいが、消さなくても害はない。
 STATUS_HISTORY_PATH = REPO_ROOT / "data" / "status_history.json"
+
+# 新: 追記専用 JSONL。1行 = {code, date, status, pivot, stop_ref_low}。
+# 同じ (code, date) が複数行あっても読み出し時に後勝ちで dedup されるので、
+# 「同日再実行は上書き」という従来のセマンティクスは維持される(src/history_store.py)。
+STATUS_HISTORY_JSONL = REPO_ROOT / "data" / "history" / "status.jsonl"
+
+# JSONL の1レコードを構成するフィールド(この順序・集合が dedup 比較の対象)。
+_STATUS_FIELDS = ("code", "date", "status", "pivot", "stop_ref_low")
+_STATUS_KEY = ("code", "date")
 
 # 「終値がピボットより上」を意味するステータス群。ブレイク鮮度(breakout_age_days)と
 # クールダウン(extended_cooldown_ready)の判定で共有する。
@@ -107,13 +125,108 @@ def market_guard_triggered(topix_return: float, config: dict | None = None) -> b
 # 5.3 Status history
 # ---------------------------------------------------------------------------
 
+def _row_of(code: str, entry: dict) -> dict:
+    """メモリ上の履歴エントリを JSONL の1行(code入りフラット形式)へ変換する。"""
+    return {
+        "code": code,
+        "date": entry.get("date"),
+        "status": entry.get("status"),
+        "pivot": entry.get("pivot"),
+        "stop_ref_low": entry.get("stop_ref_low"),
+    }
+
+
+def _entry_of(row: dict) -> dict:
+    """JSONL の1行を、従来どおりの履歴エントリ(code を持たない形)へ戻す。"""
+    return {
+        "date": row.get("date"),
+        "status": row.get("status"),
+        "pivot": row.get("pivot"),
+        "stop_ref_low": row.get("stop_ref_low"),
+    }
+
+
+def _migrate_legacy_status_history() -> int:
+    """旧 data/status_history.json が残っていて JSONL が未作成なら一度だけ変換する。
+
+    移行スクリプトを流し忘れても壊れないようにするための保険。旧ファイルは
+    削除しない(戻せるようにしておく)。変換した行数を返す。
+    """
+    if STATUS_HISTORY_JSONL.exists() or not STATUS_HISTORY_PATH.exists():
+        return 0
+    legacy = safe_load_json(STATUS_HISTORY_PATH, {})
+    if not isinstance(legacy, dict) or not legacy:
+        return 0
+    rows = []
+    for code, entries in legacy.items():
+        for entry in entries or []:
+            if isinstance(entry, dict):
+                rows.append(_row_of(code, entry))
+    append_records(STATUS_HISTORY_JSONL, rows)
+    print(
+        f"status_history: 旧JSONから {len(rows)} 行を "
+        f"{STATUS_HISTORY_JSONL.name} へ移行しました"
+    )
+    return len(rows)
+
+
 def load_status_history() -> dict:
-    # 破損時は空dictから再構築(warningはsafe_load_json側でprintされる)。
-    return safe_load_json(STATUS_HISTORY_PATH, {})
+    """`{code: [{date, status, pivot, stop_ref_low}, ...]}` を返す(日付昇順)。
+
+    返り値の構造は JSONL 移行前と同一。呼び出し側 (pipeline / record_status /
+    locked_pivot 等) は従来どおりメモリ上の dict を触ればよい。
+    """
+    _migrate_legacy_status_history()
+    history: dict[str, list[dict]] = {}
+    for row in load_deduped(STATUS_HISTORY_JSONL, _STATUS_KEY):
+        code = row.get("code")
+        if code is None:
+            continue
+        history.setdefault(str(code), []).append(_entry_of(row))
+    for entries in history.values():
+        entries.sort(key=lambda e: e.get("date") or "")
+    return history
 
 
 def save_status_history(history: dict) -> None:
-    atomic_write_json(STATUS_HISTORY_PATH, history, indent=2)
+    """メモリ上の履歴 dict を JSONL へ「差分だけ追記」して永続化する。
+
+    全量書き戻しをやめた理由は src/history_store.py の docstring 参照。
+    ここでは現在ディスクにある内容と突き合わせ、**新規または内容が変わった
+    (code, date) の行だけ**を追記する。同日再実行で status が変わった場合は
+    同じキーの行がもう1行増えるだけで、読み出し時に後勝ちで解決される。
+    """
+    on_disk = {
+        (r.get("code"), r.get("date")): {f: r.get(f) for f in _STATUS_FIELDS}
+        for r in load_deduped(STATUS_HISTORY_JSONL, _STATUS_KEY)
+    }
+
+    new_rows = []
+    for code, entries in (history or {}).items():
+        for entry in entries or []:
+            row = _row_of(str(code), entry)
+            if on_disk.get((row["code"], row["date"])) != row:
+                new_rows.append(row)
+
+    append_records(STATUS_HISTORY_JSONL, new_rows)
+    _maybe_compact_status_history(len(on_disk) + len(new_rows))
+
+
+def _maybe_compact_status_history(expected_keys: int) -> None:
+    """重複行が溜まってきたときだけ dedup + 古い行の間引きを行う。
+
+    毎回 compact すると全行書き戻しになって「git 差分は追記行だけ」という
+    利点が消えるため、行数がユニークキー数の4倍を超えたときにだけ走らせる。
+    間引きの閾値は record_status が保持する件数 (status_history_days) を
+    暦日へ安全側に換算した値。record_status 側は「末尾N件」で切るので、
+    ここで消してよいのは確実にそれより古い行だけ。
+    """
+    lines = count_lines(STATUS_HISTORY_JSONL)
+    if lines < 2000 or lines <= max(expected_keys, 1) * 4:
+        return
+    keep_days = calendar_keep_days(load_config()["entry"]["status_history_days"])
+    removed = compact(STATUS_HISTORY_JSONL, _STATUS_KEY, keep_days=keep_days)
+    print(f"status_history: compaction で {removed} 行を削減 ({lines} 行 → {lines - removed} 行)")
 
 
 def record_status(

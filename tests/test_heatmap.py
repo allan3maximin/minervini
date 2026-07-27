@@ -99,6 +99,8 @@ def test_weighted_returns_all_none():
 def patched_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(hm, "HEATMAP_PATH", tmp_path / "heatmap.json")
     monkeypatch.setattr(hm, "SECTOR_HISTORY_PATH", tmp_path / "sector_history.json")
+    # 追記専用JSONL (2026-07-27〜)。実体はこちらで、上の旧JSONは移行用フォールバック。
+    monkeypatch.setattr(hm, "SECTOR_HISTORY_JSONL", tmp_path / "history" / "sector.jsonl")
     # 公開版(docs/data/sector_history.json)も実リポジトリを汚さない。
     monkeypatch.setattr(hm, "SECTOR_HISTORY_PUBLIC_PATH", tmp_path / "sector_history_public.json")
     monkeypatch.setattr(hm, "SECTOR_MAP_PATH", tmp_path / "sector_map.json")
@@ -178,7 +180,7 @@ def test_build_heatmap_output(patched_paths):
     assert sbc["2001"]["sector"] == hm.UNKNOWN_SECTOR
 
     # 履歴も書かれる
-    history = json.loads((patched_paths / "sector_history.json").read_text(encoding="utf-8"))
+    history = hm.load_sector_history()
     assert len(history["history"]) == 1
     assert history["history"][0]["date"] == "2026-07-06"
     assert "電気機器" in history["history"][0]["sectors"]
@@ -205,7 +207,8 @@ def test_sector_history_same_date_overwrite(patched_paths):
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-06")
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-06")
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-07")
-    history = json.loads((patched_paths / "sector_history.json").read_text(encoding="utf-8"))
+    # JSONLには3行追記されているが、読み出し時に後勝ちdedupされるので日付は2つ。
+    history = hm.load_sector_history()
     dates = [e["date"] for e in history["history"]]
     assert dates == ["2026-07-06", "2026-07-07"]
 
@@ -216,6 +219,8 @@ def test_sector_history_keep_days(patched_paths):
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-04")
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-05")
     hm.build_heatmap(universe, frames, bench, records, config, "2026-07-06")
-    history = json.loads((patched_paths / "sector_history.json").read_text(encoding="utf-8"))
-    dates = [e["date"] for e in history["history"]]
-    assert dates == ["2026-07-05", "2026-07-06"]
+    # JSONLの compaction は遅延実行なのでディスク上には古い行が残りうる。
+    # 公開データ側が history_keep_days で間引かれていることを確認する。
+    published = json.loads(
+        (patched_paths / "sector_history_public.json").read_text(encoding="utf-8"))
+    assert published["dates"] == ["2026-07-05", "2026-07-06"]
