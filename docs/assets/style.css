@@ -29,6 +29,13 @@
      移し、mainはtrueな画面下端まで伸ばすことで、スクロールし切ると
      コンテンツがDockの下(すりガラス越し)まで見えるようにした。 */
   --dock-clear: calc(var(--dock-h) + max(12px, env(safe-area-inset-bottom) + 8px));
+  /* 2026-07-28 続き: 市況/リスト/個別株のタブバー(.market-tabs/.list-tabs-bar/
+     .stock-tabs-bar)・設定のサブタブ(.settings-subtabs-bottom)は、メインDockと
+     場所を変えずに固定表示させたい("タブドックもFIXEDで出す"要望)ため、
+     position:fixedにしてメインDockの上に浮かせる。その分、スクロール本文側の
+     余白は「メインDock分」だけでなく「タブバー分(実測最大50px)+その上マージン
+     の名残8px」も足す。 */
+  --tabs-clear: calc(var(--dock-clear) + 58px);
 }
 
 * { box-sizing: border-box; }
@@ -172,12 +179,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* リスト画面: タブ行(本命/候補/監視)の右にフィルタ/並び替えツールを並べる。 */
 .list-tabs-bar {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 8px 0 2px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
 }
 .list-tabs-bar .list-tabs { margin: 0; }
 .list-tools { display: flex; gap: 6px; }
@@ -1548,16 +1560,34 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
 }
 .stock-tabs::-webkit-scrollbar, .list-tabs::-webkit-scrollbar, .market-tabs::-webkit-scrollbar { display: none; }
+/* 市況タブ(データ/分析)はラッパーを持たないので、これ自体をメインDockの真上に
+   固定表示する(2026-07-28)。場所はこれまでflowで収まっていた位置(main paddingの
+   境界=--dock-clear)と同じに合わせてあるので、見た目の位置は変わらない。
+   スクロールで動くのはコンテンツ側だけ。 */
+.market-tabs {
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
 
-/* 個別株のタブバー: ＜(次へ) タブ群 ＞(前へ) を横一列に。タブ群は中央維持。 */
+/* 個別株のタブバー: ＜(次へ) タブ群 ＞(前へ) を横一列に。タブ群は中央維持。
+   market-tabsと同じ理由でメインDockの真上にposition:fixed(2026-07-28)。 */
 .stock-tabs-bar {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  flex: 0 0 auto;
-  max-width: 100%;
-  margin: 8px auto 2px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
 }
 /* タブ群(ドック本体)だけをメインDockと同じ幅に固定。＜＞はこの外側に並ぶ。
    前後銘柄の切替は＜＞ボタンとパネル全体の横スワイプ(wireStockSwipe)の両方で可能。
@@ -1654,7 +1684,7 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   /* 下paddingをdock-clearに: スクロール終端でDockの下までコンテンツが見える */
-  padding: 2px 2px var(--dock-clear);
+  padding: 2px 2px var(--tabs-clear);
   /* 縦スクロール中でも横スワイプ(前後銘柄切替)をpointerイベントで拾えるよう、
      縦パンだけをブラウザ任せにする。これでサマリー等でも横判定が効きやすい。 */
   touch-action: pan-y;
@@ -1802,8 +1832,8 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  /* スクロール終端でDockの下までコンテンツが見えるように */
-  padding-bottom: var(--dock-clear);
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
 }
 
 /* -------------------------------------------- 市況画面(市況データ/市況分析) */
@@ -1825,8 +1855,8 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-x: hidden;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
-  /* スクロール終端でDockの下(すりガラス越し)までコンテンツが見えるように */
-  padding-bottom: var(--dock-clear);
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
   /* 縦スクロール中でも横スワイプ(データ/分析のループ切替)を拾えるよう縦パンのみ委譲。 */
   touch-action: pan-y;
 }
@@ -2075,10 +2105,22 @@ a.nav-btn:hover { border-color: var(--link); }
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  /* スクロール終端でDockの下までコンテンツが見えるように */
-  padding-bottom: var(--dock-clear);
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
 }
-.settings-subtabs-bottom { flex: 0 0 auto; margin: 10px 0 2px; }
+.settings-subtabs-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
 .settings-subpanel { display: none; }
 .settings-subpanel.active { display: block; }
 

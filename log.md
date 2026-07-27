@@ -21,6 +21,50 @@
 
 ---
 
+## 2026-07-28 (132): メインDockとタブドックの被り修正(131の直後の回帰対応)
+
+131の変更(`main`のpadding-bottom撤廃)を入れた直後、ユーザーから regression 報告:
+「メインドックとタブドックが被っとる」「ドックの場所は変えずに背景だけ透明に
+したい、むしろドック部分だけFIXEDで出すイメージが近い」。触ったのは
+`docs/assets/style.css`のみ。
+
+### 原因
+
+`.market-tabs` / `.stock-tabs-bar` / `.list-tabs-bar` / `.settings-subtabs-bottom`は
+見た目こそすりガラスの浮きドック風だが、実際は`position:fixed`ではなく通常の
+flow内のflex子要素(ビューの最後尾)で、`main`側のpadding-bottom予約に頼って
+メインDockの上に収まっていただけだった。131で`main`のpadding-bottomを撤廃した
+ことで、これらのタブバーもビューの実高さいっぱい(=画面の本当の下端)まで
+押し下げられ、`position:fixed`のメインDock(`.dock-nav`)と重なるようになった。
+
+### 変更内容
+
+- `--tabs-clear`変数を新設(`:root`、`--dock-clear` + タブバー実測分58px)。
+- 4つのタブバーをすべて`position:fixed; left:50%; bottom:var(--dock-clear);
+  transform:translateX(-50%);`化(=メインDockの直上、従来の見た目上の位置と同じ)。
+  flowから抜けるので、ビューの高さが変わっても位置がズレない:
+  - `.market-tabs`
+  - `.stock-tabs-bar`
+  - `.list-tabs-bar`(`flex:0 0 auto`を削除)
+  - `.settings-subtabs-bottom`(`flex:0 0 auto`を削除。中身の`.settings-subtabs`が
+    持つピル型の背景/border-radiusはそのまま活きる)
+- 上記タブバーの分だけ、対応するスクロールコンテナのpadding-bottomを
+  `var(--dock-clear)` → `var(--tabs-clear)`に拡張(スクロール終端で両方のドックの
+  下まで見えるように):
+  - `.market-panel`
+  - `.stock-panel`
+  - `.list-panel [id$="-tier-body"]`
+  - `.batch-view .settings-subpanels`
+
+### 検証
+
+- `docs/assets/style.css`の波括弧収支663/663で一致。
+- `tools/update_cache_busters.py`実行、`?v=f74caaa4`→`6357a980`に更新。
+- **★実機での見た目確認は次回ユーザーに触ってもらうこと**(市況/リスト/個別株/
+  設定の各タブバーがメインDockと被らず、かつ位置が131以前と同じに見えるか)。
+
+---
+
 ## 2026-07-28 (131): Dockの下までスクロールコンテンツが見えるように(129の続き)
 
 ユーザーから: 「市況画面でスクロールしても、コンテンツが画面の一番下まで見えない
