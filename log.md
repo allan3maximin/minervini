@@ -21,6 +21,48 @@
 
 ---
 
+## 2026-07-28 (130): 月次リビルドが鍵未設定で落ちる件を修正 (universe.yml)
+
+ユーザーが 127 の閾値変更を反映させるため `universe.yml` を workflow_dispatch で
+手動実行 → **exit code 1 で死亡**。
+
+```
+RuntimeError: docs/data/breadth.json は暗号化されていますが
+env DASHBOARD_DATA_KEY が未設定です。
+```
+
+### 原因
+
+126 で `docs/data/` を master から外して **gh-pages 専用**にした際、各ワークフローに
+`restore-site-data` を足した。復元されてくる `breadth.json` は暗号化済みなので、
+パイプライン側 (`secure_io.read_docs_json`) は鍵が無いと**わざと RuntimeError で
+落とす**設計(平文と誤認して壊れた履歴を書くより止める方が安全、という判断)。
+ところが `universe.yml` だけ `DASHBOARD_DATA_KEY` を env に渡していなかった。
+daily / maezyou / intraday-indices / backfill-breadth の4本には元から入っていた。
+**126 の変更時の配線漏れ**で、127 の閾値変更とは無関係。
+
+`EDINETDB_API_KEY` も同じく universe.yml だけ欠けていたので併せて追加。
+
+### 実害
+
+クラッシュ地点は `run_daily` 終盤の `update_breadth`。`build_universe` は
+`pipeline.py:95` で既に走り終えており、**新閾値のユニバースは runner 上では
+生成されていた**が、ジョブが失敗したので commit / publish-site / publish-price-cache
+の全ステップがスキップされ、丸ごと破棄。銘柄数の実測値もキャッシュも残っていない。
+→ 修正を push した後、**もう一度 workflow_dispatch から回す必要がある**。
+
+### 同ログ内の非致命エラー(対処不要)
+
+- `^TPX: possibly delisted; no price data found (period=2y)` /
+  `Index fetch failed (kept cache if any): ['jgb10y']`
+  → 指数取得の一時失敗。設計通りキャッシュを保持して続行しており、これは死因ではない。
+- `Split/adjustment change detected for 8057; cache replaced with full re-fetch.`
+  → 分割検知の正常動作。
+
+コミット: `2d00fffa`
+
+---
+
 ## 2026-07-27 (129): UI刷新 — 黒背景 / 透明Dock / 起動画面風ロック / 指追従スワイプ / フィルタ再設計
 
 ユーザーから6点の要望。触ったのは `docs/index.html` `docs/assets/style.css`
