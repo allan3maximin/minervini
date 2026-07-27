@@ -790,6 +790,35 @@ composite action 2種で実現している:
 **master へ**書き込み、読むときは Pages の相対URLから取る。master に置いただけでは Pages に
 反映されないので、`pages-deploy.yml`(`docs/**` の push で発火)を追加して差を埋めている。
 
+### ブランチ構成と運用ルール (2026-07-27〜 — 必読)
+
+| ブランチ | 中身 | 書き込む主体 | 履歴 |
+|---|---|---|---|
+| `master` | ソース全部 + ワークフロー定義 + `data/` の軽い中間データ | 人間 と bot | 通常どおり積む |
+| `gh-pages` | `docs/` のスナップショット(生成物込み) | `publish-site` action のみ | **常に1コミット**(毎回 orphan で作り直し) |
+| `price-cache` | `data/prices/*.parquet` | `publish-price-cache` action のみ | **常に1コミット**(同上) |
+
+- **ワークフローは master にしか置けない**。`schedule` / `workflow_dispatch` は
+  デフォルトブランチの定義しか読まないうえ、公開ブランチは publish のたびに
+  作り直されるので置いても消える。ダッシュボードのバッチ画面も
+  `docs/assets/config.js` の `branch: "master"` を `ref` に渡して dispatch している。
+- **`gh-pages` / `price-cache` を手で編集・コミットしない**。次の run の `--force`
+  push で無言で消える。作業は必ず master で行う。実質「git ブランチの形をした
+  データ置き場」であってブランチではない。
+- **この2ブランチを削除すると復旧できないものがある**。`docs/data/breadth.json` の
+  地合い履歴は「前回ぶんを読み戻して1日足す」で伸びているため、`gh-pages` を消すと
+  過去の地合いが**恒久的に失われる**(唯一の実体がそこにしかない)。`price-cache` は
+  消しても自己修復するが、次の run が全銘柄の全履歴を取り直すので極端に遅くなる。
+  ブランチ保護を掛けておくのが望ましい。
+- **ローカルの `docs/data/` と `data/prices/` は git 管理外**。clone しても付いてこない。
+  必要なら `git fetch origin gh-pages && git checkout origin/gh-pages -- data` のように
+  公開ブランチから引くか、パイプラインを1回回す。
+- **publish ステップは master への push 可否と独立**に走る。rebase 競合で push だけ
+  失敗してもサイトとキャッシュは更新される。逆に publish が落ちると master が
+  進んでいてもサイトは古いままになる。
+- `backfill-breadth.yml` だけは master に一切コミットせず publish のみ行う
+  (breadth.json が master に存在しないため)。
+
 - daily.yml は `JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}` と `EDINETDB_API_KEY: ${{ secrets.EDINETDB_API_KEY }}` を env に設定済み。
   `edinetdb.enabled: true`(2026-07-08〜)のため、**`EDINETDB_API_KEY` の GitHub Secret 登録が
   未了だとネットワークに出られず既存ストアのみ返す**(エラーにはならないが補完も効かない) →

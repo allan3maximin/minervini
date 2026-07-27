@@ -14,5 +14,12 @@ venv/
 # 復元/公開は .github/actions/{restore-site-data,publish-site} が担当する。
 docs/data/
 
+# 価格キャッシュ (2026-07-27〜)。master ではなく price-cache ブランチに置く。
+# 理由: parquet はバイナリで差分が効かず、増分取得のたびに全銘柄のファイルが
+# 書き換わるため、1コミットあたり約20MB (1010銘柄実測) がまるごと .git に積まれる。
+# 復元/公開は .github/actions/{restore-price-cache,publish-price-cache} が担当する。
+data/prices/
+
 # publish-site アクションが公開ブランチ用に作る一時ファイル
+# (publish-price-cache はリポジトリ外の一時ディレクトリで作業するので対象外)
 docs/.git/

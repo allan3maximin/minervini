@@ -21,6 +21,51 @@
 
 ---
 
+## 2026-07-27 (128): data/prices を master から追跡解除(127の★残作業の完了)
+
+127 が「2段階切替の 1 だけやった」と書いて残していた **2 を実施**。127 のコミット
+(8e39ad6d) は publish/restore-price-cache を足して daily/maezyou/universe に配線した
+ものの、`.gitignore` も `git rm --cached` も入っていなかったため、**1011ファイル
+20MB が master に追跡されたまま**で daily.yml の `git add data/` が毎日それを
+コミットし続ける状態だった。そのコミット自身のコメントが「これを止める」と書いて
+いる当のものが止まっていない、という穴。
+
+### やったこと
+
+- `.gitignore` に `data/prices/` を追加(なぜ master に置けないかの理由をコメントで残した)。
+  `publish-price-cache` はリポジトリ外の `mktemp -d` で作業するので、`docs/.git/` に
+  相当する一時ファイルの除外は不要 — その旨も明記。
+- `git rm -r --cached data/prices` (1011ファイル)。ディスク上の実体はそのまま。
+- `restore-price-cache/action.yml` の「初回は master にまだ data/prices が残っている
+  のでそれを使う」という**この変更で嘘になるコメント**を差し替え。あわせて挙動の
+  意図を明記した: ブランチ不在時は `::warning::` を出して**わざと続行**する。
+  ここで落とすと、price-cache ブランチを一度失っただけでパイプラインが永久に
+  復旧できなくなる。全銘柄再取得は遅いが自己修復する方を選ぶ。
+- `HANDOFF.md` §8 に「ブランチ構成と運用ルール」表を追加
+  (master / gh-pages / price-cache の3本、後者2本は常に1コミット、人手で触らない)。
+
+### ★push 順序(厳守)
+
+**このコミットを push する前に、ローカルの `data/prices` から `price-cache` ブランチを
+seed すること。** 追跡解除した瞬間、キャッシュの実体はユーザーのローカルディスク
+だけになる。origin にはまだ `price-cache` も `gh-pages` も無い。順序を間違えると
+初回 run が全銘柄 × 520日 を取りに行って timeout する(127 が警告していたのと同じ罠)。
+
+seed は `publish-price-cache` を手で再現するだけ:
+`mktemp -d` に `data/prices` をコピー → `git init` → `git checkout -b price-cache`
+→ `git add -A` → commit → `git push --force <remote> price-cache`。
+gh-pages の bootstrap が HTTP 400 で落ちた件と同様、20MB 級の push なので
+`git config --global http.postBuffer 524288000` を先に入れておくこと。
+
+### 検証
+
+- `git ls-files data/prices` → 0件。ディスク上は 1010ファイル残存。
+- `git check-ignore -v data/prices/7203.parquet` → `.gitignore:21:data/prices/`。
+- `pytest -q`: **441 passed / 3 failed**(126・127 と同じ pyarrow 欠如ベースライン、増減なし)。
+- action YAML 4本パースOK。
+
+---
+
 ## 2026-07-27 (127): ユニバースを売買代金1億円の閾値方式へ + 価格キャッシュを専用ブランチへ
 
 ### 発端

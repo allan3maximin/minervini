@@ -30,9 +30,13 @@ runs:
         branch="${{ inputs.branch }}"
 
         if ! git fetch --depth=1 origin "$branch" 2>/dev/null; then
-          # 初回(移行直後)は master にまだ data/prices が残っているのでそれを使う。
-          # ブランチへの seed は同じ run の最後の publish-price-cache が行う。
-          echo "::notice::ブランチ '$branch' がまだ存在しない。作業ツリーの data/prices をそのまま使う。"
+          # data/prices は master から追跡解除済み (2026-07-27) なので、ブランチが
+          # 無い = キャッシュがどこにも無い状態。ここで落とすと、ブランチを一度失った
+          # だけでパイプラインが永久に復旧できなくなる。あえて続行して全銘柄を
+          # 取り直させる (遅いが自己修復する)。seed はこの run の最後の
+          # publish-price-cache が行う。
+          echo "::warning::ブランチ '$branch' が存在しない。価格キャッシュ無しで続行するため、"
+          echo "::warning::全銘柄 × history_days の再取得が走り実行時間が大幅に伸びる。"
           mkdir -p data/prices
           echo "作業ツリーの銘柄数: $(find data/prices -type f -name '*.parquet' | wc -l)"
           exit 0
