@@ -21,6 +21,48 @@
 
 ---
 
+## 2026-07-28 (131): Dockの下までスクロールコンテンツが見えるように(129の続き)
+
+ユーザーから: 「市況画面でスクロールしても、コンテンツが画面の一番下まで見えない
+(=Dockの手前で途切れて、Dockの向こうは素の黒背景)」との指摘。129で`.dock-nav`は
+すりガラス化したが、**コンテンツ側がDockの手前で終わっていて、そもそもDockの下に
+何も描画されていなかった**のが根本原因。触ったのは `docs/assets/style.css` のみ。
+
+### 原因
+
+`main`が`padding-bottom: calc(--dock-h + safe-area + 8px)`でDock分の余白を
+丸ごと予約していた。これにより`main`(→中の`.view-section`)の実高さ自体が
+画面の本当の下端より短く、スクロールを終端まで送ってもDockの下の領域には
+そもそもコンテンツのボックスが存在しなかった(空の黒背景が見えるだけ)。
+
+### 変更内容
+
+- `--dock-clear`変数を新設(`:root`、値は旧`main`のpadding-bottomと同じcalc式)。
+- `main`の`padding-bottom`を撤廃 → 画面の本当の下端まで伸びるように。
+- 代わりに、**実際にスクロールする要素**へ`padding-bottom: var(--dock-clear)`を移設:
+  - `.view-section`(投資法/保有など直接スクロールするビュー)
+  - `.market-panel`(市況データ/分析)
+  - `.stock-panel`(個別株の各タブ、padding shorthandの末尾を変更)
+  - `.list-panel [id$="-tier-body"]`(本命/候補/監視リスト)
+  - `.batch-view .settings-subpanels`(設定画面)
+- ヒートマップ(`.hm-view`)だけは中身がtreemapで自前スクロールしないため対象外。
+  `.hm-view`自体に`padding-bottom: var(--dock-clear)`を残し、`heatmapHeight()`
+  (`#hm-panels`のclientHeightを見るだけの関数)が今までと同じ高さを返すよう温存。
+- `.hm-view, .stock-view, .list-view, .market-view, .batch-view`は外側の
+  `.view-section`由来のpadding-bottomを`0`に戻す(内側パネル側で個別に持つため、
+  二重に余白が空くのを防ぐ)。
+
+### 検証
+
+- `docs/assets/style.css`の波括弧収支662/662で一致。
+- `tools/update_cache_busters.py`実行(ついでに129で入れ忘れていたバスター不整合
+  `?v=088160b5`→実ハッシュ`7d44bd01`のズレも今回で解消、`f74caaa4`に更新)。
+- **★実機での見た目確認は次回ユーザーに触ってもらうこと**(市況/リスト/個別株/
+  設定/保有の各画面でスクロール終端がDockの下まで自然に見えるか、ヒートマップが
+  今まで通りDockに被らないか)。
+
+---
+
 ## 2026-07-28 (130): 月次リビルドが鍵未設定で落ちる件を修正 (universe.yml)
 
 ユーザーが 127 の閾値変更を反映させるため `universe.yml` を workflow_dispatch で

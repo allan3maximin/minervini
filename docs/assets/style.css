@@ -22,6 +22,13 @@
   --radius-sm: 6px;
   --dock-h: 54px; /* メインDockの実高さ(ボタン42+padding10+border2)。mainの下余白計算用 */
   --dock-w: 300px; /* メインDockの実幅(ボタン56×5 + gap2×4 + padding5×2 + border2)。個別株タブバーの幅をこれに合わせる */
+  /* Dock(浮いたすりガラス)の下に隠れないための予約量。以前はmain全体の
+     padding-bottomでこれを一括確保していたが、それだとどの画面もDockの
+     手前でコンテンツが途切れ、Dockの向こうに何も無い(=素の黒背景)状態になる。
+     2026-07-28: 予約先をmainから各ビューの「実際にスクロールする要素」に
+     移し、mainはtrueな画面下端まで伸ばすことで、スクロールし切ると
+     コンテンツがDockの下(すりガラス越し)まで見えるようにした。 */
+  --dock-clear: calc(var(--dock-h) + max(12px, env(safe-area-inset-bottom) + 8px));
 }
 
 * { box-sizing: border-box; }
@@ -50,8 +57,9 @@ main {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* 固定Dockに内容が隠れないよう、スクロール領域自体をDockの上で終わらせる */
-  padding-bottom: calc(var(--dock-h) + max(12px, env(safe-area-inset-bottom) + 8px));
+  /* Dock分の余白はここでは予約しない(2026-07-28)。各ビューの実スクロール
+     コンテナが --dock-clear 分を自分のpadding-bottomとして持つ形に変更、
+     mainは画面の本当の下端まで伸びる。 */
 }
 
 h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: 0.01em; }
@@ -1492,17 +1500,25 @@ a.nav-btn:hover { border-color: var(--link); }
 .dock-btn.slide-target { background: rgba(52, 211, 153, 0.22); color: var(--text); }
 .dock-btn.active .dock-label { font-weight: 600; }
 
-/* SPAビュー本体: mainの残り高さを使い切り、必要なビューだけ内部で縦スクロール。 */
+/* SPAビュー本体: mainの残り高さを使い切り、必要なビューだけ内部で縦スクロール。
+   直接ここでスクロールするビュー(投資法/保有)は、スクロール終端がDockの下まで
+   見えるよう --dock-clear をpadding-bottomとして持つ。 */
 .view-section {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--dock-clear);
 }
 .view-section[hidden] { display: none; }
-/* 横スワイプパネルを持つビューは自前でレイアウトするため外側はスクロールさせない */
-.hm-view, .stock-view, .list-view, .market-view { overflow: hidden; }
+/* 横スワイプパネルを持つビューは自前でレイアウトするため外側はスクロールさせない。
+   実スクロールは内側のパネル/本文要素に任せるので、外側のこのpadding-bottomは
+   ここでは不要 → 0に戻す(パネル側で個別にdock-clearを持たせる)。 */
+.hm-view, .stock-view, .list-view, .market-view, .batch-view { overflow: hidden; padding-bottom: 0; }
+/* ヒートマップだけは中身(treemap)が自前でスクロールしないため、Dockに
+   隠れないようここ(ビュー本体)でdock-clearを予約したままにする(従来通り)。 */
+.hm-view { padding-bottom: var(--dock-clear); }
 
 /* ---------------------------------------------- 個別画面 横スワイプパネル */
 /* 画面全体は縦スクロールせず、5パネル(サマリー/グラフ/ファンダ/MUST/
@@ -1637,7 +1653,8 @@ a.nav-btn:hover { border-color: var(--link); }
   box-sizing: border-box;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 2px 8px;
+  /* 下paddingをdock-clearに: スクロール終端でDockの下までコンテンツが見える */
+  padding: 2px 2px var(--dock-clear);
   /* 縦スクロール中でも横スワイプ(前後銘柄切替)をpointerイベントで拾えるよう、
      縦パンだけをブラウザ任せにする。これでサマリー等でも横判定が効きやすい。 */
   touch-action: pan-y;
@@ -1785,6 +1802,8 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  /* スクロール終端でDockの下までコンテンツが見えるように */
+  padding-bottom: var(--dock-clear);
 }
 
 /* -------------------------------------------- 市況画面(市況データ/市況分析) */
@@ -1806,6 +1825,8 @@ a.nav-btn:hover { border-color: var(--link); }
   overflow-x: hidden;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
+  /* スクロール終端でDockの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--dock-clear);
   /* 縦スクロール中でも横スワイプ(データ/分析のループ切替)を拾えるよう縦パンのみ委譲。 */
   touch-action: pan-y;
 }
@@ -2054,6 +2075,8 @@ a.nav-btn:hover { border-color: var(--link); }
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* スクロール終端でDockの下までコンテンツが見えるように */
+  padding-bottom: var(--dock-clear);
 }
 .settings-subtabs-bottom { flex: 0 0 auto; margin: 10px 0 2px; }
 .settings-subpanel { display: none; }
