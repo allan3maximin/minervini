@@ -47,8 +47,17 @@
 - 数値表用に `.invest-table` / `.invest-table-wrap` を style.css に追加
   (狭い端末では横スクロールに逃がす)。
 
+### 導線(追記)
+
+投資法の**一覧は投資法ページ内には無く**、設定ページの
+`settings-subpanel[data-subpanel="invest"]` にある `settings-link-card` の
+リスト(`#invest/<id>` への直リンク)が実体。ここは**手書きの静的リスト**なので、
+`data-section` を足しただけでは一覧に出ない。11枚目のリンクを追加した。
+**セクションを増やすときは必ずこの2箇所を対で更新すること。**
+
 ### 検証
 
+- `data-section` 11個と一覧リンク11個が完全一致(漏れ・切れ・順序ズレなし)
 - `node --check docs/assets/app.js` OK
 - HTMLParser でタグの開閉整合チェック → エラーなし・閉じ残りなし
 - `data-help` 20箇所すべてが `TERM_HELP` に存在(未定義キー0)
