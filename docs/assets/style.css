@@ -1825,8 +1825,13 @@ a.nav-btn:hover { border-color: var(--link); }
   padding: 0;
 }
 /* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
-   横スクロール表は廃止したので縦のみ(横は明示的に禁止)。 */
-.list-panel [id$="-tier-body"] {
+   横スクロール表は廃止したので縦のみ(横は明示的に禁止)。
+   direct-child限定(> )にしているのは、監視タブだけ本文が
+   #watchlist-tier-body + #cooled-tier-body の2つに分かれており、descendant
+   セレクタだとこの2つが個別にflex:1 1 autoの独立スクロール領域になってしまい、
+   縦スペースが分割されて最後までスクロールできなくなる不具合があったため。
+   (2026-07-28: 監視タブのみコンテンツが画面下端まで見えない不具合の修正) */
+.list-panel .tier-section > [id$="-tier-body"] {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1834,6 +1839,22 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
   /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
   padding-bottom: var(--tabs-clear);
+}
+/* 監視タブのみ、本文が#watchlist-tier-body(通常監視)と#cooled-tier-body(追いかけ禁止)
+   の2つのdivに分かれている。この2つをまとめて1つのスクロール領域として扱うための
+   ラッパー。中身のtier-bodyは通常のflex項目(スクロールなし)に戻す。 */
+.list-panel .watchlist-tier-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--tabs-clear);
+}
+.list-panel .watchlist-tier-scroll > [id$="-tier-body"] {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding-bottom: 0;
 }
 
 /* -------------------------------------------- 市況画面(市況データ/市況分析) */
