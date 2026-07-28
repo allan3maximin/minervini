@@ -2027,6 +2027,32 @@ a.nav-btn:hover { border-color: var(--link); }
   line-height: 1.7;
 }
 
+/* 「このツールの閾値と、実測したエッジ」で使う数値表。狭い端末では
+   横スクロールに逃がす(本文の横幅を崩さないため)。 */
+.invest-table-wrap { margin: 0 0 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.invest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.invest-table th,
+.invest-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.invest-table thead th {
+  color: var(--text-dim);
+  font-weight: 600;
+  border-bottom-color: var(--border-strong);
+}
+.invest-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.invest-table td.pos { color: var(--accent); }
+.invest-table td.neg { color: var(--warn); }
+.invest-table tbody tr:last-child td { border-bottom: none; }
+
 /* 本文末尾に流す前後ナビ。矢印が無い端でも visibility:hidden で場所を保つ。 */
 .invest-pager-nav {
   display: flex;
