@@ -36,6 +36,7 @@ from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
 from src.report import positions as positions_mod
 from src.report import summary as summary_mod
+from src.report.secure_io import preflight_data_key
 from src.screener import entry as entry_mod
 from src.screener import priority as priority_mod
 from src.screener import trend_template
@@ -72,6 +73,11 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     if jpholiday.is_holiday(today):
         print(f"{today} is a JP holiday; skipping.")
         return 0
+
+    # 鍵の配線ミスを「取りに行く前」に落とす。docs/data が暗号化済みなのに
+    # DASHBOARD_DATA_KEY が無いと update_breadth (終盤) で必ず落ちるので、
+    # 全銘柄の価格取得を終えてから死ぬのを避ける。詳細は preflight_data_key。
+    preflight_data_key(build_site.DOCS_DATA_DIR)
 
     # Market overview indices (Nikkei/TOPIX/Growth/JGB10y/USDJPY/NASDAQ/SOX).
     # Fully independent of the screener; a failure here must never block it.

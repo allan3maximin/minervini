@@ -195,6 +195,51 @@ flow内のflex子要素(ビューの最後尾)で、`main`側のpadding-bottom�
 
 ---
 
+## 2026-07-28 (131): 鍵未設定を「取りに行く前」に落とす (preflight_data_key)
+
+130 の修正後にユーザーがもう一度回したが**同じ RuntimeError で失敗**。
+
+### 調査結果: コードは直っている。走ったコミットが古い
+
+- `git fetch` 後の `origin/master` の `universe.yml` に `DASHBOARD_DATA_KEY` は
+  **入っている**(53行目 EDINETDB / 59行目 DASHBOARD)。130 のコミット 2d00fffa は
+  push 済み。
+- `DASHBOARD_DATA_KEY` シークレット自体は存在する。同じ鍵を使う daily / maezyou /
+  intraday-indices が同日に成功してコミットを積んでいる
+  (`chore: daily screener run 2026-07-28`, `chore: intraday index refresh
+  2026-07-28T10:45` 等)。鍵が空なら**これらも同時に死ぬ**はずで、死んでいない。
+- `python -m src.pipeline` を回す4本(daily/maezyou/intraday/universe)は全て鍵を
+  持っている。残る2本(jquants-backfill / margin_backfill)は `src.data.*` を叩く
+  別エントリで、トレースバックの `pipeline.py:493 main()` とは一致しない。
+
+→ 結論: **失敗した run は修正前の SHA で走っている**。最有力は GitHub の
+「**Re-run failed jobs**」で、これは元の run と同じコミットを再利用するため
+ワークフローファイルを直しても永久に古いままリトライし続ける。Actions 画面の
+`Run workflow` から**新規に dispatch し直す**必要がある。
+
+### 恒久対策: プリフライト
+
+原因が何であれ、この失敗モードは**全銘柄の価格取得を終えた終盤**(`update_breadth`)
+で初めて顕在化するのが致命的だった。env を1本忘れただけで数十分の取得が丸ごと
+捨てられる。そこでネットワークに出る前に同じ条件を判定する:
+
+- `secure_io.find_encrypted_json(dir)` — `*.json` の先頭256バイトに `__enc__`
+  マーカーがあるかだけ見る(report.json 数MBをパースしないため)。
+- `secure_io.preflight_data_key(dir)` — 暗号化ファイルがあるのに鍵が無ければ
+  即 RuntimeError。**平文しか無い場合(ローカル開発・テスト)は素通し**なので
+  既存の平文運用は壊れない。
+- `pipeline.run_daily` の祝日判定直後、`update_indices` より前に呼ぶ。
+
+これで同種の配線ミスは「起動1秒で明示的なメッセージ」になる。
+
+### 検証
+
+`pytest -q` → **441 passed / 3 failed**(pyarrow/fastparquet 欠如の既知ベースライン、
+増減なし)。プリフライトは平文のみ→素通し / 鍵あり→素通し / 暗号化+鍵なし→中断 の
+3ケースを実データで確認。
+
+---
+
 ## 2026-07-28 (130): 月次リビルドが鍵未設定で落ちる件を修正 (universe.yml)
 
 ユーザーが 127 の閾値変更を反映させるため `universe.yml` を workflow_dispatch で

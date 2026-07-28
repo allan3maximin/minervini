@@ -105,6 +105,53 @@ def read_docs_json(path, default=None):
     return decrypt_envelope(obj, key)
 
 
+def find_encrypted_json(directory) -> list:
+    """directory 直下の *.json のうち暗号化封筒になっているものを列挙する。
+
+    起動直後のプリフライト用なので、report.json のような数MBのファイルを
+    JSONパースせず先頭バイトのマーカー検出だけで判定する(封筒は
+    `{"__enc__": "aesgcm-v1", ...}` の3キーしか無く、マーカーは必ず先頭付近)。
+    """
+    from pathlib import Path
+
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    found = []
+    for p in sorted(directory.glob("*.json")):
+        try:
+            with open(p, "rb") as f:
+                head = f.read(256)
+        except OSError:
+            continue
+        if ENVELOPE_MARKER.encode() in head:
+            found.append(p)
+    return found
+
+
+def preflight_data_key(directory) -> None:
+    """暗号化済みファイルがあるのに鍵が無い状態を「処理を始める前に」落とす。
+
+    read_docs_json は読んだ時点で例外を投げるが、パイプラインでその読み戻しが
+    起きるのは全銘柄の価格取得を終えた終盤(update_breadth)なので、鍵の配線を
+    1本忘れただけで数十分ぶんの取得を捨てることになる(2026-07-28、universe.yml に
+    DASHBOARD_DATA_KEY を渡し忘れて実際にこれが起きた)。ネットワークに出る前に
+    同じ条件を先に判定して即死させる。
+    """
+    if load_data_key() is not None:
+        return
+    encrypted = find_encrypted_json(directory)
+    if not encrypted:
+        return  # 平文運用(ローカル開発・テスト)。従来どおり素通し。
+    names = ", ".join(p.name for p in encrypted[:5])
+    more = f" 他{len(encrypted) - 5}件" if len(encrypted) > 5 else ""
+    raise RuntimeError(
+        f"{directory} に暗号化済みJSONがあるのに env {DATA_KEY_ENV} が未設定です "
+        f"({names}{more})。このまま進めても終盤の読み戻しで必ず失敗するため"
+        "、取得を始める前に中断します。GitHub Actions ならワークフローの env に "
+        f"{DATA_KEY_ENV} を渡してください。")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="docs/data JSONの暗号化封筒ツール")
     parser.add_argument("--decrypt", metavar="FILE", help="封筒JSONを復号して標準出力へ(鍵は環境変数)")
