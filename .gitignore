@@ -20,6 +20,12 @@ docs/data/
 # 復元/公開は .github/actions/{restore-price-cache,publish-price-cache} が担当する。
 data/prices/
 
+# 研究用の長期価格ストア (2026-07-28〜)。tools/fetch_long_history.py が作る。
+# 2015年以降 × 全候補約3700銘柄で data/prices/ の10倍以上のサイズになるうえ、
+# 運用には一切使わない(閾値検証専用)ので master には載せない。
+# 消えても再取得できる。ローカルにだけ置くこと。
+data/prices_long/
+
 # publish-site アクションが公開ブランチ用に作る一時ファイル
 # (publish-price-cache はリポジトリ外の一時ディレクトリで作業するので対象外)
 docs/.git/
