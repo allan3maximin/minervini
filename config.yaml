@@ -43,7 +43,12 @@ trend_template:
   low52w_margin: 1.25
   high52w_margin: 0.75
   rs_min: 70
-  score_weights: {rs: 30, ma200_days: 10, near_high: 15, eps_accel: 25, rev_accel: 10, monthly: 10}
+  # 2026-07-29改定: tech_score は「その日のMUST通過銘柄内での断面パーセンタイルの
+  # 等ウェイト平均」になったので、技術面の内訳ウェイト(旧 rs/ma200_days/near_high)は
+  # 廃止した。自由パラメータをゼロにするのが設計意図なので、ここに技術3変数の重みを
+  # 再導入しないこと(26年検証の根拠は log.md (140))。technical は full_score の中で
+  # 技術面が占める配点。
+  score_weights: {technical: 55, eps_accel: 25, rev_accel: 10, monthly: 10}
 
 # 機能A: トレンドテンプレート距離ベースのプライオリティ(P1〜P4)
 priority:

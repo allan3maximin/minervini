@@ -31,6 +31,34 @@ def add_ma200_slope_days(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_ma200_slope_21d(df: pd.DataFrame) -> pd.DataFrame:
+    """MA200 の21営業日(≒1ヶ月)あたりの上昇率。tech_score の3変数のひとつ。
+
+    MUST条件で使う ma200_slope_days が「何日連続で上向きか(持続)」なのに対し、
+    こちらは「どれくらいの角度で上がっているか(強度)」。26年検証(log.md 140)で
+    期待Rの幅が持続の10倍以上あり局面安定性も8勝1敗だったのはこちらの側。
+    両者は別物なので、片方をもう片方の代用にしないこと。
+    """
+    df = df.copy()
+    prev = df["ma200"].shift(21)
+    df["ma200_slope_21d"] = df["ma200"] / prev - 1.0
+    return df
+
+
+def add_dryup_series(df: pd.DataFrame) -> pd.DataFrame:
+    """dryup_med_10_50 のベクトル化版(全行ぶん)。
+
+    dryup_metrics() と同一定義(直近10日出来高の中央値 / vol_ma50)。あちらが
+    point-in-time の正準実装で、こちらは全行を一括で欲しい場面(tech_score の
+    断面ランク・バックテスト)専用の同値実装。定義がドリフトしていないことは
+    tests/test_indicators.py で最終行同士を突合して常時保証する。
+    """
+    df = df.copy()
+    med10 = df["volume"].rolling(10).median()
+    df["dryup_med_10_50"] = med10 / df["vol_ma50"].replace(0, np.nan)
+    return df
+
+
 def add_52w_high_low(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["high_52w"] = df["high"].rolling(252).max()
@@ -82,6 +110,8 @@ def compute_all(df: pd.DataFrame, benchmark_close: pd.Series | None = None) -> p
     """Apply all per-symbol indicator calculations in one pass."""
     df = add_moving_averages(df)
     df = add_ma200_slope_days(df)
+    df = add_ma200_slope_21d(df)
+    df = add_dryup_series(df)
     df = add_52w_high_low(df)
     df = add_atr(df, 20)
     df = add_rs_raw(df)

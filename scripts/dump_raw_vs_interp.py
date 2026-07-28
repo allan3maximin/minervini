@@ -207,6 +207,10 @@ def main(only_codes: list[str] | None = None) -> None:
         latest["rs"] = rs
         latest_by_code[code] = latest
 
+    # tech_score は「その日のMUST通過銘柄内での断面パーセンタイル」なので、
+    # 個別銘柄を回す前にユニバース全体で一括付与しておく(pipeline と同順序)。
+    tt.attach_score_percentiles(latest_by_code, config)
+
     # ---- トレンドテンプレート再計算 & 忠実性ゲート -----------------------
     print("トレンドテンプレート再計算 & 忠実性ゲート検証中 ...")
 
@@ -389,6 +393,9 @@ def main(only_codes: list[str] | None = None) -> None:
             "ma150": round_float(latest.get("ma150"), 2),
             "ma200": round_float(latest.get("ma200"), 2),
             "ma200_slope_days": round_float(latest.get("ma200_slope_days"), 0),
+            # tech_score の3変数の生値(2026-07-29改定)
+            "ma200_slope_21d": round_float(latest.get("ma200_slope_21d"), 4),
+            "dryup_med_10_50": round_float(latest.get("dryup_med_10_50"), 4),
             "low_52w": low_52w,
             "high_52w": high_52w,
             "rs": latest.get("rs"),
@@ -414,6 +421,8 @@ def main(only_codes: list[str] | None = None) -> None:
             "tt_flags": to_python(flags),
             "passed": bool(tt.passes_trend_template(flags)),
             "tech_score": tech_score_val,
+            # tech_score の内訳(当日断面パーセンタイル、等ウェイト平均の前の3成分)
+            "score_pct": to_python(latest.get("score_pct")),
             "full_score": full_score_val,
             "vcp_status": vcp_result.get("status"),
             "vcp_score": round_float(vcp_result.get("vcp_score"), 1),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from src.config import load_config
 from src.screener.scoring import linear_score, renormalize_to_100
@@ -38,30 +39,118 @@ def passes_trend_template(flags: dict[str, bool]) -> bool:
     return all(flags.values())
 
 
+# ---------------------------------------------------------------------------
+# tech_score (2026-07-29 全面作り直し)
+#
+# 旧スコアは RS 54.5% / near_high 27.3% / MA200上向き日数 18.2% の固定重みと
+# ハードコードされた境界(70→99, 0→105, 高値25%幅)でできていた。26年(2000-2026)
+# のデータで診断したところ、MUST通過集合の中ではこの3変数はいずれも期待Rの幅が
+# 0.02〜0.03R しかなく、局面別の符号も 5勝5敗〜7勝4敗 とコイン投げだった。
+# near_high に至っては単独で使うと期待R +0.078 と無条件ベースライン +0.126 を
+# 下回る(11局面中1勝)。つまり旧スコアは直近2年の局面に合わせて配分された
+# カーブフィッティングであり、上位20%(+0.117)が自分の上位50%(+0.140)にも
+# 無条件ベースライン(+0.126)にも負けるという、選別力が負の状態にあった。
+#
+# 新スコアは26年を通して符号が安定していた3変数だけを使う:
+#   - ma200_slope_21d      : MA200の21日上昇率(強度)   幅 +0.277R / 8勝1敗
+#   - close / low_52w      : 52週安値からの倍率         幅 +0.216R / 6勝4敗
+#   - dryup_med_10_50 の反転: 出来高の枯れ度(小さいほど良) 幅 +0.142R / 9勝2敗
+#
+# 設計上の縛りが2つある。どちらも「26年フィットで2年フィットを置き換えるだけ」に
+# ならないための歯止めなので、後から緩めないこと。
+#   (1) 等ウェイト。重み探索をしない(Dawes 1979: improper linear model の頑健性)。
+#   (2) 正規化は当日の断面パーセンタイル。閾値・境界値を一切持たない。母集団は
+#       「その日のMUST通過銘柄」に限る -- 効果量をこの部分集合の中で測ったので、
+#       採点も同じ部分集合の中で行わないと測定と運用がズレる。
+#
+# RS と near_high(52週高値からの距離)は MUST フィルタとしては残す。「通過に
+# 必要な条件」と「通過者の順位付けに効く変数」は別物であり、アブレーションでは
+# 両者をスコアに足し戻すと期待Rが +0.209 → +0.199 → +0.177 と下がった。
+# 根拠の全文は log.md (140)。
+# ---------------------------------------------------------------------------
+
+SCORE_COMPONENT_NAMES = ("ma200_slope", "low52w_ratio", "dryup")
+
+
+def score_variables(latest: dict) -> dict[str, float | None]:
+    """スコア3変数の生値。いずれも「大きいほど良い」向きに符号を揃えて返す。
+
+    dryup は小さい(出来高が枯れている)ほど良いので符号を反転させる。値が
+    欠けている(履歴不足など)場合は None。
+    """
+    slope = latest.get("ma200_slope_21d")
+    close = latest.get("close")
+    low_52w = latest.get("low_52w")
+    dryup = latest.get("dryup_med_10_50")
+
+    low_ratio = close / low_52w if close is not None and low_52w else None
+    return {
+        "ma200_slope": _finite(slope),
+        "low52w_ratio": _finite(low_ratio),
+        "dryup": (-_finite(dryup)) if _finite(dryup) is not None else None,
+    }
+
+
+def _finite(v) -> float | None:
+    if v is None:
+        return None
+    f = float(v)
+    return None if f != f else f  # NaN
+
+
+def attach_score_percentiles(
+    latest_by_code: dict[str, dict], config: dict | None = None
+) -> dict[str, dict[str, float]]:
+    """その日のMUST通過銘柄の中で3変数を断面パーセンタイル(0-100)に変換し、
+    各 latest の "score_pct" に書き込む(破壊的)。
+
+    母集団をMUST通過銘柄に限るのが要点。落ちる銘柄まで含めて順位付けすると、
+    効果量を測った集合と採点する集合が食い違う。MUSTを落ちた銘柄には
+    score_pct を付けない(= tech_score は None)。
+    """
+    config = config or load_config()
+    passers = [
+        code
+        for code, latest in latest_by_code.items()
+        if passes_trend_template(check_must_conditions(latest, config))
+    ]
+    values = {code: score_variables(latest_by_code[code]) for code in passers}
+
+    pct_by_code: dict[str, dict[str, float]] = {code: {} for code in passers}
+    for name in SCORE_COMPONENT_NAMES:
+        series = pd.Series(
+            {code: values[code][name] for code in passers}, dtype="float64"
+        ).dropna()
+        if series.empty:
+            continue
+        ranks = series.rank(pct=True, method="average") * 100.0
+        for code, pct in ranks.items():
+            pct_by_code[code][name] = round(float(pct), 1)
+
+    for code in passers:
+        latest_by_code[code]["score_pct"] = pct_by_code[code]
+    return pct_by_code
+
+
 def technical_score_raw(latest: dict, config: dict | None = None) -> dict[str, float]:
-    """The 3 technical-quality point components (max rs=30, ma200_days=10, near_high=15)."""
-    config = config or load_config()
-    w = config["trend_template"]["score_weights"]
-    rs = latest["rs"]
-    slope_days = latest["ma200_slope_days"]
-    high_52w = latest["high_52w"]
-    close = latest["close"]
+    """attach_score_percentiles が付けた断面パーセンタイル成分。
 
-    rs_pts = linear_score(rs, 70, 99, w["rs"])
-    ma200_days_pts = linear_score(min(slope_days, 105), 0, 105, w["ma200_days"])
-    near_high_shortfall = (high_52w - close) / (high_52w * 0.25) if high_52w else 1.0
-    near_high_pts = linear_score(1 - near_high_shortfall, 0, 1, w["near_high"])
-
-    return {"rs": rs_pts, "ma200_days": ma200_days_pts, "near_high": near_high_pts}
+    等ウェイトなので「成分 = そのままパーセンタイル値」。config の重みは見ない。
+    """
+    pct = latest.get("score_pct") or {}
+    return {k: v for k, v in pct.items() if v is not None}
 
 
-def technical_score(latest: dict, config: dict | None = None) -> float:
-    """Technical-only score (design doc 3.2 (1)), rescaled from 55 raw points to 100."""
-    config = config or load_config()
-    w = config["trend_template"]["score_weights"]
+def technical_score(latest: dict, config: dict | None = None) -> float | None:
+    """技術面スコア(0-100)。3変数の断面パーセンタイルの等ウェイト平均。
+
+    attach_score_percentiles を先に通していない latest には計算できないので
+    None を返す(断面が要るスコアなので、単独銘柄からは原理的に出せない)。
+    """
     raw = technical_score_raw(latest, config)
-    max_pts = w["rs"] + w["ma200_days"] + w["near_high"]
-    return round(sum(raw.values()) / max_pts * 100.0, 1)
+    if not raw:
+        return None
+    return round(sum(raw.values()) / len(raw), 1)
 
 
 def quarter_sort_key(fiscal_quarter: str) -> tuple[int, int]:
@@ -142,9 +231,12 @@ def compute_full_score(
     config = config or load_config()
     w = config["trend_template"]["score_weights"]
 
-    tech_raw = technical_score_raw(latest, config)
-    tech_points = sum(tech_raw.values())
-    tech_max = w["rs"] + w["ma200_days"] + w["near_high"]
+    # 技術面は tech_score(0-100)を w["technical"] 点満点に写すだけ。断面が無くて
+    # tech_score が出せない場合は技術成分を欠測扱いにし、renormalize_to_100 が
+    # ファンダ成分だけで100点満点に割り戻す(部分カバレッジと同じ扱い)。
+    tech_max = w["technical"]
+    tech = technical_score(latest, config)
+    tech_points = None if tech is None else tech / 100.0 * tech_max
 
     eps_slope = compute_accel_slope(eps_quarters, "eps") if eps_quarters else None
     eps_latest_growth = latest_yoy_growth(eps_quarters, "eps") if eps_quarters else None
@@ -178,6 +270,8 @@ def screen_universe(latest_by_code: dict[str, dict], config: dict | None = None)
     score for stocks that pass.
     """
     config = config or load_config()
+    # tech_score は当日の断面ランクなので、個別判定に入る前に一括で付与する。
+    attach_score_percentiles(latest_by_code, config)
     results = []
     for code, latest in latest_by_code.items():
         flags = check_must_conditions(latest, config)

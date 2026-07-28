@@ -53,9 +53,14 @@ BASELINE_LATEST = {
     "ma150": 130.0,
     "ma200": 120.0,
     "ma200_slope_days": 30,
+    "ma200_slope_21d": 0.05,
+    "dryup_med_10_50": 0.8,
     "low_52w": 100.0,
     "high_52w": 160.0,
     "rs": 80,
+    # tech_score は当日の断面ランクから出るので、pipeline 同様
+    # attach_score_percentiles 済みの状態を模す(単独銘柄なので全成分100)。
+    "score_pct": {"ma200_slope": 100.0, "low52w_ratio": 100.0, "dryup": 100.0},
 }
 
 

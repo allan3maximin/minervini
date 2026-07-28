@@ -2,6 +2,7 @@ import pytest
 
 from src.config import load_config
 from src.screener.trend_template import (
+    attach_score_percentiles,
     check_must_conditions,
     compute_accel_slope,
     compute_full_score,
@@ -17,10 +18,19 @@ BASELINE = {
     "ma150": 130.0,
     "ma200": 120.0,
     "ma200_slope_days": 30,
+    "ma200_slope_21d": 0.05,
+    "dryup_med_10_50": 0.8,
     "low_52w": 100.0,
     "high_52w": 160.0,
     "rs": 80,
 }
+
+
+def _scored(latest: dict) -> float:
+    """単独銘柄でも採点できるよう、自分だけの断面を作って tech_score を出す。"""
+    by_code = {"X": dict(latest)}
+    attach_score_percentiles(by_code, CONFIG)
+    return technical_score(by_code["X"], CONFIG)
 
 
 def test_all_conditions_pass_on_baseline():
@@ -61,11 +71,51 @@ def test_each_condition_fails_independently(mutation, expected_false_key):
 
 
 def test_technical_score_is_higher_for_stronger_stock():
-    weak = dict(BASELINE, rs=70, ma200_slope_days=0, high_52w=200.0)
-    strong = dict(BASELINE, rs=99, ma200_slope_days=105, high_52w=150.0)
+    """3変数(MA200の21日傾き / 52週安値からの倍率 / 枯れ度)全部が上の銘柄が上に来る。"""
+    weak = dict(BASELINE, ma200_slope_21d=0.005, close=142.0, dryup_med_10_50=1.6)
+    strong = dict(BASELINE, ma200_slope_21d=0.09, close=155.0, dryup_med_10_50=0.5)
+    by_code = {"WEAK": weak, "STRONG": strong}
+    attach_score_percentiles(by_code, CONFIG)
     assert technical_score(weak, CONFIG) < technical_score(strong, CONFIG)
     assert 0 <= technical_score(weak, CONFIG) <= 100
     assert 0 <= technical_score(strong, CONFIG) <= 100
+
+
+def test_technical_score_ignores_rs_and_near_high():
+    """RS と 52週高値への近さは MUST 条件のまま。スコアには一切効かない
+    (2026-07-29改定。26年検証で足し戻すと期待Rが下がったため)。"""
+    a = dict(BASELINE, rs=70, high_52w=195.0)
+    b = dict(BASELINE, rs=99, high_52w=151.0)
+    by_code = {"A": a, "B": b}
+    attach_score_percentiles(by_code, CONFIG)
+    assert technical_score(a, CONFIG) == technical_score(b, CONFIG)
+
+
+def test_technical_score_is_none_without_cross_section():
+    """断面ランクを付けていない latest からは原理的に採点できない。"""
+    assert technical_score(dict(BASELINE), CONFIG) is None
+
+
+def test_attach_score_percentiles_skips_must_failures():
+    """母集団はその日のMUST通過銘柄のみ。落ちた銘柄は採点対象に入れない。"""
+    passer = dict(BASELINE)
+    failer = dict(BASELINE, rs=50)  # RS 70未満でMUST落ち
+    by_code = {"PASS": passer, "FAIL": failer}
+    attach_score_percentiles(by_code, CONFIG)
+    assert "score_pct" in passer
+    assert "score_pct" not in failer
+    assert technical_score(failer, CONFIG) is None
+
+
+def test_technical_score_is_equal_weighted():
+    """等ウェイト = 3成分パーセンタイルの単純平均。重みづけを持ち込まない。"""
+    latest = dict(BASELINE)
+    by_code = {"A": latest, "B": dict(BASELINE, ma200_slope_21d=0.9, close=159.0,
+                                      dryup_med_10_50=0.1)}
+    attach_score_percentiles(by_code, CONFIG)
+    pct = latest["score_pct"]
+    assert set(pct) == {"ma200_slope", "low52w_ratio", "dryup"}
+    assert technical_score(latest, CONFIG) == round(sum(pct.values()) / 3, 1)
 
 
 def _make_quarters(values: list[float], start_year: int = 2024, start_q: int = 1) -> list[dict]:
@@ -93,8 +143,15 @@ def test_compute_accel_slope_none_when_insufficient_quarters():
     assert compute_accel_slope(quarters, "eps") is None
 
 
+def _baseline_with_percentiles() -> dict:
+    by_code = {"X": dict(BASELINE)}
+    attach_score_percentiles(by_code, CONFIG)
+    return by_code["X"]
+
+
 def test_compute_full_score_partial_renormalizes_to_100_scale():
-    result = compute_full_score(BASELINE, eps_quarters=None, revenue_quarters=None, monthly_yoy=None)
+    latest = _baseline_with_percentiles()
+    result = compute_full_score(latest, eps_quarters=None, revenue_quarters=None, monthly_yoy=None)
     # only the technical component is available -> renormalized using tech weight only
     assert 0 <= result["full_score"] <= 100
     assert result["eps_accel_slope"] is None
@@ -104,7 +161,18 @@ def test_compute_full_score_partial_renormalizes_to_100_scale():
 def test_compute_full_score_full_coverage_within_100():
     quarters = _make_quarters([10, 10, 10, 10, 12, 15, 19, 25])
     result = compute_full_score(
-        BASELINE, eps_quarters=quarters, revenue_quarters=quarters, monthly_yoy=15.0
+        _baseline_with_percentiles(), eps_quarters=quarters, revenue_quarters=quarters,
+        monthly_yoy=15.0,
     )
     assert 0 <= result["full_score"] <= 100
     assert result["eps_accel_slope"] > 0
+
+
+def test_compute_full_score_falls_back_to_fundamentals_without_cross_section():
+    """断面が無い(tech_score が None)ときは技術成分を欠測として割り戻す。"""
+    quarters = _make_quarters([10, 10, 10, 10, 12, 15, 19, 25])
+    result = compute_full_score(
+        dict(BASELINE), eps_quarters=quarters, revenue_quarters=quarters, monthly_yoy=15.0
+    )
+    assert "technical" not in result["component_points"]
+    assert 0 <= result["full_score"] <= 100

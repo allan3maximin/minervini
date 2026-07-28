@@ -145,6 +145,45 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 - 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。**2026-07-22改定: full_score は表示専用**となり、ランキング(total_score の phase1 側)は全ティアとも tech_score を使う(純セットアップ品質で順位付け。RSが業績を織り込むためスコアへのファンダ加点は二重計上、という整理)。
 - **ファンダのサイズ係数 (2026-07-22追加)**: ファンダはランキングから外した代わりに、エントリー可否とロット管理に反映する。`fund_verdict_and_multiplier` (src/data/fundamentals.py) が Code33基準(confirmed_eps_yoy_min/confirmed_rev_yoy_min、`fund_coverage_tier` と同一閾値)で判定し、`fund_verdict`("pass"|"unknown"|"fail") と `fund_multiplier`(1.0|0.5|0.0) を report.json に出力。**fail=0 はエントリー取り止め**(セットアップ完成でも見送り)、unknown=0.5 はハーフサイズ、pass=1.0 はフルサイズ。フロントの株数計算機 (app.js renderSizingResult) が許容損失に乗数を掛け、係数0なら計算せず取り止め表示。カード一覧には F バッジ(fail=赤「F不合格 取止」/unknown=黄「F未確認 ½」)。旧report.json(フィールドなし)は係数1.0扱いで後方互換。資金額・リスク%はフロントのlocalStorage(`minervini_sizing_settings`)のみでリポジトリには置かない(公開リポジトリのため)。
 
+### tech_score(2026-07-29 全面作り直し)
+
+ランキングの主軸である `tech_score` を、固定重み＋ハードコード境界の合成点から
+**「その日のMUST通過銘柄の中での断面パーセンタイルの等ウェイト平均」** に作り替えた。
+実装は `src/screener/trend_template.py` の `attach_score_percentiles` / `technical_score`。
+
+使う変数は3つだけ(いずれも「大きいほど良い」向きに符号を揃える):
+
+| 成分キー | 生値 | 出所 |
+|---|---|---|
+| `ma200_slope` | `ma200_slope_21d` = MA200の21営業日上昇率 | `src/indicators.add_ma200_slope_21d` |
+| `low52w_ratio` | `close / low_52w` | latest から直接 |
+| `dryup` | `-dryup_med_10_50`(枯れているほど高得点) | `src/indicators.add_dryup_series` |
+
+**設計上の縛り(後から緩めないこと)**
+1. **等ウェイト**。重み探索はしない。26年フィットで2年フィットを置き換えるだけに
+   ならないための歯止め(Dawes 1979 の improper linear model の頑健性が根拠)。
+2. **正規化は当日の断面パーセンタイルのみ**。閾値・境界値を一切持たない。
+3. **母集団はその日のMUST通過銘柄に限定**。効果量をこの部分集合の中で測ったので、
+   採点も同じ部分集合で行わないと測定と運用がズレる。MUST落ち銘柄には `score_pct`
+   を付けず、`technical_score` は None を返す。
+
+**RS と near_high(52週高値からの近さ)はスコア寄与ゼロ。** MUSTフィルタとしては
+残す。「通過に必要な条件」と「通過者の順位付けに効く変数」は別物。26年の
+アブレーションでは、この2つをスコアに足し戻すと上位20%の期待Rが
++0.209R → +0.199R → +0.177R と単調に下がった。
+
+**呼び出し順序の制約**: `technical_score` は断面が要るので単独銘柄からは計算できない。
+`attach_score_percentiles(latest_by_code, config)` を先に通すこと。`screen_universe`
+は内部で呼ぶので pipeline 側の追加配線は不要。`scripts/dump_raw_vs_interp.py` は
+明示的に呼んでいる。
+
+**旧スコアの何が問題だったか**: RS 54.5% / near_high 27.3% / MA200上向き日数 18.2% の
+配分だったが、MUST通過集合の中ではこの3変数の期待Rの幅は 0.02〜0.03R しかなく、
+局面別の符号も 5勝5敗〜7勝4敗 のコイン投げだった。結果として旧スコアの上位20%
+(+0.117R)は自分の上位50%(+0.140R)にも無条件ベースライン(+0.126R)にも負けており、
+選別力が負だった。新スコアの上位20%は +0.209R、11局面中10局面で旧を上回る。
+検証の全文は log.md (140)。
+
 ### P1〜P4について(重要な経緯)
 - バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
 - **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。**2026-07-11以降 P2〜P4は report.json へ出力自体しない**(`src/pipeline.py`で`continue`するだけになり、軽量レコード組立関数`assemble_priority_record`ごと削除。転送量削減が目的)。
@@ -546,7 +585,9 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 
 - `universe`: size 1000, jpx_list_url (東証上場一覧xls), shares_sleep_sec 0.5
 - `data`: history_days 520, chunk_size 50, sleep_range [2,4], max_fail_ratio 0.10, topix_proxy_ticker "1306.T"
-- `trend_template`: rs_min 70, score_weights {rs:30, ma200_days:10, near_high:15, eps_accel:25, rev_accel:10, monthly:10}
+- `trend_template`: rs_min 70, score_weights {technical:55, eps_accel:25, rev_accel:10, monthly:10}
+  (2026-07-29改定: 技術面の内訳ウェイト rs/ma200_days/near_high は廃止。tech_score は
+  自由パラメータを持たない断面ランクになった。下記「tech_score」節を参照)
 - `priority`: high_dist_mid_pct 25, high_dist_bad_pct 35, rs_soft_min 60, p1_warn_threshold 3
 - `heatmap`: periods [1,5,20,60], strength/direction窓と閾値
 - `vcp`: zigzag/収縮/スコアの全パラメータ
