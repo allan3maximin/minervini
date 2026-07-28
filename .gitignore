@@ -21,10 +21,16 @@ docs/data/
 data/prices/
 
 # 研究用の長期価格ストア (2026-07-28〜)。tools/fetch_long_history.py が作る。
-# 2015年以降 × 全候補約3700銘柄で data/prices/ の10倍以上のサイズになるうえ、
+# 2000年以降 × 全候補約3700銘柄で data/prices/ の20倍以上のサイズになるうえ、
 # 運用には一切使わない(閾値検証専用)ので master には載せない。
 # 消えても再取得できる。ローカルにだけ置くこと。
 data/prices_long/
+
+# 閾値診断の中間行列 (2026-07-28〜)。tools/audit_thresholds_long.py が作る。
+# 日付×銘柄の密行列を .npy で十数本、2000年起点だと合計1.5GB超になる。
+# sandbox の / は空きが300MB弱しかなく /tmp に置けないのでここに逃がしている。
+# 消しても --stage build からやり直せば再生成できる。
+data/audit_cache/
 
 # publish-site アクションが公開ブランチ用に作る一時ファイル
 # (publish-price-cache はリポジトリ外の一時ディレクトリで作業するので対象外)

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""SEPA骨格7閾値の診断を、長期データ(2015〜)で再実行する(2026-07-28)。
+"""SEPA骨格7閾値の診断を、長期データ(2000〜)で再実行する(2026-07-28)。
 
 `tools/audit_sepa_thresholds.py` の2年版(log.md 134)を、
 `tools/fetch_long_history.py` が作る `data/prices_long/` に対して回す版。
 
 2年版との違いは3点だけ。閾値の最適値は**探索しない**方針は変えない。
 
-1. 期間が11年。前半/後半ではなく**相場局面**で切って符号の保存を見る。
-   2015-17 / 2018-19 / 2020 / 2021-22 / 2023-24 / 2025-26。
+1. 期間が長い。前半/後半ではなく**相場局面**で切って符号の保存を見る。
+   2000-02 / 2003-06 / 2007-09 / 2010-12 / 2013-14 / 2015-17 /
+   2018-19 / 2020 / 2021-22 / 2023-24 / 2025-26 の11局面。
    見たいのは「この閾値はどの局面でも効くのか」であって最適値ではない。
+   ★2026-07-28 に 2015年起点(6局面)から 2000年起点(11局面)へ拡張した。
+     大きく壊れる相場が 2020 の1回しか入っておらず、暴落局面で符号が
+     保たれるかを確かめようがなかったため。これで 2000-02 / 2007-09 /
+     2020 の3回入る。拡張の代償は生存バイアスの増大(下記)。
 
 2. ユニバースを**各日時点の売買代金**で再構築する。`data/universe.json`
    (2026年時点の上位1000)を使うと、2026年の流動性で2015年の銘柄を選ぶことになり、
@@ -21,11 +26,20 @@
 理由は log.md 2026-07-28(134)。固定-5%は低ボラ銘柄フィルタとして働き、
 Minerviniの非対称ペイオフと正反対の方向に最適化してしまう。
 
-★生存バイアスの注記★
+★生存バイアスの注記 — 2000年まで遡ると更に深刻になる★
 `data/prices_long/` は上場廃止銘柄を含まない(yfinanceが返さない)。
-標本外率は2015年で17.4%、2023年で5.4%(log.md 135)。日本の上場廃止は
-TOB/MBOが大きな比率を占め、これは勝ちトレードなので歪みの向きは自明でない。
-古い局面だけで見えた効果を単独の根拠にしないこと。
+標本外率は2015年で17.4%、2023年で5.4%(log.md 135)。2000年代前半は
+これより遥かに大きい(2013年より前は東証の会社数表と突合できないので
+未測定。`fetch_long_history.py --survivorship-report` 参照)。
+日本の上場廃止はTOB/MBOが大きな比率を占め、これは勝ちトレードなので
+歪みの向きは自明でない。
+
+**古い局面ほどデータ量は増えるが標本の代表性は落ちる。**
+2000-02 / 2003-06 の列は「符号が合っているか」の参考にとどめ、
+その列だけで効果を主張しないこと。単調性や符号の安定性を見るときは
+2010年以降で成立しているかを必ず併せて確認する。
+更に `--coverage-report` で分かる通り、古い年は yfinance の収載自体が
+薄く、「生存バイアス」とは別に「そもそも標本が小さい」問題もある。
 
 実行(メモリ3GB・bash45秒制限を想定して段階分割):
     python tools/audit_thresholds_long.py --stage build
@@ -39,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pickle
 import sys
 import time
@@ -49,7 +64,13 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 LONG_DIR = ROOT / "data" / "prices_long"
-WORK = Path("/tmp/mnv_long")
+
+# 中間行列の置き場。2026-07-28 に /tmp から data/ 配下へ移した。
+# 理由: 検証期間を2000年まで延ばすと日付が約2,850→約6,400行になり、
+# 中間の .npy が合計1.5GB超になる。sandbox の / は空きが300MB弱しかなく、
+# /tmp では確実に溢れる。プロジェクト側のディスクには十分な空きがある。
+# .gitignore 済み。消しても --stage build からやり直せば再生成できる。
+WORK = Path(os.environ.get("MNV_AUDIT_WORK", ROOT / "data" / "audit_cache"))
 
 MIN_TRADING_VALUE = 1e8  # config.yaml: universe.min_trading_value
 RS_LOOKBACKS = (63, 126, 189, 252)
@@ -60,7 +81,17 @@ DEDUP_BARS = 10
 # 相場局面。前半/後半の機械的2分割ではなく、性格の違う局面で切る。
 # 「どの局面でも符号が保たれるか」だけを見るためのもので、
 # 局面ごとに閾値を変えるためのものではない(それはカーブフィット)。
+# 2026-07-28: 取得起点を2000年に延ばしたのに合わせて前半5局面を追加。
+# これで「大きく壊れる相場」が 2000-02 / 2007-09 / 2020 の3回入る。
+# 2015年起点だとコロナの1回しかなく、暴落局面で符号が保たれるかを
+# 確かめようがなかった。区切りは事後の成績ではなく、事前に知られている
+# マクロイベント(バブル崩壊・リーマン・震災・政権交代)で引いている。
 REGIMES = [
+    ("2000-02 ITバブル崩壊", "2000-01-01", "2002-12-31"),
+    ("2003-06 小泉相場", "2003-01-01", "2006-12-31"),
+    ("2007-09 リーマン", "2007-01-01", "2009-12-31"),
+    ("2010-12 震災・超円高", "2010-01-01", "2012-12-31"),
+    ("2013-14 アベノミクス初期", "2013-01-01", "2014-12-31"),
     ("2015-17 アベノミクス中期", "2015-01-01", "2017-12-31"),
     ("2018-19 米中摩擦・年末急落", "2018-01-01", "2019-12-31"),
     ("2020    コロナ", "2020-01-01", "2020-12-31"),
@@ -102,7 +133,11 @@ def stage_build() -> None:
         if not np.isfinite(tv) or tv < MIN_TRADING_VALUE:
             continue
         d = d[["date", "close", "high", "low", "volume"]].copy()
-        d["ci"] = len(codes)
+        # 2000年起点だと縦持ちが約2,000万行になる。float64のままだと連結時に
+        # 1GB超を一時的に2重に持ってOOMする(sandbox 3.9GB)。ここで落としておく。
+        for c in ("close", "high", "low", "volume"):
+            d[c] = d[c].astype(np.float32)
+        d["ci"] = np.int32(len(codes))
         codes.append(p.stem)
         parts.append(d)
     print(f"  読み込み {len(codes)} 銘柄 採用 ({time.time()-t0:.0f}秒)", flush=True)
@@ -213,20 +248,26 @@ def stage_rs() -> None:
 # ---------------------------------------------------------------------------
 
 def stage_setups() -> None:
-    close = np.load(npy("close"))
-    high = np.load(npy("high"))
-    low = np.load(npy("low"))
-    vol = np.load(npy("volume"))
-    ma50 = np.load(npy("ma50"))
-    ma200 = np.load(npy("ma200"))
-    vma50 = np.load(npy("vma50"))
-    volmed10 = np.load(npy("volmed10"))
-    h20 = np.load(npy("h20"))
-    h250 = np.load(npy("h250"))
-    l250 = np.load(npy("l250"))
-    atr = np.load(npy("atr"))
-    rs = np.load(npy("rs"))
-    inuniv = np.load(npy("inuniv"))
+    # 2026-07-28: 全部を実体でロードすると 2000年起点では 13行列 × 約94MB = 1.2GB を
+    # 常駐で抱えることになる。ここは銘柄ごとに列を1本ずつ舐めるだけなので
+    # mmap で開いてOSのページキャッシュに任せる。速度はほぼ変わらない。
+    def L(name: str) -> np.ndarray:
+        return np.load(npy(name), mmap_mode="r")
+
+    close = L("close")
+    high = L("high")
+    low = L("low")
+    vol = L("volume")
+    ma50 = L("ma50")
+    ma200 = L("ma200")
+    vma50 = L("vma50")
+    volmed10 = L("volmed10")
+    h20 = L("h20")
+    h250 = L("h250")
+    l250 = L("l250")
+    atr = L("atr")
+    rs = L("rs")
+    inuniv = L("inuniv")
     dates = np.load(npy("dates"))
     codes = json.loads((WORK / "codes.json").read_text(encoding="utf-8"))
     T, N = close.shape
@@ -392,7 +433,7 @@ def stage_report() -> None:
                + [f"{edges[i]:g}-{edges[i+1]:g}" for i in range(len(edges) - 1)]
                + [f">={edges[-1]:g}"])
         head = f"  {'帯':>12s} {'n':>7s} {'期待R':>8s} " + "".join(
-            f"{nm.split()[0]:>9s}" for nm, _, _ in REGIMES)
+            f"{nm.split()[0]:>8s}" for nm, _, _ in REGIMES)
         print(head)
         for i in range(len(edges) + 1):
             m = (b == i) & np.isfinite(x) & np.isfinite(Rm)
@@ -402,7 +443,7 @@ def stage_report() -> None:
             row = f"  {lab[i]:>12s} {m.sum():7,d} {np.nanmean(Rm[m]):+8.3f} "
             for ri in range(len(REGIMES)):
                 mm = m & (reg_id == ri)
-                row += f"{np.nanmean(Rm[mm]):+9.2f}" if mm.sum() >= 30 else f"{'-':>9s}"
+                row += f"{np.nanmean(Rm[mm]):+8.2f}" if mm.sum() >= 30 else f"{'-':>8s}"
             print(row)
 
     rep("H1 rs_min = 70", "rs", [30, 50, 70, 85], "RS>=70")
@@ -486,7 +527,7 @@ def stage_report() -> None:
                + [f">={edges[-1]:g}"])
         print(f"\n--- {title}")
         print(f"  {'帯':>12s} {'n':>8s} {'到達率':>7s} {'無条件R':>9s} " + "".join(
-            f"{nm.split()[0]:>9s}" for nm, _, _ in REGIMES))
+            f"{nm.split()[0]:>8s}" for nm, _, _ in REGIMES))
         for i in range(len(edges) + 1):
             m = (b == i) & np.isfinite(x)
             if m.sum() < 100:
@@ -495,7 +536,7 @@ def stage_report() -> None:
             row = f"  {lab[i]:>12s} {m.sum():8,d} {isbo[m].mean():6.1%} {np.nanmean(Ru[m]):+9.3f} "
             for ri in range(len(REGIMES)):
                 mm = m & (a_reg == ri)
-                row += f"{np.nanmean(Ru[mm]):+9.2f}" if mm.sum() >= 50 else f"{'-':>9s}"
+                row += f"{np.nanmean(Ru[mm]):+8.2f}" if mm.sum() >= 50 else f"{'-':>8s}"
             print(row)
 
     # -----------------------------------------------------------------
