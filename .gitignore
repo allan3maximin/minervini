@@ -35,3 +35,7 @@ data/audit_cache/
 # publish-site アクションが公開ブランチ用に作る一時ファイル
 # (publish-price-cache はリポジトリ外の一時ディレクトリで作業するので対象外)
 docs/.git/
+
+# 閾値診断のレポート出力 (2026-07-28〜)。tools/audit_thresholds_long.py --stage report の生出力。
+# 再実行すれば再現できるのでコミットしない。
+audit27.txt
