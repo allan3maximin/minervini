@@ -75,6 +75,27 @@ UNIVERSE_PATH = ROOT / "data" / "universe.json"
 
 OHLCV = ["date", "open", "high", "low", "close", "volume"]
 
+# JPX公表「上場会社数の推移」年末値から、TOKYO PRO Market と外国会社を差し引いた
+# 内国会社数。本ストアの母集団(filter_domestic_common_stock)と比較可能な粒度。
+# 出典: https://www.jpx.co.jp/listing/co/tvdivq0000004xgb-att/tvdivq0000017jt9.pdf
+#   (合計 − TOKYO PRO Market − 外国会社)
+# 2022年4月に市場再編があるが、会社数の連続性には影響しない。
+JPX_DOMESTIC_YEAR_END = {
+    2013: 3417 - 6 - 11,
+    2014: 3468 - 9 - 12,
+    2015: 3511 - 14 - 9,
+    2016: 3539 - 16 - 6,
+    2017: 3602 - 22 - 6,
+    2018: 3655 - 29 - 5,
+    2019: 3706 - 33 - 4,
+    2020: 3756 - 41 - 4,
+    2021: 3822 - 47 - 6,
+    2022: 3869 - 64 - 6,
+    2023: 3933 - 90 - 6,
+    2024: 3975 - 133 - 6,
+    2025: 3945 - 163 - 5,
+}
+
 
 # ---------------------------------------------------------------------------
 # 銘柄リスト
@@ -340,16 +361,32 @@ def run_survivorship_report() -> None:
         for y in yrs:
             counts[int(y)] = counts.get(int(y), 0) + 1
 
-    latest = max(counts) if counts else None
-    base = counts.get(latest, 1)
-    print("年 | 標本に存在した銘柄数 | 直近年比")
+    # 基準年 = JPX実数を持つ最新年。その年のカバー率を「バイアスゼロ」とみなし、
+    # 各年のカバー率がそこからどれだけ落ちるかを『標本外率』とする。
+    # 基準年でも100%にならない(フィルタ差・Yahoo未収載)ので、その分は
+    # 生存バイアスではないため差し引く必要がある。
+    base_year = max(y for y in counts if y in JPX_DOMESTIC_YEAR_END)
+    base_cov = counts[base_year] / JPX_DOMESTIC_YEAR_END[base_year]
+
+    print(f"基準年 {base_year}: カバー率 {base_cov:.1%} (これをバイアス0とみなす)\n")
+    print("年   | 標本  | JPX実数 | カバー率 | 標本外率(生存バイアス)")
     for y in sorted(counts):
-        print(f"{y} | {counts[y]:>5} | {counts[y]/base:6.1%}")
+        real = JPX_DOMESTIC_YEAR_END.get(y)
+        if real is None:
+            print(f"{y} | {counts[y]:>5} |    -    |    -     |   - (JPX実数未登録)")
+            continue
+        cov = counts[y] / real
+        gap = 1.0 - cov / base_cov
+        print(f"{y} | {counts[y]:>5} | {real:>7} | {cov:7.1%}  | {gap:6.1%}")
     print(
-        "\n※ これは『生き残り組の中で当時上場していた数』。実際の当時の上場社数は\n"
-        "  JPXの月末上場銘柄数(公表値)で照合すること。差が消えた銘柄の規模。\n"
-        "  例: 2015年の実上場社数が3500で本表が2600なら、当時の約26%が標本外。\n"
-        "  その分だけ過去の勝率・期待値は上振れして見える。"
+        "\n※ 標本外率 = その年に上場していたが今日まで生き残らず、Yahooから消えた銘柄の割合。\n"
+        "  この割合だけ、遡った期間の成績は歪む。\n"
+        "\n★歪みの向きは自明ではない★\n"
+        "  日本の上場廃止はTOB/MBO/親子上場解消が大きな比率を占める。これらは\n"
+        "  「株価が上がって買われて消えた」=勝ちトレードなので、消えることで\n"
+        "  成績は下振れする。倒産・整理銘柄は逆に上振れさせる。\n"
+        "  向きを確定させたければ JPX『上場廃止銘柄一覧』の廃止理由内訳を当たること。\n"
+        "  それまでは『標本外率X%ぶんの不確実性がある』とだけ注記して結論を出すこと。"
     )
 
 
