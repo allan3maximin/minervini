@@ -510,12 +510,13 @@
   }
 
   // 汎用版: バッチ実行ページの各カードから任意のワークフローをトリガーする。
-  async function triggerWorkflow(buttonEl, workflowFile) {
+  // inputs は config.js の workflows[].inputs をそのまま透過させる(未指定なら送らない)。
+  async function triggerWorkflow(buttonEl, workflowFile, inputs) {
     buttonEl.disabled = true;
     const original = buttonEl.textContent;
     buttonEl.textContent = "実行をリクエスト中...";
     try {
-      await GH.dispatchWorkflow(workflowFile);
+      await GH.dispatchWorkflow(workflowFile, inputs);
       alert("実行をリクエストしました。GitHub Actionsの実行状況をご確認ください。");
       buttonEl.textContent = original;
       buttonEl.disabled = false;

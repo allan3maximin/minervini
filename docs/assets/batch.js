@@ -54,7 +54,7 @@
       btn.className = "secondary write-btn";
       btn.textContent = "実行";
       btn.addEventListener("click", () => {
-        window.MinerviniFundamentalsUI.triggerWorkflow(btn, wf.file);
+        window.MinerviniFundamentalsUI.triggerWorkflow(btn, wf.file, wf.inputs);
       });
       actions.appendChild(btn);
 

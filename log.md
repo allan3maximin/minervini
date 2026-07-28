@@ -21,6 +21,57 @@
 
 ---
 
+## 2026-07-29 (142): ダッシュボードの手動実行ボタンが force を送れず「押しても何も起きない」問題を修正
+
+ユーザー:「スコアとか銘柄とか変わってないな・・ DailyBat は動かしたんだけど」。
+
+### 何が起きていたか
+
+1. 当日の実 run (`1cfa48c7`, 16:09 UTC commit) は、パイプラインが15-30分かかる
+   ことから逆算して checkout が 15:54 以前 = 新スコアのコミット
+   (`fb7ce76e` 15:56 / `d4eec8b2` 16:04) より**前**。つまり旧コードで回っていた。
+2. そこでダッシュボードの実行ボタンを押し直しても、`daily.yml` の
+   「当日実行済みチェック」に引っかかって全ステップが skip される。
+   **skip されても job 自体は成功(緑)扱い**になるため、UI 上は成功したように
+   見えるのに実際は何も走っていない、という一番タチの悪い挙動になっていた。
+3. ガードを迂回する `inputs.force` は `daily.yml` に用意済みだったが、
+   `docs/assets/github-api.js` の `dispatchWorkflow` が
+   `body: JSON.stringify({ ref: branch })` 固定で **inputs を一切送れなかった**。
+   つまりダッシュボードからは構造的に force を指定できなかった。
+
+### 修正
+
+- `docs/assets/github-api.js`: `dispatchWorkflow(workflowFile, inputs)` に拡張。
+  inputs が非空のときだけ body に `inputs` を載せる。値は `String(v)` で文字列化
+  する(workflow_dispatch の inputs は文字列で届くため、boolean のまま送ると
+  ワークフロー側の `inputs.force == 'true'` 比較が成立しない)。
+  `dispatchDailyWorkflow()` は常に `{force: true}` を送るようにした
+  (「今すぐ再スクリーニング」を手で押した = 今すぐ回したい意思表示なので)。
+- `docs/assets/config.js`: `workflows[]` に `inputs` フィールドを追加し、
+  `daily.yml` にだけ `{ force: true }` を付けた。
+- `docs/assets/fundamentals-modal.js`: `triggerWorkflow(buttonEl, workflowFile, inputs)`
+  で透過。
+- `docs/assets/batch.js`: `wf.inputs` を渡すだけ。
+
+### 注意 (次に触る人向け)
+
+**inputs を宣言していないワークフローに inputs を送ると GitHub API は 422 を返す。**
+2026-07-29 時点で `force` を宣言しているのは `daily.yml` と `maezyou.yml` のみ。
+`universe.yml` / `jquants-backfill.yml` / `intraday-indices.yml` は inputs 宣言が
+ないので、config.js の該当エントリに `inputs` を書いてはいけない。
+(`backfill-breadth.yml` は `dry_run`、`margin_backfill.yml` は `weeks` を持つ。)
+
+`node --check` は4ファイルとも通過。
+
+### 新スコアが反映されたかの確認ポイント
+
+- MUST通過銘柄の tech_score 平均が **約50** になっていること(断面パーセンタイルの
+  等ウェイト平均なので構造上そうなる)。
+- **ちょうど 100.0** の銘柄が最低1つ存在すること。
+- スコア順が RS 順から目に見えて乖離していること(RS はスコアの重みゼロにしたため)。
+
+---
+
 ## 2026-07-29 (141): 投資法ページに「このツールの閾値と、実測したエッジ」を追加
 
 ユーザー:「このツールのエッジ閾値を読み物のところに追加しておいて。用語系は

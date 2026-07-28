@@ -214,19 +214,35 @@
   // ---------------------------------------------------------------------
 
   // 任意のワークフローファイルをworkflow_dispatchでトリガーする汎用版。
-  async function dispatchWorkflow(workflowFile) {
+  //
+  // inputs: そのワークフローが workflow_dispatch.inputs に宣言している値のみ渡せる。
+  // 宣言のないワークフローに inputs を送るとGitHub APIは422を返すので、呼び出し側
+  // (config.js の workflows[].inputs) でワークフローごとに指定すること。
+  // 未指定(null/空)のときは body に inputs キー自体を含めない。
+  async function dispatchWorkflow(workflowFile, inputs) {
     const { owner, repo, branch } = window.MINERVINI_CONFIG;
+    const body = { ref: branch };
+    if (inputs && Object.keys(inputs).length > 0) {
+      // workflow_dispatch の inputs は文字列で渡す必要がある(booleanのままだと
+      // ワークフロー側の `inputs.force == 'true'` 比較が成立しない)。
+      body.inputs = {};
+      for (const [k, v] of Object.entries(inputs)) body.inputs[k] = String(v);
+    }
     const resp = await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${workflowFile}/dispatches`, {
       method: "POST",
-      body: JSON.stringify({ ref: branch }),
+      body: JSON.stringify(body),
     });
     if (resp.status === 204) return true;
     throw await toApiError(resp);
   }
 
   // 後方互換: 既存の「今すぐ再スクリーニング」相当の呼び出し元向け薄いラッパ。
+  // 手動で押した = 「今すぐ回したい」意思表示なので、daily.yml の当日実行済み
+  // ガードは常に迂回する(force=true)。これがないと当日2回目以降は全ステップ
+  // skipされたうえでjobは成功(緑)扱いになり、押しても何も起きないのに成功して
+  // いるように見える -- 2026-07-28にこれで丸1日ハマった。
   async function dispatchDailyWorkflow() {
-    return dispatchWorkflow(window.MINERVINI_CONFIG.workflowFile);
+    return dispatchWorkflow(window.MINERVINI_CONFIG.workflowFile, { force: true });
   }
 
   // 直近の実行履歴一覧。公開リポジトリのActions実行履歴は認証不要で読める
