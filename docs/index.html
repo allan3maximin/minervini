@@ -167,7 +167,13 @@
       <button type="button" class="list-tool-btn" id="list-sort-btn" aria-label="並び替え">
         <i class="bi bi-sort-down"></i>
       </button>
-      <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="フィルタ">
+      <!-- 2026-07-30: フィルタを2本立てに。左(スライダー)= 毎朝押す「隠す」トグル、
+           右(じょうご)= たまに使う数値レンジ等の詳細フィルタ。 -->
+      <button type="button" class="list-tool-btn" id="list-simple-filter-btn" aria-label="かんたんフィルタ">
+        <i class="bi bi-sliders"></i>
+        <span id="simple-filter-badge" class="adhoc-filter-badge" hidden></span>
+      </button>
+      <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="詳細フィルタ">
         <i class="bi bi-funnel"></i>
         <span id="adhoc-filter-badge" class="adhoc-filter-badge" hidden></span>
       </button>
@@ -177,9 +183,26 @@
   <!-- ボトムシート: 共有バックドロップ + フィルタ/並び替え -->
   <div class="sheet-backdrop" id="list-sheet-backdrop" hidden></div>
 
-  <div class="bottom-sheet" id="filter-sheet" role="dialog" aria-label="フィルタ" hidden>
+  <!-- かんたんフィルタ: 「チェック=隠す」で意味を統一した4トグルだけ。
+       中身は app.js initSimpleFilter が SIMPLE_FILTER_TOGGLES から生成する。
+       適用ボタンは無く、押した瞬間に反映される。 -->
+  <div class="bottom-sheet" id="simple-filter-sheet" role="dialog" aria-label="かんたんフィルタ" hidden>
     <div class="sheet-head">
-      <span class="sheet-title"><i class="bi bi-funnel"></i> フィルタ <small>リロードで解除</small></span>
+      <span class="sheet-title"><i class="bi bi-sliders"></i> かんたんフィルタ <small>チェック=隠す</small></span>
+      <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="sheet-body">
+      <div class="lf-chips lf-chips-hide" id="slf-toggles"></div>
+      <p class="sheet-hint">
+        あと一歩・待機A/B・ブレイクは常に表示します。もっと細かく出し分けるときは
+        詳細フィルタ（じょうごのボタン）のステータスを使ってください。
+      </p>
+    </div>
+  </div>
+
+  <div class="bottom-sheet" id="filter-sheet" role="dialog" aria-label="詳細フィルタ" hidden>
+    <div class="sheet-head">
+      <span class="sheet-title"><i class="bi bi-funnel"></i> 詳細フィルタ <small>リロードで解除</small></span>
       <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <!-- 2026-07-27 UI刷新: 「下限/上限」を別ラベルの入力欄に分けると4行ぶんの
@@ -248,11 +271,14 @@
       <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="sheet-body">
-      <p class="sheet-hint" id="sort-sheet-hint">今開いているタブのカードを並び替えます。</p>
+      <p class="sheet-hint" id="sort-sheet-hint">一覧のカードを並び替えます。</p>
+      <!-- 枯れ度は「小さいほど枯れている=良い」ので、他と違い昇順で並ぶ
+           (符号反転は app.js CARD_SORTS.dryup 側で行う)。 -->
       <div class="segmented sort-options" id="list-sort-options" role="group" aria-label="並び替え">
         <button type="button" data-sort="total_score">スコア</button>
         <button type="button" data-sort="rs">RS</button>
         <button type="button" data-sort="change_pct">前日比</button>
+        <button type="button" data-sort="dryup">枯れ度</button>
       </div>
     </div>
   </div>

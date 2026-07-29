@@ -147,6 +147,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 表/グラフ・期間などの切替(segmented)。Dock/タブと同じ「ピル+アクセント」言語に統一。 */
 .segmented {
   display: inline-flex;
+  /* 選択肢が増えた時(並び替え4項目など)に横へはみ出さず折り返す */
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
@@ -1131,6 +1135,14 @@ a.nav-btn:hover { border-color: var(--link); }
   background: rgba(56, 189, 248, 0.34);
   color: #e0f2fe;
 }
+/* 2026-07-30: 閾値未達(枯れていない)も `DU x.xx` として同じ形で出す。
+   ただし注目させたくないので無彩色・枠なしの控えめ表示にする。 */
+.dryup-badge-flat {
+  background: transparent;
+  color: var(--text-dim);
+  font-weight: 400;
+  padding: 2px 0;
+}
 
 /* ファンダのサイズ係数バッジ(2026-07-22)。表示専用(ランキング非算入)。
    カード一覧に出すのは fail=取り止め(danger系)のみ。unknown用スタイルは
@@ -1525,6 +1537,19 @@ a.nav-btn:hover { border-color: var(--link); }
   padding-bottom: var(--dock-clear);
 }
 .view-section[hidden] { display: none; }
+/* 2026-07-30: 横揺れ(指で横に振れる)対策。CSSの規定で、overflow-y だけを
+   auto/scroll にした要素は overflow-x の visible が auto に化ける。つまり
+   「縦にスクロールさせたいだけ」の指定が、中身が1pxでもはみ出した瞬間に
+   横スクロールを生む。リスト/保有/設定で報告された横揺れの正体はこれ。
+   横スクロールを意図している要素(.table-scroll / .invest-table-wrap /
+   ヒートマップ / .stock-panels 等)はここに入れないこと。
+   touch-action は触らない(個別株・市況の横スワイプ操作を殺すため)。 */
+.view-section,
+.bottom-sheet,
+.batch-view .settings-subpanels {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
 /* 横スワイプパネルを持つビューは自前でレイアウトするため外側はスクロールさせない。
    実スクロールは内側のパネル/本文要素に任せるので、外側のこのpadding-bottomは
    ここでは不要 → 0に戻す(パネル側で個別にdock-clearを持たせる)。 */
@@ -1883,6 +1908,8 @@ a.nav-btn:hover { border-color: var(--link); }
   padding: 5px 10px;
   cursor: pointer;
   transition: background 0.1s;
+  /* 万一中身がはみ出しても親(#stock-list-body)に横スクロールを作らせない */
+  overflow: hidden;
 }
 .stock-card:hover { background: rgba(96, 165, 250, 0.06); }
 /* キーボードフォーカス(tabindex=0のカード/保有行)の可視化 */
@@ -1917,7 +1944,9 @@ a.nav-btn:hover { border-color: var(--link); }
   font-weight: 600;
 }
 .sc-code { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
-.sc-metrics { flex: 0 0 auto; display: flex; align-items: baseline; gap: 5px; }
+/* バッジが増えた日でもカード幅を超えないよう縮められるようにする(0 0 autoだと
+   はみ出して一覧が横スクロールする)。中身は各バッジがnowrapなので潰れはしない。 */
+.sc-metrics { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 5px; }
 
 /* 2026-07-27: 買重(信用買残)/F不(ファンダ不合格)バッジは短縮表記にしてSCチップの
    左横へ移動。3段目のバッジ行に置くとカード幅を食って折り返しが起きていた。 */
@@ -1962,6 +1991,9 @@ a.nav-btn:hover { border-color: var(--link); }
   text-align: right;
 }
 .sc-dryup { flex: 0 0 auto; white-space: nowrap; }
+/* 枯れ度が無い銘柄は「-」を出さず要素ごと消す(2026-07-30)。gapの分だけ
+   余白が残るのを防ぐため display:none にする。 */
+.sc-dryup:empty { display: none; }
 /* .sc-margin / .sc-fund は 2026-07-27 に .sc-flags(1段目)へ移動して廃止。 */
 
 /* ------------------------------------------------------- 投資法ページ */
@@ -2303,6 +2335,19 @@ a.nav-btn:hover { border-color: var(--link); }
   border-color: rgba(52, 211, 153, 0.55);
   color: var(--accent);
   font-weight: 600;
+}
+
+/* かんたんフィルタ (2026-07-30)。詳細フィルタのチップは「チェック=表示する」で
+   点灯が緑=良い状態だが、こちらは「チェック=隠す」なので同じ緑だと意味が逆に
+   読める。点灯色を琥珀(=間引いている状態)に変えて取り違えを防ぐ。
+   1行1項目にして、指で押す的を横幅いっぱいに広げる。 */
+.lf-chips-hide { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 12px; }
+.lf-chips-hide .lf-chip { justify-content: center; min-height: 40px; font-size: 13px; }
+.lf-chips-hide .lf-chip:has(input:checked),
+.lf-chips-hide .lf-chip.is-on {
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.5);
+  color: var(--warn);
 }
 
 .lf-actions {
@@ -2815,7 +2860,7 @@ a.nav-btn:hover { border-color: var(--link); }
   opacity: 1;
 }
 
-/* 状態バッジ(ブレイク/待機/禁追/あと一歩/形成中)。スコアに入らない情報を
+/* 状態バッジ(ブレイク/待機/追禁/あと一歩/形成中)。スコアに入らない情報を
    順位ではなくバッジで示すための行内ラベル。 */
 .sc-badge {
   display: inline-flex;

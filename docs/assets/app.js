@@ -449,15 +449,18 @@ function sectorStrengthHtml(s) {
   return `${escapeHtml(s.sector33)} ${badge}`;
 }
 
-// 枯れ度列: dryup_med_10_50 の値と2段階バッジ(枯れ気味/激枯れ)を表示する。
+// 枯れ度列: dryup_med_10_50 の値を `DU 0.50` 形式で表示する。
+// 2026-07-30: 「激枯れ/枯れ気味」の日本語ラベルは廃止し、指標名+数値の
+// 一貫表記(SC/RSチップと同じ読み方)に統一。強さは文字ではなく色の濃さで出す。
 // バッジ種別(dryup.badge)はサーバ側(build_site._build_dryup_badge)がconfig閾値で確定済み。
+// 値が無い銘柄は "-" ではなく空文字を返す(.sc-dryup:empty で要素ごと消える)。
 function dryupBadgeHtml(s) {
   const d = s.dryup;
-  if (!d || d.value == null) return "-";
-  const v = Number(d.value).toFixed(2);
-  if (d.badge === "extreme") return `<span class="dryup-badge dryup-badge-extreme">激枯れ ${v}</span>`;
-  if (d.badge === "dryup") return `<span class="dryup-badge dryup-badge-dry">枯れ気味 ${v}</span>`;
-  return v; // 閾値超(枯れていない)は数値のみ
+  if (!d || d.value == null) return "";
+  const v = `DU ${Number(d.value).toFixed(2)}`;
+  if (d.badge === "extreme") return `<span class="dryup-badge dryup-badge-extreme" title="激枯れ">${v}</span>`;
+  if (d.badge === "dryup") return `<span class="dryup-badge dryup-badge-dry" title="枯れ気味">${v}</span>`;
+  return `<span class="dryup-badge dryup-badge-flat" title="枯れていない">${v}</span>`;
 }
 
 // 需給(信用取引週末残高)バッジ。表示専用(総合スコアには一切使わない)。
@@ -494,10 +497,15 @@ function fundVerdictBadgeHtml(s, { detail = false } = {}) {
 
 // リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
 // カード側(renderCardList)に直書きし、ここには並び順の定義だけ残す。
+// 並びは全キー共通で「値の降順」。枯れ度(dryup.value)だけは小さいほど枯れて
+// いる=良いという向きなので、ここで符号を反転して「枯れている順」にする
+// (tech_score内の dryup 成分は score_variables の時点で反転済みだが、
+//  report.json の dryup.value は生値なのでフロント側で反転が要る)。
 const CARD_SORTS = {
   total_score: (s) => s.total_score ?? -Infinity,
   rs: (s) => s.rs ?? -Infinity,
   change_pct: (s) => s.change_pct ?? -Infinity,
+  dryup: (s) => (s.dryup && s.dryup.value != null ? -Number(s.dryup.value) : -Infinity),
 };
 
 // 並び替えチップ(リスト画面)。選択をlocalStorageに保存し、リロード後も維持する。
@@ -508,7 +516,7 @@ const CARD_SORTS = {
 const CARD_SORT_STORAGE_KEY = "minervini-card-sort";
 const CARD_SORT_PREF_KEY = "list";
 const CARD_SORT_DEFAULT = "total_score";
-const CARD_SORT_LABELS = { total_score: "スコア", rs: "RS", change_pct: "前日比" };
+const CARD_SORT_LABELS = { total_score: "スコア", rs: "RS", change_pct: "前日比", dryup: "枯れ度" };
 
 function getCardSortKey() {
   try {
@@ -1367,15 +1375,41 @@ function defaultShownStatuses() {
 function statusFilterCustom(f) {
   const st = f && f.showStatuses;
   if (!st) return false;
-  const def = defaultShownStatuses();
-  return st.length !== def.length || st.some((x) => !def.includes(x));
+  // 2026-07-30: 追禁(EXTENDED/STALE)の出し入れはシンプルフィルタ側のトグルが
+  // 担当するようになったので、詳細フィルタの「既定から変えたか」判定からは外す。
+  // 外さないと、シンプル側で追禁を出しただけで詳細側のバッジも点灯して二重計上に
+  // なる(実体の showStatuses は共有なので、片方で変えれば両方に効くのは正しい)。
+  const strip = (a) => a.filter((x) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(x));
+  const cur = strip(st);
+  const def = strip(defaultShownStatuses());
+  return cur.length !== def.length || cur.some((x) => !def.includes(x));
+}
+
+// ---- シンプルフィルタ (2026-07-30) -----------------------------------------
+// 詳細フィルタ(数値レンジ+市場+ステータス全種)は「たまに使う精密機械」で、
+// 毎朝のスキャンで触るのは「このノイズを消したい」という数個のトグルだけだった。
+// そこでボタンを2つに分け、日常操作をこちら側に出す。
+//
+// 4項目は**意味をすべて「チェック=隠す」に統一**する。詳細フィルタ側のチップは
+// 逆に「チェック=表示する」だが、あちらは全種を並べる一覧なのでその向きが自然で、
+// こちらは「消す」だけを選ぶ場なのでこの向きが自然。混ぜないよう別UIにしている。
+//
+// - 追禁だけは既定ON(=隠す)。従来の既定(EXTENDED/STALE 非表示)と同じ挙動を
+//   そのまま引き継ぐため。実体は showStatuses なので詳細フィルタと二重管理に
+//   ならない(片方で変えればもう片方の表示も追従する)。
+// - 進行度は「形成中を隠す」1個だけ。あと一歩/待機A/B/ブレイクは常に出す。
+//   細かい出し分けが要るときは詳細フィルタのステータスチップを使う。
+function emptySimpleFilter() {
+  return { hideFundFail: false, hideHeavyMargin: false, hideForming: false };
 }
 
 // リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
 // のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
 // showStatuses は一時フィルタ側にだけ持つ(恒久フィルタ=設定画面はユニバースの
 // 絞り込み専用で、ステータスは日々切り替える表示トグルのため)。
-let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses() };
+// シンプルフィルタの3つのbooleanも同じオブジェクトに同居させ、「リストの見え方を
+// 決める一時状態」を1箇所にまとめる。
+let adhocListFilter = { ...emptyListFilter(), ...emptySimpleFilter(), showStatuses: defaultShownStatuses() };
 
 // ---- フィルタフォームのチップUI共通ヘルパ (2026-07-27 UI刷新) --------------
 // 市場/ステータスの表示トグルは、小さいチェックボックスから「押せるチップ」に
@@ -1672,7 +1706,10 @@ function applyAdhocFilterFromForm() {
   if (statWrap) {
     statWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => stats.push(cb.value));
   }
+  // 2026-07-30: 丸ごと作り直すとシンプルフィルタ側の3トグルが消えるので、
+  // 既存の値の上に詳細フィルタの項目だけを重ねる。
   adhocListFilter = {
+    ...adhocListFilter,
     minClose: num("alf-min-close"),
     maxClose: num("alf-max-close"),
     minRs: num("alf-min-rs"),
@@ -1684,7 +1721,85 @@ function applyAdhocFilterFromForm() {
     showStatuses: statWrap ? stats : defaultShownStatuses(),
   };
   updateAdhocFilterBadge();
+  // 詳細フィルタ側でステータスを変えるとシンプル側の「追禁を隠す」の状態も
+  // 変わりうるので、チェックボックスを引き直す。
+  initSimpleFilter();
   rerenderStockList();
+}
+
+// ---- シンプルフィルタ (2026-07-30) のUI ------------------------------------
+// トグルは4つ。3つは adhocListFilter の boolean、追禁だけ showStatuses の
+// EXTENDED/STALE を出し入れする(詳細フィルタと実体を共有するため)。
+// 「適用」ボタンは置かず、押した瞬間に反映する(項目が4つしかない上に、
+// 毎朝ノイズを消すための道具なので往復させる理由がない)。
+
+// 追禁(EXTENDED/STALE)を隠している状態か。
+function simpleCooledHidden() {
+  const shown = adhocListFilter.showStatuses || defaultShownStatuses();
+  return !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.some((st) => shown.includes(st));
+}
+
+function setSimpleCooledHidden(hide) {
+  const shown = (adhocListFilter.showStatuses || defaultShownStatuses()).filter(
+    (st) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(st)
+  );
+  if (!hide) shown.push(...LIST_FILTER_DEFAULT_HIDDEN_STATUSES);
+  // STATUS_ORDER の並びを保つ(詳細フィルタのチップ同期で順序差が出ないように)。
+  adhocListFilter.showStatuses = STATUS_ORDER.filter((st) => shown.includes(st));
+}
+
+const SIMPLE_FILTER_TOGGLES = [
+  { key: "hideFundFail", label: "F不を隠す", title: "ファンダ不合格 (エントリー取り止め)" },
+  { key: "hideHeavyMargin", label: "買重を隠す", title: "信用買残が重い" },
+  { key: "hideForming", label: "形成中を隠す", title: "セットアップ形成中 (あと一歩・待機・ブレイクは残る)" },
+  { key: "cooled", label: "追禁を隠す", title: "追いかけ禁止 (伸びすぎ / ブレイク鮮度切れ)" },
+];
+
+function simpleToggleValue(key) {
+  return key === "cooled" ? simpleCooledHidden() : !!adhocListFilter[key];
+}
+
+function initSimpleFilter() {
+  const wrap = document.getElementById("slf-toggles");
+  if (!wrap) return;
+  if (!wrap.dataset.built) {
+    wrap.dataset.built = "1";
+    wrap.innerHTML = SIMPLE_FILTER_TOGGLES.map(
+      (t) =>
+        `<label class="lf-chip" title="${escapeHtml(t.title)}"><input type="checkbox" data-key="${t.key}"><span>${escapeHtml(t.label)}</span></label>`
+    ).join("");
+    wrap.addEventListener("change", (e) => {
+      const cb = e.target.closest("input[type=checkbox][data-key]");
+      if (!cb) return;
+      const key = cb.dataset.key;
+      if (key === "cooled") setSimpleCooledHidden(cb.checked);
+      else adhocListFilter[key] = cb.checked;
+      syncChipStates(wrap);
+      updateSimpleFilterBadge();
+      updateAdhocFilterBadge(); // 追禁は showStatuses を触るので詳細側の数も更新
+      rerenderStockList();
+    });
+  }
+  // ビューを離れて戻ったとき・詳細フィルタ側で追禁を出したときのために毎回同期。
+  wrap.querySelectorAll("input[type=checkbox][data-key]").forEach((cb) => {
+    cb.checked = simpleToggleValue(cb.dataset.key);
+  });
+  syncChipStates(wrap);
+  updateSimpleFilterBadge();
+}
+
+// シンプルフィルタボタンのバッジ。既定(追禁だけ隠す)からの差分を数える。
+// 追禁を隠している状態は既定なので数えない(常時点灯するとバッジの意味が無い)。
+function updateSimpleFilterBadge() {
+  const badge = document.getElementById("simple-filter-badge");
+  if (!badge) return;
+  let n = 0;
+  if (adhocListFilter.hideFundFail) n++;
+  if (adhocListFilter.hideHeavyMargin) n++;
+  if (adhocListFilter.hideForming) n++;
+  if (!simpleCooledHidden()) n++; // 既定と違う=追禁を出している
+  badge.textContent = n;
+  badge.hidden = n === 0;
 }
 
 // フィルタバーのsummaryに出す「適用中」バッジ。有効な項目数を数字で出す。
@@ -1747,12 +1862,30 @@ function statusVisible(status) {
   return status == null || shownStatuses().includes(status);
 }
 
+// カードの状態バッジが「形成中」になる銘柄か。statusBadgeHtml と同じ判定順で
+// 書く(あちらを変えたらこちらも変える。ズレるとフィルタと表示が食い違う)。
+function cardBadgeIsForming(s) {
+  if (STATUS_BADGE[s.status]) return false;
+  const g = setupStageGroupKey(s);
+  return !!g && g !== "near";
+}
+
+// シンプルフィルタの3トグル。すべて「true = 隠す」。
+function simpleFilterVisible(s) {
+  const f = adhocListFilter || {};
+  if (f.hideFundFail && s.fund_verdict === "fail") return false;
+  if (f.hideHeavyMargin && s.margin && s.margin.badge === "heavy_buy") return false;
+  if (f.hideForming && cardBadgeIsForming(s)) return false;
+  return true;
+}
+
 function applyListFilter(stocks) {
   const perm = loadListFilters();
   const adhoc = adhocListFilter;
-  // ステータスの出し分けは「除外件数」には数えない。既定で追いかけ禁止を
-  // 隠している状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
-  const visible = stocks.filter((s) => statusVisible(s.status));
+  // ステータス/シンプルフィルタの出し分けは「除外件数」には数えない。既定で
+  // 追禁を隠している状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
+  // 「隠す」トグルは自分で押した結果が見えていれば十分で、件数告知は不要。
+  const visible = stocks.filter((s) => statusVisible(s.status) && simpleFilterVisible(s));
   if (!listFilterActive(perm) && !listFilterActive(adhoc)) {
     return { kept: visible, excluded: 0 };
   }
@@ -1915,16 +2048,19 @@ function syncSortSheet() {
 // 呼ばれるが、イベント登録は初回のみ(dataset.wired)。ラベル/バッジ同期は毎回。
 function initListTools() {
   const filterBtn = document.getElementById("list-filter-btn");
+  const simpleBtn = document.getElementById("list-simple-filter-btn");
   const sortBtn = document.getElementById("list-sort-btn");
   const backdrop = document.getElementById("list-sheet-backdrop");
   const filterSheet = document.getElementById("filter-sheet");
+  const simpleSheet = document.getElementById("simple-filter-sheet");
   const sortSheet = document.getElementById("sort-sheet");
   if (!filterBtn || !sortBtn || !backdrop) return;
 
   const closeSheets = () => {
     backdrop.hidden = true;
-    if (filterSheet) { filterSheet.classList.remove("open"); filterSheet.hidden = true; }
-    if (sortSheet) { sortSheet.classList.remove("open"); sortSheet.hidden = true; }
+    [filterSheet, simpleSheet, sortSheet].forEach((sheet) => {
+      if (sheet) { sheet.classList.remove("open"); sheet.hidden = true; }
+    });
   };
   const openSheet = (sheet) => {
     if (!sheet) return;
@@ -1941,6 +2077,9 @@ function initListTools() {
   filterBtn.dataset.wired = "1";
 
   filterBtn.addEventListener("click", () => openSheet(filterSheet));
+  // シンプルフィルタは開くたびに現在値を引き直す(詳細フィルタ側で追禁を
+  // 出し入れした直後でも表示が食い違わないように)。
+  if (simpleBtn) simpleBtn.addEventListener("click", () => { initSimpleFilter(); openSheet(simpleSheet); });
   sortBtn.addEventListener("click", () => { syncSortSheet(); openSheet(sortSheet); });
   backdrop.addEventListener("click", closeSheets);
   document.querySelectorAll("#view-stocklist .sheet-close").forEach((b) => {
@@ -1980,14 +2119,14 @@ function changePctHtml(s) {
 
 // 状態バッジ(2026-07-29)。ステータス/セットアップ進行度を1個のバッジに畳む。
 // スコアには一切入らない情報なので、順位ではなくバッジで示すのが役割分担。
-// 追いかけ禁止(EXTENDED/STALE)は「禁追」。
+// 追いかけ禁止(EXTENDED/STALE)は「追禁」。
 const STATUS_BADGE = {
   BREAKOUT: { text: "ブレイク", cls: "sc-badge-breakout" },
   BREAKOUT_WEAK: { text: "ブレイク弱", cls: "sc-badge-breakout-weak" },
   WATCH_A: { text: "待機A", cls: "sc-badge-watch" },
   WATCH_B: { text: "待機B", cls: "sc-badge-watch" },
-  EXTENDED: { text: "禁追", cls: "sc-badge-cooled" },
-  STALE: { text: "禁追", cls: "sc-badge-cooled" },
+  EXTENDED: { text: "追禁", cls: "sc-badge-cooled" },
+  STALE: { text: "追禁", cls: "sc-badge-cooled" },
 };
 
 function statusBadgeHtml(s) {
@@ -2565,6 +2704,7 @@ function wireTabSlide(tabs, tabSelector, activate) {
 function initListView() {
   if (!document.getElementById("stock-list-body")) return;
   initAdhocFilter();
+  initSimpleFilter();
   initListTools();
 }
 

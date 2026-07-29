@@ -134,12 +134,12 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   YoY計算不能(前年比較対象なし/前年値≤0)は強度未確認として pool 止まり。判定は `fund_coverage_tier` (src/data/fundamentals.py)。
 - `tier: "pool"` → 〔候補プール〕VCPセットアップあり、ファンダなし **または強度基準未達** (`fund_strong: false` → フロントで「ファンダ弱」表示)
 - `tier: "watchlist"` → 〔候補〕トレンドテンプレート8条件合格 (セットアップ形成待ち)
-- `tier: "cooled"` → 〔禁追〕ブレイク済みで手遅れ (EXTENDED=伸びすぎ / STALE=鮮度切れ)。
+- `tier: "cooled"` → 〔追禁〕ブレイク済みで手遅れ (EXTENDED=伸びすぎ / STALE=鮮度切れ)。
   watchlist とは意味が違う(watchlist=形成待ち、cooled=ブレイク後)ので別ティアで管理する。
   ピボット・損切りレコードは保持(チャート表示・クールダウン管理に必要)。
   **表示可否はステータスフィルタが決める** (2026-07-27改定: 折りたたみ `<details>` は撤廃)。
   既定で EXTENDED/STALE のチェックが外れているため通常は一覧に出ず、ボトムシートで
-  チェックを入れると出る。出たときは行を淡色(`.sc-cooled`)にし「禁追」バッジを付ける。
+  チェックを入れると出る。出たときは行を淡色(`.sc-cooled`)にし「追禁」バッジを付ける。
   **スコアにはペナルティを一切課さない**(実測エッジの無い減点は指標の意味を濁らせるため)。
   `ACTIONABLE_ENTRY_STATUSES` からは外れ、`COOLED_ENTRY_STATUSES = {"EXTENDED", "STALE"}` で管理。
 
@@ -151,7 +151,7 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   セットアップ未成立は上限50に沈み、**順序そのものが両者を分離する**。
   `_sort_key` は `(-total_score, status_rank, code)` の単一軸。`TIER_ORDER` /
   `SECTOR_STRENGTH_ORDER` は意味の序列の記録として残っているが、ソートには使っていない。
-  ティア・セットアップ進行度・禁追はすべてフロントの行内バッジで表す。詳細は log.md (143)。
+  ティア・セットアップ進行度・追禁はすべてフロントの行内バッジで表す。詳細は log.md (143)。
 - 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。**2026-07-22改定: full_score は表示専用**となり、ランキング(total_score の phase1 側)は全ティアとも tech_score を使う(純セットアップ品質で順位付け。RSが業績を織り込むためスコアへのファンダ加点は二重計上、という整理)。
 - **ファンダのサイズ係数 (2026-07-22追加)**: ファンダはランキングから外した代わりに、エントリー可否とロット管理に反映する。`fund_verdict_and_multiplier` (src/data/fundamentals.py) が Code33基準(confirmed_eps_yoy_min/confirmed_rev_yoy_min、`fund_coverage_tier` と同一閾値)で判定し、`fund_verdict`("pass"|"unknown"|"fail") と `fund_multiplier`(1.0|0.5|0.0) を report.json に出力。**fail=0 はエントリー取り止め**(セットアップ完成でも見送り)、unknown=0.5 はハーフサイズ、pass=1.0 はフルサイズ。フロントの株数計算機 (app.js renderSizingResult) が許容損失に乗数を掛け、係数0なら計算せず取り止め表示。カード一覧には F バッジ(fail=赤「F不合格 取止」/unknown=黄「F未確認 ½」)。旧report.json(フィールドなし)は係数1.0扱いで後方互換。資金額・リスク%はフロントのlocalStorage(`minervini_sizing_settings`)のみでリポジトリには置かない(公開リポジトリのため)。
 
@@ -641,6 +641,15 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   必要があるためmeta refreshではなくJS実装)。
 - `showView(hash)` の先頭で `window.scrollTo(0, 0)` を実行(2026-07-08追加)。SPA化により前ビューの
   スクロール位置がそのまま残ってしまう(ページ遷移してもブラウザが自動で先頭に戻さない)問題への対応。
+- **縦スクロールコンテナには `overflow-x: hidden` を明示すること (2026-07-30)**。CSSの規定で
+  `overflow-y` を auto/scroll にすると `overflow-x: visible` は `auto` に化けるため、
+  「縦だけスクロールさせたい」つもりの指定が、中身が1pxはみ出した瞬間に横スクロール
+  (画面が指で横に揺れる)を生む。リスト/保有/設定で実際に起きた。現在
+  `.view-section` / `.bottom-sheet` / `.batch-view .settings-subpanels` /
+  `#stock-list-body` に明示済み。
+  - **横スクロールが意図的な要素は対象外**: `.table-scroll` / `.invest-table-wrap` /
+    ヒートマップ / 個別株・市況の横スワイプパネル。
+  - 塞ぐのに `touch-action: pan-y` は使わないこと。横スワイプ操作を殺す。
 
 ### ダッシュボード (view-dashboard)
 - `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
@@ -661,14 +670,22 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - `renderCardList(stocks)`: **呼び出し側が並べ替え済みの前提**で、内部ソートはしない。
   1枚のカード = スコア / コード・銘柄名 / 終値・前日比 / バッジ行 (`.sc-flags`)。
   - バッジ行 = `statusBadgeHtml(s)` + `marginBadgeHtml(s.margin)` + `fundVerdictBadgeHtml(s)`。
-  - `statusBadgeHtml`: `STATUS_BADGE` に一致すれば〔ブレイク〕〔ブレイク弱〕〔待機A/B〕〔禁追〕。
+  - `statusBadgeHtml`: `STATUS_BADGE` に一致すれば〔ブレイク〕〔ブレイク弱〕〔待機A/B〕〔追禁〕。
     無ければ `setupStageGroupKey(s)` から〔あと一歩〕/〔形成中〕。
   - `s.tier === "cooled"` のカードに `.sc-cooled`(opacity 0.55、hover/focusで1.0)を付ける。
     **スコアは減点しない**(理由は「ティアとフロント表示の対応」節)。
   - チャートJSON未生成(`has_chart === false`)はクリック不可。それ以外は
     `window.location.hash = "stock/" + code` で view-stock へ遷移。
-- 並び替えキーは `CARD_SORTS`(`total_score` / `rs` / `change_pct`)、既定 `total_score`。
+  - 枯れ度は `dryupBadgeHtml` が `DU 0.50` 形式で出す (2026-07-30改定。旧:〔激枯れ/枯れ気味〕)。
+    強弱は文字ではなく背景の濃さ (`-extreme` > `-dry` > `-flat`=無彩色) で表す。
+    **値が無い銘柄は空文字を返す**(`"-"` を出さない)。`.sc-dryup:empty { display:none }`
+    で要素ごと消えるので gap の余白も残らない。
+- 並び替えキーは `CARD_SORTS`(`total_score` / `rs` / `change_pct` / `dryup`)、既定 `total_score`。
   localStorage `minervini-card-sort` に**ティア別ではなく単一キー `list` で**保存する。
+  - **`dryup` だけ符号を反転している**。他は「大きいほど良い」で降順に並べるが、
+    `dryup.value` は生値(小さいほど枯れている=良い)。tech_score 内の dryup 成分は
+    `score_variables` の時点で反転済みだが report.json の値は生のままなので、
+    フロント側で `-value` にして向きを揃える。
 - `rerenderStockList()`: フィルタ/並び替え変更時に `reportCache` から引き直して再描画。
 - **一覧フィルタは2層 (恒久 + アドホック、AND結合)**: 恒久=設定画面、localStorage
   `minervini_list_filters`。アドホック=ボトムシート、メモリ上の `adhocListFilter`(リロードで消える)。
@@ -681,6 +698,28 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
     `applyListFilter` の早期returnより**前**で filter する。(b) 除外件数 `excluded` には
     **含めない**(含めると「フィルタでN件を除外中」バナーが常時点灯する)。同じ理由で
     `statusFilterCustom()` は全ステータスではなく**既定セット**との差分でカスタム判定する。
+- **UIはシンプル/詳細の2ボタン構成 (2026-07-30追加)**。詳細フィルタ(`#filter-sheet`、
+  数値レンジ・市場・ステータス全種)は従来のまま。左に「かんたんフィルタ」
+  (`#list-simple-filter-btn` → `#simple-filter-sheet`)を追加し、毎朝使う
+  「このノイズを消す」操作だけを出した。経緯は log.md (145)。
+  - 4トグルは**すべて「チェック=隠す」で意味を統一**する(詳細側のチップは逆に
+    「チェック=表示する」。取り違え防止に点灯色を緑ではなく琥珀にしてある)。
+    中身は `SIMPLE_FILTER_TOGGLES` から `initSimpleFilter` が生成する。
+  - `hideFundFail` / `hideHeavyMargin` / `hideForming` は `adhocListFilter` の
+    boolean。既定は全て false(=表示する)。判定は `simpleFilterVisible` が行い、
+    ステータスと同じく `applyListFilter` の**前段**で落とす(=`excluded` に数えない)。
+  - `hideForming` の判定 `cardBadgeIsForming` は **`statusBadgeHtml` と同じ順序で
+    書くこと**。ズレるとバッジ表示とフィルタの対象が食い違う。あと一歩・待機A/B・
+    ブレイクは対象外(進行度の細かい出し分けは詳細フィルタの仕事)。
+  - **「追禁を隠す」だけは専用フィールドを持たず `showStatuses` を実体にする**
+    (既定ON=隠す)。専用booleanを足すと詳細フィルタのステータスチップと二重管理に
+    なり、片方だけ変えたときに矛盾する。共有していれば追従が自動で成立する。
+    代わりに `statusFilterCustom()` は EXTENDED/STALE を除いて比較し、2つのボタンの
+    バッジが同じ操作を二重に数えないようにしている。
+  - かんたんフィルタに「適用」ボタンは無く、押した瞬間に反映する。
+  - `applyAdhocFilterFromForm` は `adhocListFilter` を組み立て直すので、
+    **先頭の `...adhocListFilter` を消さないこと**。消すと詳細フィルタの「適用」を
+    押すたびにシンプル側の3トグルがリセットされる。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
 - `renderMarketSignal(breadth)` (2026-07-11追加、2026-07-18に地合い詳細パネル+
   market_score/score_trendバッジ+スパークライン2本を追加): breadth.jsonのhistory
