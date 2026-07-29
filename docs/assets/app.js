@@ -500,31 +500,35 @@ const CARD_SORTS = {
   change_pct: (s) => s.change_pct ?? -Infinity,
 };
 
-// 並び替えチップ(リスト画面)。tierごとの選択をlocalStorageに保存し、
-// リロード後も維持する。既定は従来の並び(本命/候補=総合スコア、監視=RS)。
+// 並び替えチップ(リスト画面)。選択をlocalStorageに保存し、リロード後も維持する。
+// 2026-07-29: 本命/候補/監視タブを廃止して単一リストにしたので、ティアごとの
+// 選択も廃止し1つのキー("list")に集約した。既定は総合スコア。
+// 旧既定は監視タブだけ "rs" だったが、RSはスコア寄与ゼロ(MUSTフィルタ専用)に
+// 作り替えたので既定ソートに残す理由がない。log.md (143)。
 const CARD_SORT_STORAGE_KEY = "minervini-card-sort";
-const CARD_SORT_DEFAULTS = { confirmed: "total_score", pool: "total_score", watchlist: "rs" };
+const CARD_SORT_PREF_KEY = "list";
+const CARD_SORT_DEFAULT = "total_score";
 const CARD_SORT_LABELS = { total_score: "スコア", rs: "RS", change_pct: "前日比" };
 
-function getCardSortKey(tier) {
+function getCardSortKey() {
   try {
     const prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
-    const key = prefs[tier];
+    const key = prefs[CARD_SORT_PREF_KEY];
     if (key && CARD_SORTS[key]) return key;
   } catch (e) {
     /* 破損データ・プライベートブラウズ等は既定値へフォールバック */
   }
-  return CARD_SORT_DEFAULTS[tier] || "total_score";
+  return CARD_SORT_DEFAULT;
 }
 
-function setCardSortKey(tier, key) {
+function setCardSortKey(key) {
   let prefs = {};
   try {
     prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
   } catch (e) {
     prefs = {};
   }
-  prefs[tier] = key;
+  prefs[CARD_SORT_PREF_KEY] = key;
   try {
     localStorage.setItem(CARD_SORT_STORAGE_KEY, JSON.stringify(prefs));
   } catch (e) {
@@ -625,10 +629,7 @@ async function initDashboard() {
   renderMarketOverview(indices);
   renderBreadth(breadth, report);
   renderP1Warning(report);
-  renderTier(report, "confirmed", "confirmed-tier-body");
-  renderTier(report, "pool", "pool-tier-body");
-  renderPriorityTier(report, "watchlist-tier-body");
-  renderCooledTier(report);
+  renderStockList(report);
   wireSessionReview(report, indices, breadth, positionsData);
   startLiveIndices();
 }
@@ -1335,9 +1336,9 @@ function renderP1Warning(report) {
 
 // ---------------------------------------------------------------------------
 // 銘柄リストの永続フィルタ (設定画面で設定 → 次に変更するまでリストに適用)
-// localStorage に保存し、本命/候補/監視の全ティアで renderTier /
-// renderPriorityTier が描画前に適用する。空欄の項目は無視。指標が欠損(null)の
-// 銘柄はそのフィルタでは除外しない(データ無しで黙って消えると気づけないため)。
+// localStorage に保存し、renderStockList が描画前に適用する。空欄の項目は無視。
+// 指標が欠損(null)の銘柄はそのフィルタでは除外しない(データ無しで黙って消えると
+// 気づけないため)。
 // ---------------------------------------------------------------------------
 const LIST_FILTER_SETTINGS_KEY = "minervini_list_filters";
 const LIST_FILTER_SEGMENTS = ["プライム", "スタンダード", "グロース"];
@@ -1375,10 +1376,6 @@ function statusFilterCustom(f) {
 // showStatuses は一時フィルタ側にだけ持つ(恒久フィルタ=設定画面はユニバースの
 // 絞り込み専用で、ステータスは日々切り替える表示トグルのため)。
 let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses() };
-
-// 個別株画面の前後ナビが辿るリストのティア(本命/候補/監視)。カードから遷移した
-// ときに記録し、個別株画面の ＜/＞ で同ティアのフィルタ済み並び順を前後移動する。
-let listNavTier = null;
 
 // ---- フィルタフォームのチップUI共通ヘルパ (2026-07-27 UI刷新) --------------
 // 市場/ステータスの表示トグルは、小さいチェックボックスから「押せるチップ」に
@@ -1521,12 +1518,8 @@ function initListFilterSettings() {
   const persistAndRerender = () => {
     saveListFilters(readForm());
     updateListFilterStatus();
-    // 全ティアを再描画(reportCacheがあれば)。リスト非表示中でも裏で更新。
-    if (reportCache && reportCache.data) {
-      rerenderTierBody("confirmed");
-      rerenderTierBody("pool");
-      rerenderTierBody("watchlist");
-    }
+    // リストを再描画。リスト非表示中でも裏で更新しておく。
+    rerenderStockList();
   };
 
   form.addEventListener("change", persistAndRerender);
@@ -1691,11 +1684,7 @@ function applyAdhocFilterFromForm() {
     showStatuses: statWrap ? stats : defaultShownStatuses(),
   };
   updateAdhocFilterBadge();
-  if (reportCache && reportCache.data) {
-    rerenderTierBody("confirmed");
-    rerenderTierBody("pool");
-    rerenderTierBody("watchlist");
-  }
+  rerenderStockList();
 }
 
 // フィルタバーのsummaryに出す「適用中」バッジ。有効な項目数を数字で出す。
@@ -1784,11 +1773,40 @@ function listFilterNoteEl(excluded) {
   return p;
 }
 
-function renderTier(report, tier, containerId) {
-  const container = document.getElementById(containerId);
+// ---------------------------------------------------------------------------
+// リスト画面(2026-07-29改定): 本命/候補/監視の3タブ + ステータス別セクション分割を
+// 全部やめ、総合スコア降順のフラットな1リストにした。
+//
+// 統合できた理由: combined_score が VCPスコア欠損を 0 扱いに変わり(scoring.py)、
+// 「テクニカル70・VCP未成立」の銘柄は total_score 50 に沈むようになった。つまり
+// 順序そのものがティアの役割を果たすので、ティアで隔離する必要がなくなった。
+// ティア/セットアップ進行度/追いかけ禁止は行内のバッジで表す。log.md (143)。
+// ---------------------------------------------------------------------------
+
+// フィルタ適用済み・現在のソートキー順の銘柄配列。表示と前後ナビで同じ関数を使い、
+// 「画面の並びとスワイプの並びがズレる」事故を構造的に防ぐ。
+function visibleListStocks(report) {
+  const { kept, excluded } = applyListFilter(report.stocks || []);
+  const sortVal = CARD_SORTS[getCardSortKey()] || CARD_SORTS.total_score;
+  const sorted = [...kept].sort((a, b) => {
+    const av = sortVal(a);
+    const bv = sortVal(b);
+    if (av !== bv) return av > bv ? -1 : 1;
+    // 同点は「ブレイク > 待機 > 形成中」の順(build_site._sort_key と同じ考え方)。
+    const ar = STATUS_ORDER.indexOf(a.status);
+    const br = STATUS_ORDER.indexOf(b.status);
+    if (ar !== br) return (ar < 0 ? 99 : ar) - (br < 0 ? 99 : br);
+    return String(a.code || "").localeCompare(String(b.code || ""));
+  });
+  return { stocks: sorted, excluded };
+}
+
+function renderStockList(report) {
+  const container = document.getElementById("stock-list-body");
+  if (!container) return;
   container.innerHTML = "";
-  const all = report.stocks.filter((s) => s.tier === tier);
-  const { kept: stocks, excluded } = applyListFilter(all);
+  const { stocks, excluded } = visibleListStocks(report);
+  updateListSummary(stocks.length, excluded);
   const note = listFilterNoteEl(excluded);
   if (note) container.appendChild(note);
   if (!stocks.length) {
@@ -1798,116 +1816,50 @@ function renderTier(report, tier, containerId) {
     container.appendChild(empty);
     return;
   }
-  const sortKey = getCardSortKey(tier);
-  for (const status of STATUS_ORDER) {
-    const group = stocks.filter((s) => s.status === status);
-    if (!group.length) continue;
-    container.appendChild(renderStatusSection(status, group, tier, sortKey));
-  }
+  container.appendChild(renderCardList(stocks));
 }
 
-function renderStatusSection(status, stocks, tier, sortKey) {
-  const section = document.createElement("div");
-  section.className = "status-section status-" + status;
-  const h3 = document.createElement("h3");
-  h3.textContent = `${STATUS_LABELS[status] || status} (${stocks.length})`;
-  section.appendChild(h3);
-  section.appendChild(renderCardList(stocks, tier, { initialSortKey: sortKey }));
-  return section;
+// ツールバー左の件数表示。タブが無くなって「今何件見ているか」の手掛かりが
+// 消えたので、その代わりに出す。
+function updateListSummary(shown, excluded) {
+  const el = document.getElementById("list-summary");
+  if (!el) return;
+  el.textContent = excluded ? `${shown}件 (${excluded}件除外)` : `${shown}件`;
 }
 
 // ---------------------------------------------------------------------------
-// リスト画面の並び替え/フィルタ(タブ横のツールボタン + ボトムシート)。
-// 並び替えは「今開いているタブ(ティア)」のカードを対象に、スコア/RS/前日比で
-// 実行。選択はティアごとlocalStorage(CARD_SORT_STORAGE_KEY)に保存するので、
-// リロードや個別株画面からの復帰後も維持される。フィルタ(その時用)はメモリ保持
-// (adhocListFilter)のためSPA内では維持、リロードで解除。
+// リスト画面の並び替え/フィルタ(ツールバーのボタン + ボトムシート)。
+// 並び替えはリスト全体を対象に、スコア/RS/前日比で実行。選択は localStorage
+// (CARD_SORT_STORAGE_KEY)に保存するので、リロードや個別株画面からの復帰後も
+// 維持される。フィルタ(その時用)はメモリ保持(adhocListFilter)のため
+// SPA内では維持、リロードで解除。
 // ---------------------------------------------------------------------------
 
-// 追いかけ禁止(cooled ティア = EXTENDED/STALE)。2026-07-27にアコーディオンを廃止し、
-// フィルタのステータスチェックで出し分ける方式へ。既定では非表示なので、
-// 表示対象が1件も無ければセクションごと空にして何も出さない。
-function renderCooledTier(report) {
-  const body = document.getElementById("cooled-tier-body");
-  if (!body) return;
-  body.innerHTML = "";
-  const visible = (report.stocks || []).filter(
-    (s) => s.tier === "cooled" && statusVisible(s.status)
-  );
-  if (!visible.length) return;
-  renderTier(report, "cooled", "cooled-tier-body");
-}
-
-function rerenderTierBody(tier) {
+function rerenderStockList() {
   const report = reportCache && reportCache.data;
   if (!report) return;
-  if (tier === "watchlist") {
-    renderPriorityTier(report, "watchlist-tier-body");
-    renderCooledTier(report);
-  } else if (tier === "cooled") {
-    renderCooledTier(report);
-  } else {
-    renderTier(report, tier, `${tier}-tier-body`);
-  }
+  renderStockList(report);
 }
 
-// 今アクティブなリストのティア(タブ)。ソートシートはこのティアを対象にする。
-function currentListTier() {
-  const active = document.querySelector("#list-tabs .list-tab.active");
-  return (active && active.dataset.panel) || "confirmed";
-}
-
-// 指定ティアの「リスト画面に表示されているのと同じ並び順」の銘柄コード配列を返す。
-// フィルタ(恒久+一時)適用後、renderTier/renderPriorityTier と同じグループ順・
-// ソートで並べる。個別株画面の前後ナビ(＜/＞)が辿る順序に使う。
-// チャート未生成(has_chart===false)の銘柄は詳細ページに行けないので除外する。
-function orderedTierCodes(tier) {
+// 「リスト画面に表示されているのと同じ並び順」の銘柄コード配列。個別株画面の
+// 前後ナビ(＜/＞)と横スワイプが辿る順序に使う。チャート未生成(has_chart===false)
+// の銘柄は詳細ページに行けないので除外する。
+function orderedListCodes() {
   const report = reportCache && reportCache.data;
-  if (!report || !tier) return [];
-  const sortKey = getCardSortKey(tier);
-  const sortVal = CARD_SORTS[sortKey] || CARD_SORTS.total_score;
-  const sortDesc = (arr) =>
-    [...arr].sort((a, b) => {
-      const av = sortVal(a);
-      const bv = sortVal(b);
-      return av === bv ? 0 : av > bv ? -1 : 1;
-    });
-
-  let ordered = [];
-  if (tier === "watchlist") {
-    const all = report.stocks.filter(
-      (s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null)
-    );
-    const { kept } = applyListFilter(all);
-    if (!kept.some((s) => s.setup_stage)) {
-      ordered = sortDesc(kept);
-    } else {
-      const byGroup = new Map(SETUP_STAGE_GROUPS.map((g) => [g.key, []]));
-      for (const s of kept) {
-        byGroup.get(setupStageGroupKey(s) || "inactive").push(s);
-      }
-      for (const g of SETUP_STAGE_GROUPS) {
-        ordered = ordered.concat(sortDesc(byGroup.get(g.key)));
-      }
-    }
-  } else {
-    const all = report.stocks.filter((s) => s.tier === tier);
-    const { kept } = applyListFilter(all);
-    for (const status of STATUS_ORDER) {
-      ordered = ordered.concat(sortDesc(kept.filter((s) => s.status === status)));
-    }
-  }
-  return ordered.filter((s) => s.has_chart !== false).map((s) => s.code);
+  if (!report) return [];
+  return visibleListStocks(report)
+    .stocks.filter((s) => s.has_chart !== false)
+    .map((s) => s.code);
 }
 
-// 個別株画面の前後銘柄。listNavTier のフィルタ済み並び順で現在銘柄の前後を割り出し、
+// 個別株画面の前後銘柄。リストのフィルタ済み並び順で現在銘柄の前後を割り出し、
 // 横スワイプ(setupStockPanels の wireStockSwipe)が参照するモジュール変数へ格納しつつ、
 // ＜＞ボタンの遷移先(dataset.target)と有効/無効も同時に更新する。前後の切替は
 // ＜＞ボタンと横スワイプの両方で可能(体感を揃えるため ＜=上へ / ＞=下へ)。
 let stockNavPrevCode = null; // リストの上(前の銘柄, idx-1)
 let stockNavNextCode = null; // リストの下(次の銘柄, idx+1)
 function updateStockNav(code) {
-  const codes = orderedTierCodes(listNavTier);
+  const codes = orderedListCodes();
   const idx = codes.indexOf(code);
   stockNavPrevCode = idx > 0 ? codes[idx - 1] : null;
   stockNavNextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
@@ -1942,18 +1894,18 @@ function initStockNav() {
   wire("stock-nav-prev");
 }
 
-// ソートボタンのラベルを、今のティアの並び替えキーに合わせて更新。
+// ソートボタンのラベルを、現在の並び替えキーに合わせて更新。
 function updateListSortLabel() {
   const el = document.getElementById("list-sort-label");
   if (!el) return;
-  el.textContent = CARD_SORT_LABELS[getCardSortKey(currentListTier())] || "スコア";
+  el.textContent = CARD_SORT_LABELS[getCardSortKey()] || "スコア";
 }
 
-// ソートシートの選択状態を、今のティアの並び替えキーに同期。
+// ソートシートの選択状態を、現在の並び替えキーに同期。
 function syncSortSheet() {
   const opts = document.getElementById("list-sort-options");
   if (!opts) return;
-  const key = getCardSortKey(currentListTier());
+  const key = getCardSortKey();
   opts.querySelectorAll("button[data-sort]").forEach((b) => {
     b.classList.toggle("active", b.dataset.sort === key);
   });
@@ -2002,11 +1954,10 @@ function initListTools() {
   if (opts) {
     const applySort = (btn) => {
       if (!btn || !CARD_SORTS[btn.dataset.sort]) return;
-      const tier = currentListTier();
-      setCardSortKey(tier, btn.dataset.sort);
+      setCardSortKey(btn.dataset.sort);
       syncSortSheet();
       updateListSortLabel();
-      rerenderTierBody(tier);
+      rerenderStockList();
       closeSheets();
     };
     opts.addEventListener("click", (e) => applySort(e.target.closest("button[data-sort]")));
@@ -2027,29 +1978,50 @@ function changePctHtml(s) {
   return `<span class="sc-chg-wrap">（<span class="sc-chg ${cls}">${sign}${Number(v).toFixed(2)}%</span>）</span>`;
 }
 
-// リスト画面: 横スクロール表を廃止し、1銘柄=薄型2段カードでスマホ幅に収める。
-// 表示項目はコード/銘柄名/総合スコア/RS/終値(前日比%)/セクター(強度)/枯れ度のみ。
-// 並びは総合スコア降順(監視タブはRS降順)固定。列ヘッダソートは表とともに廃止。
-function renderCardList(stocks, tier, options = {}) {
-  const sortVal = CARD_SORTS[options.initialSortKey || "total_score"] || CARD_SORTS.total_score;
-  const sorted = [...stocks].sort((a, b) => {
-    const av = sortVal(a);
-    const bv = sortVal(b);
-    return av === bv ? 0 : av > bv ? -1 : 1;
-  });
+// 状態バッジ(2026-07-29)。ステータス/セットアップ進行度を1個のバッジに畳む。
+// スコアには一切入らない情報なので、順位ではなくバッジで示すのが役割分担。
+// 追いかけ禁止(EXTENDED/STALE)は「禁追」。
+const STATUS_BADGE = {
+  BREAKOUT: { text: "ブレイク", cls: "sc-badge-breakout" },
+  BREAKOUT_WEAK: { text: "ブレイク弱", cls: "sc-badge-breakout-weak" },
+  WATCH_A: { text: "待機A", cls: "sc-badge-watch" },
+  WATCH_B: { text: "待機B", cls: "sc-badge-watch" },
+  EXTENDED: { text: "禁追", cls: "sc-badge-cooled" },
+  STALE: { text: "禁追", cls: "sc-badge-cooled" },
+};
 
+function statusBadgeHtml(s) {
+  const meta = STATUS_BADGE[s.status];
+  if (meta) {
+    const title = STATUS_LABELS[s.status] || s.status;
+    return `<span class="sc-badge ${meta.cls}" title="${escapeHtml(title)}">${meta.text}</span>`;
+  }
+  // VCPセットアップ未成立(旧・監視ティア)。進行度が付いていれば「あと一歩」だけ
+  // 別バッジにして、それ以外は一括で「形成中」。詳細な不足理由は3段目に出す。
+  const g = setupStageGroupKey(s);
+  if (g === "near") return `<span class="sc-badge sc-badge-near" title="あと一歩">あと一歩</span>`;
+  if (g) return `<span class="sc-badge sc-badge-forming" title="セットアップ形成中">形成中</span>`;
+  return "";
+}
+
+// リスト画面: 横スクロール表を廃止し、1銘柄=薄型2〜3段カードでスマホ幅に収める。
+// 2026-07-29: ティア引数を廃止(タブ統合)。並びは呼び出し側(visibleListStocks)が
+// 確定済みなので、ここではソートせず渡された順のまま描画する。
+function renderCardList(stocks) {
   const list = document.createElement("div");
   list.className = "card-list";
-  for (const s of sorted) {
+  for (const s of stocks) {
     const card = document.createElement("div");
     card.className = "stock-card";
+    // 追いかけ禁止は行ごと淡色にして「見えるが目立たない」状態にする。スコアには
+    // ペナルティを課さない(実測エッジのない減点は指標の意味を濁らせるため)。
+    if (s.tier === "cooled") card.classList.add("sc-cooled");
     // 2026-07-27: ファンダ未入力(fund_stale)の黄色背景は撤廃。エントリー時には
     // どのみち必ずファンダを確認するので、一覧段階では表示ノイズにしかならない
     // (ユーザー要望)。クラス自体を付けないので、CSS側の規則も削除済み。
     // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
     if (s.has_chart !== false) {
       const go = () => {
-        listNavTier = tier; // 前後ナビはこのティアのフィルタ済み並び順を辿る
         window.location.hash = `stock/${encodeURIComponent(s.code)}`;
       };
       // キーボード操作対応: divのままフォーカス可能+Enter/Spaceで遷移。
@@ -2065,19 +2037,18 @@ function renderCardList(stocks, tier, options = {}) {
     } else {
       card.classList.add("row-static");
     }
-    // 上段: 「銘柄名（コード）」+ SC/RS(チップ化して視覚的に強弱を出す)
-    // 下段: 終値（±前日比%。前日比は太字で強調） + セクター(強度) + 枯れ度 + 信用
+    // 上段: 「銘柄名（コード）」+ 状態/ファンダ/信用バッジ + SC/RS チップ
+    // 下段: 終値（±前日比%） + セクター(強度) + 枯れ度
     //   (下段はflex-wrapで、狭い画面でもバッジが潰れず自然に折り返す)
-    // 監視タブ(stageBadgeオプション時)のみ3段目: セットアップ進行度・不足理由
-    const stageLine =
-      options.stageBadge && s.setup_stage
-        ? `<div class="sc-row sc-row-stage${s.setup_stage.near ? " sc-stage-near" : ""}">${escapeHtml(setupStageBadgeText(s))}</div>`
-        : "";
+    // 3段目: セットアップ進行度・不足理由(setup_stage がある銘柄のみ)
+    const stageLine = s.setup_stage
+      ? `<div class="sc-row sc-row-stage${s.setup_stage.near ? " sc-stage-near" : ""}">${escapeHtml(setupStageBadgeText(s))}</div>`
+      : "";
     card.innerHTML = `
       <div class="sc-row">
         <span class="sc-name">${escapeHtml(s.name ?? "-")}<span class="sc-code">（${escapeHtml(s.code)}）</span></span>
         <span class="sc-metrics">
-          <span class="sc-flags">${marginBadgeHtml(s.margin)}${fundVerdictBadgeHtml(s)}</span>
+          <span class="sc-flags">${statusBadgeHtml(s)}${marginBadgeHtml(s.margin)}${fundVerdictBadgeHtml(s)}</span>
           <span class="sc-score-chip">SC ${s.total_score ?? "-"}</span>
           <span class="sc-rs-chip">RS ${s.rs ?? "-"}</span>
         </span>
@@ -2097,23 +2068,11 @@ function formatClose(v) {
 }
 
 // ---------------------------------------------------------------------------
-// 〔監視〕8条件合格・セットアップ形成待ち(旧P1)一覧。P2〜P4はUI廃止(データは
-// report.jsonに残るがダッシュボードには出さない)。
-// 2026-07-17: 100件超を毎日全部見るのは不可能なので、report.jsonの
-// setup_stage(バックエンドbuild_setup_stageが付与)でセットアップ進行度別に
-// グループ表示する。毎日見るべき「あと一歩」を最上段に、実質見送りの
-// ボラ過大/ベース無しは折りたたみに隔離する。setup_stage未付与の旧データは
-// 従来どおりの単一リスト(RS降順)へフォールバックする。
+// セットアップ進行度(setup_stage。バックエンド build_setup_stage が付与)。
+// 2026-07-17〜07-28 は監視タブでこれを見出しにしたアコーディオングループ表示に
+// 使っていたが、2026-07-29のリスト統合でグループ分けそのものを廃止した。
+// 現在はカードの状態バッジ(あと一歩/形成中)と3段目の不足理由テキストにのみ使う。
 // ---------------------------------------------------------------------------
-
-// 表示順: あと一歩(near=true横断) -> ベース形成中 -> 高値直後 -> VCP未達 -> 対象外
-const SETUP_STAGE_GROUPS = [
-  { key: "near", label: "🔥 あと一歩", desc: "ベース熟成間近 or VCP残り1条件", collapsed: false },
-  { key: "forming", label: "ベース形成中", desc: "最短日数まで熟成待ち", collapsed: false },
-  { key: "fresh_high", label: "高値更新直後", desc: "押し・ベース開始待ち", collapsed: false },
-  { key: "rejected", label: "VCP条件未達", desc: "ベースはあるが2条件以上不足", collapsed: true },
-  { key: "inactive", label: "対象外 (ボラ過大/ベース無し)", desc: "実質見送り", collapsed: true },
-];
 
 function setupStageGroupKey(s) {
   const st = s.setup_stage;
@@ -2133,63 +2092,6 @@ function setupStageBadgeText(s) {
     return `未達: ${labels.join(" / ")}`;
   }
   return st.detail || "";
-}
-
-function renderPriorityTier(report, containerId) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = "";
-  // 8条件合格(旧P1)のみ。priority未設定の旧データも合格扱いで拾う。
-  const all = report.stocks
-    .filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null));
-  const { kept: stocks, excluded } = applyListFilter(all);
-  const filterNote = listFilterNoteEl(excluded);
-  if (filterNote) container.appendChild(filterNote);
-  if (!stocks.length) {
-    const empty = document.createElement("p");
-    empty.className = "tier-note";
-    empty.textContent = excluded ? "フィルタ条件に合う銘柄なし" : "該当銘柄なし";
-    container.appendChild(empty);
-    return;
-  }
-  const sortKey = getCardSortKey("watchlist");
-
-  // 旧report.json(setup_stage無し)へのフォールバック: 従来の単一リスト。
-  if (!stocks.some((s) => s.setup_stage)) {
-    const note = document.createElement("p");
-    note.className = "tier-note";
-    note.textContent = `全${stocks.length}件`;
-    container.appendChild(note);
-    container.appendChild(renderCardList(stocks, "watchlist", { initialSortKey: sortKey }));
-    return;
-  }
-
-  const byGroup = new Map(SETUP_STAGE_GROUPS.map((g) => [g.key, []]));
-  for (const s of stocks) {
-    const key = setupStageGroupKey(s) || "inactive";
-    byGroup.get(key).push(s);
-  }
-
-  for (const g of SETUP_STAGE_GROUPS) {
-    const group = byGroup.get(g.key);
-    if (!group.length) continue;
-    container.appendChild(renderStageSection(g, group, sortKey));
-  }
-}
-
-function renderStageSection(groupDef, stocks, sortKey) {
-  const details = document.createElement("details");
-  details.className = "stage-section stage-" + groupDef.key;
-  details.open = !groupDef.collapsed;
-  const summary = document.createElement("summary");
-  summary.innerHTML =
-    `<span class="stage-label">${groupDef.label} (${stocks.length})</span>` +
-    `<span class="stage-desc">${groupDef.desc}</span>`;
-  details.appendChild(summary);
-  details.appendChild(
-    renderCardList(stocks, "watchlist", { initialSortKey: sortKey, stageBadge: true })
-  );
-  return details;
 }
 
 // ---------------------------------------------------------------------------
@@ -2658,42 +2560,12 @@ function wireTabSlide(tabs, tabSelector, activate) {
   );
 }
 
-// リスト画面(本命/候補/監視)はタブでのみ切替。横スワイプでの画面切替は廃止し、
-// 各パネル内の横スクロールは表の列閲覧専用にした(スワイプでパネルが動かない)。
+// リスト画面。2026-07-29に本命/候補/監視の3タブを廃止したので、ここでやることは
+// フィルタ/並び替えツールの配線だけになった(パネル切替のロジックは消滅)。
 function initListView() {
-  const panels = document.getElementById("list-panels");
-  const tabs = document.getElementById("list-tabs");
-  if (!panels || !tabs) return;
-
+  if (!document.getElementById("stock-list-body")) return;
   initAdhocFilter();
   initListTools();
-
-  const setActive = (name) => {
-    tabs.querySelectorAll(".list-tab").forEach((b) => {
-      b.classList.toggle("active", b.dataset.panel === name);
-    });
-    panels.querySelectorAll(".list-panel").forEach((p) => {
-      const on = p.dataset.panel === name;
-      p.classList.toggle("active", on);
-      if (on) p.scrollTop = 0; // 切替のたびに先頭へ
-    });
-    // 並び替えはティアごとに保存するため、タブ切替でボタンのラベルも更新。
-    updateListSortLabel();
-  };
-
-  // 初期表示は本命(既にactiveなタブがあればそれを尊重)。
-  const initial = (tabs.querySelector(".list-tab.active") || tabs.querySelector(".list-tab"));
-  setActive(initial ? initial.dataset.panel : "confirmed");
-
-  if (panels.dataset.wired) return;
-  panels.dataset.wired = "1";
-
-  tabs.addEventListener("click", (e) => {
-    const btn = e.target.closest(".list-tab");
-    if (!btn) return;
-    setActive(btn.dataset.panel);
-  });
-  wireTabSlide(tabs, ".list-tab", (btn) => setActive(btn.dataset.panel));
 }
 
 // 設定画面のサブタブ切替(バッチ実行/履歴・フィルター設定・投資法)。
@@ -4693,22 +4565,54 @@ function renderContractionTable(vcpDetail) {
   el.appendChild(wrap);
 }
 
+// tech_score の3成分(当日断面パーセンタイル)。等ウェイト平均なので、
+// 「成分値 = そのままパーセンタイル」でフロント側の再計算は不要。
+// report.json の score_pct(build_site が latest_row から通す)をそのまま出す。
+const SCORE_PCT_COMPONENTS = [
+  { key: "ma200_slope", label: "200日線の傾き", helpKey: "ma200_slope_21d" },
+  { key: "low52w_ratio", label: "52週安値からの倍率", helpKey: "low52w_ratio" },
+  // dryup は attach_score_percentiles の時点で符号反転済み(枯れているほど高い)。
+  { key: "dryup", label: "出来高の枯れ", helpKey: "dryup" },
+];
+
+// 2026-07-29: 一覧をスコア1本に統合した代わりに、内訳はここで見る設計にした。
+// 上段=合成スコア(総合/テクニカル/VCP)、下段=テクニカルの3成分パーセンタイル。
 function renderScoreBreakdown(stock) {
   const el = document.getElementById("score-breakdown");
   el.innerHTML = "";
+  const bar = (label, value, helpKey, cls) => {
+    const row = document.createElement("div");
+    row.className = "score-bar-row" + (cls ? " " + cls : "");
+    const pct = Math.max(0, Math.min(100, value));
+    row.innerHTML =
+      `<span>${label}${helpKey ? helpBtnHtml(helpKey) : ""}</span>` +
+      `<div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div>` +
+      `<span>${value}</span>`;
+    el.appendChild(row);
+  };
+
   const items = [
-    { label: "テクニカルスコア", value: stock.tech_score, helpKey: "tech_score" },
-    { label: "フルスコア", value: stock.full_score, helpKey: "full_score" },
-    { label: "VCPスコア", value: stock.vcp_score, helpKey: "vcp_score" },
     { label: "総合スコア", value: stock.total_score, helpKey: "total_score" },
+    { label: "テクニカルスコア", value: stock.tech_score, helpKey: "tech_score" },
+    { label: "VCPスコア", value: stock.vcp_score, helpKey: "vcp_score" },
+    { label: "フルスコア", value: stock.full_score, helpKey: "full_score" },
   ];
   for (const item of items) {
     if (item.value == null) continue;
-    const row = document.createElement("div");
-    row.className = "score-bar-row";
-    const pct = Math.max(0, Math.min(100, item.value));
-    row.innerHTML = `<span>${item.label}${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${item.value}</span>`;
-    el.appendChild(row);
+    bar(item.label, item.value, item.helpKey);
+  }
+
+  // テクニカルスコアの3成分。旧report.json(score_pct無し)では何も出さない。
+  const pct = stock.score_pct;
+  if (!pct) return;
+  const head = document.createElement("div");
+  head.className = "score-subhead";
+  head.innerHTML = `テクニカルの内訳 <small>当日の全銘柄中の順位(パーセンタイル)</small>`;
+  el.appendChild(head);
+  for (const c of SCORE_PCT_COMPONENTS) {
+    const v = pct[c.key];
+    if (v == null) continue;
+    bar(c.label, Math.round(v * 10) / 10, c.helpKey, "score-bar-sub");
   }
 }
 
@@ -5081,7 +4985,9 @@ async function ensureDataAccess() {
 
 async function bootApp() {
   await ensureDataAccess();
-  if (document.getElementById("confirmed-tier-body")) {
+  // ダッシュボード(index.html)判定。2026-07-29のリスト統合で #confirmed-tier-body が
+  // 消えたため、単一リストのコンテナ #stock-list-body を目印にする。
+  if (document.getElementById("stock-list-body")) {
     initDashboard();
   }
   // 銘柄詳細(view-stock)はDockナビを持つSPAシェル(index.html)内の1ビューに

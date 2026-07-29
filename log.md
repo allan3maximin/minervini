@@ -21,14 +21,78 @@
 
 ---
 
-## 2026-07-29 (143): 【設計・未実装】一覧を「1リスト・1スコア・バッジ」へ / 本命・候補・監視タブの廃止
+## 2026-07-29 (144): 一覧の一本化を実装 — 3タブ廃止 / スコア降順の単一リスト / 禁追バッジ
+
+ユーザー:「200強やね。実装はいっちゃって。追うなはダサいから禁追にして」。
+(143) の設計をそのまま実装した。ウォッチ約200銘柄を1リストに混ぜても回る、という
+件数判断はユーザーの実測。
+
+### バックエンド
+
+- `src/screener/scoring.py` `combined_score` — **`vcp_score is None` を 0 として扱う**
+  (旧: `total_score = phase1_score` にフォールバック)。これが一本化の全ての土台。
+  セットアップ未成立の銘柄は上限50に沈み、**順序そのものがティアの隔離を代替する**。
+- `src/report/build_site.py`
+  - `build_stock_record` — `phase1_score` があれば必ず `combined_score` を通す。
+    `"score_pct"` を report.json へ出力(個別画面の内訳表示用)。
+  - `_sort_key` — `(-total_score, status_rank, code)` の単一軸に縮小。ティア順・
+    watchlist 専用ソート(priority→セクター強度→RS)を撤去。
+  - `TIER_ORDER` / `SECTOR_STRENGTH_ORDER` は**意味と表示には残す**が並び順には使わない。
+
+### フロント
+
+- `docs/index.html` — `list-panel` 3枚 + `#list-tabs` を削除し、描画先を `#stock-list-body`
+  1つに。`#confirmed-tier-body` / `#pool-tier-body` / `#watchlist-tier-body` /
+  `#cooled-tier-body` / `.watchlist-tier-scroll` は消滅。
+- `docs/assets/app.js`
+  - `visibleListStocks(report)` を新設し、**並び順を決める場所を1箇所に集約**。
+    `renderStockList`(画面)と `orderedListCodes`(個別画面の前後スワイプ)が同じ関数を
+    呼ぶので、両者の順序が食い違わない。
+  - 削除: `renderTier` / `renderPriorityTier` / `renderCooledTier` / `rerenderTierBody` /
+    `renderStatusSection` / `currentListTier` / `orderedTierCodes` / `listNavTier` /
+    `SETUP_STAGE_GROUPS` / `CARD_SORT_DEFAULTS`。
+  - ソート設定 localStorage をティア別から単一キー `list` へ。既定は `total_score`
+    (RS はスコア寄与ゼロにしたので既定に残す理由がない)。
+  - `STATUS_BADGE` — EXTENDED/STALE を **〔禁追〕**(「追うな」から改称)。
+    `.sc-cooled` で opacity 0.55、hover/focus で 1.0。**減点はしない**(実測エッジの
+    無い減点はスコアの意味を濁らせるため)。
+  - `renderScoreBreakdown` に「テクニカルの内訳(当日の断面パーセンタイル)」として
+    200日線の傾き / 52週安値からの倍率 / 出来高の枯れ の3サブバーを追加。
+    `dryup` は `score_variables` で符号反転済みなのでフロントでは反転しない。
+- `docs/assets/style.css` — スクロールコンテナ規則を `[id$="-tier-body"]` から
+  `> #stock-list-body` へ。**これを直し忘れると一覧がスクロールしない**(セレクタが
+  マッチしなくなるだけで見た目のエラーが出ないので気付きにくい)。
+  `.sc-badge` 系 / `.sc-cooled` / `.list-summary` / `.score-subhead` / `.score-bar-sub` を追加。
+
+### テスト
+
+`tests/test_build_site.py` の3本は旧ティア意味論を固定していたので書き換え、
+1本追加。**455 passed**、`node --check docs/assets/app.js` も通過。
+
+- `..._watchlist_missing_vcp_score_counts_as_zero` — 期待値 72.0 → 36.0
+- `test_build_report_sorts_by_total_score_regardless_of_tier`
+- `test_build_report_cooled_is_not_pushed_to_the_bottom`
+- `test_build_report_sort_ties_break_on_status`(新規、同点3件が status 順に割れる)
+
+### 検証できなかったこと
+
+**実データでのスコア分布は手元から確認できない**(`docs/data/report.json` は
+AES-GCM暗号化、gh-pages は単一コミットの orphan)。代わりに静的チェックとして
+app.js の `getElementById` 全件と index.html の `id=` を突合した。6件が未定義だったが
+`git show HEAD:docs/index.html` で**改変前から存在しない**ことを確認済み(null ガード
+済みの死んだ参照であり、今回の退行ではない)。実際の分布と件数感はユーザーの画面で
+確認してもらう。
+
+---
+
+## 2026-07-29 (143): 【設計】一覧を「1リスト・1スコア・バッジ」へ / 本命・候補・監視タブの廃止 (実装は (144))
 
 ユーザー:「できればまとめて一つのスコアにしてスコア順に並べたい。スコアに含まない
 ものはバッジで出して、スコアの内訳は個別画面内で確認する。で、ついでに本命、候補、
 監視タブも廃止したい」。
 
-**この項は設計合意用。実装は未着手。着手時に HANDOFF.md 側(「ティアとフロント表示の
-対応」節・「ダッシュボード」節)を書き換えること。**
+**この項は設計合意用。実装は同日 (144) で完了済み。HANDOFF.md 側(「ティアとフロント
+表示の対応」節・「ダッシュボード」節・「tech_score」節)も書き換え済み。**
 
 ### 前提: なぜ今までタブを廃止できなかったか
 
@@ -44,7 +108,7 @@ None のため、build_site.py:113 が **`total_score = tech_score` にフォー
 ### 決定事項
 
 1. **監視銘柄は1本のリストに混ぜる**(隔離しない)
-2. **cooled(追いかけ禁止)も混ぜる。** 行を淡色化 + 「追うな」バッジで区別する
+2. **cooled(追いかけ禁止)も混ぜる。** 行を淡色化 + 「禁追」バッジで区別する
 3. まず設計を固めてから実装する(この項)
 
 ### 設計1: スコアの一本化 — VCP欠損は 0 として扱う
@@ -78,7 +142,7 @@ total_score = tech_score×0.5 + vcp_score×0.5     (vcp_score が None → 0 と
 
 | 系統 | 出所フィールド | 表示例 |
 |---|---|---|
-| 状態 | `status` / `setup_stage` | `ブレイク` `待機` `形成中` `追うな` |
+| 状態 | `status` / `setup_stage` | `ブレイク` `待機` `形成中` `禁追` |
 | ファンダ | `fund_verdict` (pass/unknown/fail) | `本命` / `F未確認 ½` / `F不合格 取止` |
 | 文脈 | `dryup` / `margin` / `sector_strength` | `枯れ` `信用重い` `セクター強` |
 
@@ -86,7 +150,7 @@ total_score = tech_score×0.5 + vcp_score×0.5     (vcp_score が None → 0 と
 既にランキングから外してサイズ係数 `fund_multiplier`(1.0/0.5/0.0)へ再配置済み
 なので、**「本命」を順位ではなくバッジで表すのは既定路線と整合している**。
 
-### 設計3: cooled は混ぜて淡色 + 「追うな」バッジ
+### 設計3: cooled は混ぜて淡色 + 「禁追」バッジ
 
 cooled は「スコアが低い」のではなく「押すな」。ブレイク直後なので tech も vcp も
 高く、素直にスコア順へ入れると上位に来てしまう。これは減点で沈めない

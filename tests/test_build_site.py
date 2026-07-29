@@ -123,7 +123,14 @@ def test_assemble_stock_record_pool_uses_tech_score_for_total():
     assert record["total_score"] == 65.0  # (60*0.5 + 70*0.5)
 
 
-def test_assemble_stock_record_watchlist_tier_override_falls_back_to_phase1_score():
+def test_assemble_stock_record_watchlist_missing_vcp_score_counts_as_zero():
+    """VCPセットアップ未成立(vcp_score=None)は 0 として合成される (2026-07-29)。
+
+    旧実装は total_score = tech_score へフォールバックしていたが、それだと
+    「テクニカル72・VCP未成立」が「テクニカル72・VCP72」と同じ72になり、同じ列で
+    並べられなかった。0に倒すと未成立銘柄は上限50に沈み、順序そのものが両者を
+    分離するので、ティアで隔離する必要がなくなる。log.md (143)。
+    """
     tt_flags = {"cond1": True}
     # No VCP setup yet: status is one of the "not actionable" VCP states,
     # vcp_score/footprint/contractions are all absent.
@@ -143,11 +150,14 @@ def test_assemble_stock_record_watchlist_tier_override_falls_back_to_phase1_scor
     assert record["tier"] == "watchlist"
     assert record["status"] == "IMMATURE"
     assert record["pivot"] is None
-    # no vcp_score available -> total_score falls back to the phase1 (tech) score alone
-    assert record["total_score"] == 72.0
+    assert record["total_score"] == 36.0  # 72*0.5 + 0*0.5
 
 
-def test_build_report_sorts_confirmed_before_pool_and_by_status_then_score(tmp_path, monkeypatch):
+def test_build_report_sorts_by_total_score_regardless_of_tier(tmp_path, monkeypatch):
+    """並び順は総合スコア降順の単一軸 (2026-07-29)。
+
+    ティアは _sort_key から外れ、バッジ表示用のフィールドとして残るだけ。
+    """
     import src.report.build_site as bs
 
     monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
@@ -162,9 +172,23 @@ def test_build_report_sorts_confirmed_before_pool_and_by_status_then_score(tmp_p
     ]
     report = build_report(stocks, universe_size=1000, template_pass=87)
     codes = [s["code"] for s in report["stocks"]]
-    # confirmed tier first; within confirmed, BREAKOUT before WATCH_A; within
-    # WATCH_A, higher score first; watchlist always last regardless of score
-    assert codes == ["B", "C", "D", "A", "E"]
+    assert codes == ["E", "C", "A", "D", "B"]
+
+
+def test_build_report_sort_ties_break_on_status(tmp_path, monkeypatch):
+    """同点はステータス順(BREAKOUT > WATCH_A > IMMATURE)、それも同じならコード順。"""
+    import src.report.build_site as bs
+
+    monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(bs, "REPORT_PATH", tmp_path / "report.json")
+
+    stocks = [
+        {"code": "C", "tier": "watchlist", "status": "IMMATURE", "total_score": 70},
+        {"code": "B", "tier": "pool", "status": "WATCH_A", "total_score": 70},
+        {"code": "A", "tier": "confirmed", "status": "BREAKOUT", "total_score": 70},
+    ]
+    report = build_report(stocks, universe_size=1000, template_pass=87)
+    assert [s["code"] for s in report["stocks"]] == ["A", "B", "C"]
 
 
 def test_compute_breakout_success_rate_counts_holds_above_pivot():
@@ -455,8 +479,14 @@ def test_assemble_stock_record_cooled_tier_override():
     assert record["risk_pct"] == 5.0
 
 
-def test_build_report_cooled_sorts_after_watchlist(tmp_path, monkeypatch):
-    """cooled ティアは watchlist より後にソートされること"""
+def test_build_report_cooled_is_not_pushed_to_the_bottom(tmp_path, monkeypatch):
+    """cooled(追いかけ禁止)もスコア順に混ざること (2026-07-29)。
+
+    以前は tier_rank で最後尾へ隔離していたが、追いかけ禁止はスコアの問題ではなく
+    「今は買えない」という状態の問題なので、順位ではなくフロントのバッジ+淡色表示
+    (app.js の statusBadgeHtml / .sc-cooled)で表す方針に変えた。実測エッジの無い
+    減点をスコアに混ぜると指標の意味が濁るため、ペナルティも課さない。log.md (143)。
+    """
     import src.report.build_site as bs
 
     monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
@@ -469,5 +499,4 @@ def test_build_report_cooled_sorts_after_watchlist(tmp_path, monkeypatch):
     ]
     report = build_report(stocks, universe_size=1000, template_pass=50)
     codes = [s["code"] for s in report["stocks"]]
-    # confirmed -> watchlist -> cooled (スコアに関係なく)
-    assert codes == ["C", "B", "A"]
+    assert codes == ["A", "C", "B"]

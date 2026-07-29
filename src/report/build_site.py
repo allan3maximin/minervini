@@ -61,9 +61,13 @@ STATUS_ORDER = {
     "TOO_VOLATILE": 9,
     "NO_BASE": 10,
 }
+# ティアの序列。**2026-07-29以降、一覧の並び順には使っていない**(_sort_key は
+# total_score 単一軸になった)。ティアはバッジ表示用にレコードへ残るだけなので、
+# この定数は意味の序列を記録しておくためのもの。
 TIER_ORDER = {"confirmed": 0, "pool": 1, "watchlist": 2, "cooled": 3}
 
-# セクター強度(機能B)の複合ソート順: 強 -> 中 -> 弱 -> 不明
+# セクター強度(機能B)の序列: 強 -> 中 -> 弱 -> 不明。
+# 上と同じく 2026-07-29 以降 _sort_key では使っていない(表示・分析用に残置)。
 SECTOR_STRENGTH_ORDER = {"強": 0, "中": 1, "弱": 2}
 
 
@@ -105,12 +109,12 @@ def assemble_stock_record(
     # ファンダは tier バッジ + fund_verdict/fund_multiplier(サイズ係数)に再配置。
     phase1_score = fund_info.get("tech_score")
     vcp_score = vcp_result.get("vcp_score")
-    if phase1_score is not None and vcp_score is not None:
+    # 2026-07-29改定: VCPセットアップ未成立(vcp_score=None)は 0 として合成する。
+    # 旧実装は total_score = phase1_score にフォールバックしていたため、監視銘柄の
+    # 「70」と本命銘柄の「70」が別物になり同じ列で並べられなかった。0に倒すことで
+    # 監視銘柄は上限50に沈み、ティア隔離なしで1本のリストに並べられる。log.md (143)。
+    if phase1_score is not None:
         total_score = combined_score(phase1_score, vcp_score, config)
-    elif phase1_score is not None:
-        # Watchlist stocks (no VCP setup yet): rank by the trend-template
-        # score alone rather than leaving total_score empty.
-        total_score = round(phase1_score, 1)
     else:
         total_score = None
 
@@ -122,6 +126,10 @@ def assemble_stock_record(
         "close": latest_row.get("close"),
         "total_score": total_score,
         "tech_score": fund_info.get("tech_score"),
+        # tech_score の3成分(当日断面パーセンタイル)。個別画面のスコア内訳用。
+        # 等ウェイトなので「成分値 = そのままパーセンタイル」でフロント側の再計算は不要。
+        # attach_score_percentiles が latest_row に書いた値をそのまま通す。
+        "score_pct": latest_row.get("score_pct") or None,
         "full_score": fund_info.get("full_score"),
         "vcp_score": vcp_score,
         "rs": latest_row.get("rs"),
@@ -349,18 +357,18 @@ def attach_priority(record: dict, priority_eval: dict | None) -> dict:
 
 
 def _sort_key(stock: dict) -> tuple:
-    tier_rank = TIER_ORDER.get(stock["tier"], 99)
-    if stock["tier"] == "watchlist":
-        # 機能A/B複合ソート: プライオリティ昇順 -> セクター強度 -> RS降順
-        return (
-            tier_rank,
-            stock.get("priority") or 99,
-            SECTOR_STRENGTH_ORDER.get(stock.get("sector_strength"), 9),
-            -(stock.get("rs") or 0.0),
-        )
-    status_rank = STATUS_ORDER.get(stock["status"], 99)
+    """総合スコア降順の単一軸(2026-07-29改定)。
+
+    旧実装は tier_rank を第1キーにし、watchlist だけ priority → セクター強度 → RS
+    という別軸でソートしていた。VCP欠損を0扱いにして total_score の意味を全ティアで
+    揃えたので(combined_score 参照)、ティアで層別する必要がなくなった。ティア自体は
+    バッジ表示用にレコードへ残る。log.md (143)。
+
+    同点処理のみ status_rank を使う(ブレイク > 待機 > 形成中の順)。
+    """
     score = stock.get("total_score") or 0.0
-    return (tier_rank, status_rank, -score, 0)
+    status_rank = STATUS_ORDER.get(stock["status"], 99)
+    return (-score, status_rank, stock.get("code") or "")
 
 
 def build_report(

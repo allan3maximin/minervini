@@ -134,14 +134,24 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   YoY計算不能(前年比較対象なし/前年値≤0)は強度未確認として pool 止まり。判定は `fund_coverage_tier` (src/data/fundamentals.py)。
 - `tier: "pool"` → 〔候補プール〕VCPセットアップあり、ファンダなし **または強度基準未達** (`fund_strong: false` → フロントで「ファンダ弱」表示)
 - `tier: "watchlist"` → 〔候補〕トレンドテンプレート8条件合格 (セットアップ形成待ち)
-- `tier: "cooled"` → 〔追いかけ禁止〕ブレイク済みで手遅れ (EXTENDED=伸びすぎ / STALE=鮮度切れ)。
-  watchlist とは意味が違う(watchlist=形成待ち、cooled=ブレイク後)ので別ティアに隔離。
+- `tier: "cooled"` → 〔禁追〕ブレイク済みで手遅れ (EXTENDED=伸びすぎ / STALE=鮮度切れ)。
+  watchlist とは意味が違う(watchlist=形成待ち、cooled=ブレイク後)ので別ティアで管理する。
   ピボット・損切りレコードは保持(チャート表示・クールダウン管理に必要)。
-  フロントでは監視パネル内の `#cooled-tier-body` に表示するが、**表示可否はステータスフィルタが決める**
-  (2026-07-27改定: 折りたたみ `<details>` は撤廃)。既定で EXTENDED/STALE のチェックが外れているため
-  通常は空 = 描画されず、ボトムシートでチェックを入れると出る。
+  **表示可否はステータスフィルタが決める** (2026-07-27改定: 折りたたみ `<details>` は撤廃)。
+  既定で EXTENDED/STALE のチェックが外れているため通常は一覧に出ず、ボトムシートで
+  チェックを入れると出る。出たときは行を淡色(`.sc-cooled`)にし「禁追」バッジを付ける。
+  **スコアにはペナルティを一切課さない**(実測エッジの無い減点は指標の意味を濁らせるため)。
   `ACTIONABLE_ENTRY_STATUSES` からは外れ、`COOLED_ENTRY_STATUSES = {"EXTENDED", "STALE"}` で管理。
-  TIER_ORDER では watchlist(2) の次の 3 に配置。
+
+- **2026-07-29改定: ティアは並び順に使わない。** 一覧は本命/候補/監視の3タブを廃止し、
+  `total_score` 降順の単一リストに統合した。統合できた理由は `combined_score` が
+  VCPスコア欠損を 0 扱いに変えたこと(scoring.py)。以前は欠損時 `total_score = tech_score` に
+  フォールバックしていたため「テクニカル70・VCP70」と「テクニカル70・VCP未成立」が
+  同じ70になり、同じ列で並べられなかった(だからティアで隔離するしかなかった)。0に倒すと
+  セットアップ未成立は上限50に沈み、**順序そのものが両者を分離する**。
+  `_sort_key` は `(-total_score, status_rank, code)` の単一軸。`TIER_ORDER` /
+  `SECTOR_STRENGTH_ORDER` は意味の序列の記録として残っているが、ソートには使っていない。
+  ティア・セットアップ進行度・禁追はすべてフロントの行内バッジで表す。詳細は log.md (143)。
 - 補足: `full_score`/`eps_accel_slope` はファンダデータがあれば tier に関係なく計算される(個別株画面・コピー機能用)。**2026-07-22改定: full_score は表示専用**となり、ランキング(total_score の phase1 側)は全ティアとも tech_score を使う(純セットアップ品質で順位付け。RSが業績を織り込むためスコアへのファンダ加点は二重計上、という整理)。
 - **ファンダのサイズ係数 (2026-07-22追加)**: ファンダはランキングから外した代わりに、エントリー可否とロット管理に反映する。`fund_verdict_and_multiplier` (src/data/fundamentals.py) が Code33基準(confirmed_eps_yoy_min/confirmed_rev_yoy_min、`fund_coverage_tier` と同一閾値)で判定し、`fund_verdict`("pass"|"unknown"|"fail") と `fund_multiplier`(1.0|0.5|0.0) を report.json に出力。**fail=0 はエントリー取り止め**(セットアップ完成でも見送り)、unknown=0.5 はハーフサイズ、pass=1.0 はフルサイズ。フロントの株数計算機 (app.js renderSizingResult) が許容損失に乗数を掛け、係数0なら計算せず取り止め表示。カード一覧には F バッジ(fail=赤「F不合格 取止」/unknown=黄「F未確認 ½」)。旧report.json(フィールドなし)は係数1.0扱いで後方互換。資金額・リスク%はフロントのlocalStorage(`minervini_sizing_settings`)のみでリポジトリには置かない(公開リポジトリのため)。
 
@@ -177,6 +187,13 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 は内部で呼ぶので pipeline 側の追加配線は不要。`scripts/dump_raw_vs_interp.py` は
 明示的に呼んでいる。
 
+**フロント表示 (2026-07-29追加)**: `build_stock_record` が `latest_row["score_pct"]` を
+そのまま report.json の `score_pct` へ流す。個別画面の `renderScoreBreakdown` (app.js) が
+総合/テクニカル/VCP/フルのバーの下に「テクニカルの内訳 — 当日の全銘柄中の順位
+(パーセンタイル)」として3成分を `SCORE_PCT_COMPONENTS` の順(200日線の傾き / 52週安値
+からの倍率 / 出来高の枯れ)でサブバー表示する。`dryup` は `score_variables` の時点で
+符号反転済みなのでフロント側で反転しないこと(枯れているほど高い値が来る)。
+
 **旧スコアの何が問題だったか**: RS 54.5% / near_high 27.3% / MA200上向き日数 18.2% の
 配分だったが、MUST通過集合の中ではこの3変数の期待Rの幅は 0.02〜0.03R しかなく、
 局面別の符号も 5勝5敗〜7勝4敗 のコイン投げだった。結果として旧スコアの上位20%
@@ -186,7 +203,7 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 
 ### P1〜P4について(重要な経緯)
 - バックエンド(priority.py, report.jsonの `priority`/`priority_counts`/`p1_scarce` フィールド)は**P1〜P4を計算し続けている**。
-- **UIからは概念を廃止**: フロントは `tier==="watchlist" && (priority===1 || priority==null)` のみを〔候補〕として**全件RS降順**表示 (app.js renderPriorityTier)。**2026-07-11以降 P2〜P4は report.json へ出力自体しない**(`src/pipeline.py`で`continue`するだけになり、軽量レコード組立関数`assemble_priority_record`ごと削除。転送量削減が目的)。
+- **UIからは概念を廃止**: フロントは priority を表示にも並び順にも使っていない(2026-07-29の一覧一本化で `renderPriorityTier` 自体を削除。それ以前は `tier==="watchlist" && (priority===1 || priority==null)` を〔候補〕として全件RS降順表示していた)。**2026-07-11以降 P2〜P4は report.json へ出力自体しない**(`src/pipeline.py`で`continue`するだけになり、軽量レコード組立関数`assemble_priority_record`ごと削除。転送量削減が目的)。
 - 弱地合い警告バナー(renderP1Warning)は残存。文言は「8条件完全一致の候補銘柄が◯件と極端に少ない…」(P1という語は使わない)。
 - 地合いメーターに「候補(8条件合格): N件」を表示 (renderBreadth)。
 - style.css の .prio-badge / .prio-1〜4 / .priority-table は2026-07-08に削除済み(対応するJSがCOLUMNS一本化で消えたため)。
@@ -627,19 +644,32 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 
 ### ダッシュボード (view-dashboard)
 - `initDashboard`: report.json / breadth.json / indices.json を `cache: "no-store"` でfetch → 各render
-- `COLUMNS` (本命/候補プール/監視の3ティア共通、1本化済み): code, name(10文字トリム), close(終値), total_score, rs,
-  footprint, pivot, buy_stop, stop_loss, risk_pct, fund_status, sector(セクター強度で文字色分け)
-  - 終値は `formatClose` (ja-JP ロケール, 小数1桁まで)
-  - `renderTable(stocks, tier, options)` が3ティア共通の描画/ソート実装。`options.initialSortKey`/
-    `initialSortDesc` で初期ソート列を指定(confirmed/poolはtotal_score降順、watchlistはrs降順)。
-    各列は `sortValue(s)` を任意で持てる(フォーマット済み文字列ではなく元の数値でソートするため)。
-  - セクター強度の文字色: `.sector-strength-strong`(accent) / `-mid`(text-dim) / `-weak`(danger)。
-  - チャートJSON未生成の行(`has_chart === false`)は `.row-static` でクリック不可(view-stockへ遷移させない)。
-  - 行クリックは `window.location.hash = "stock/" + code` で view-stock へ遷移(旧: `stock.html?code=...`)。
-  - 「ファンダ入力/編集」ボタン列は2026-07-08にview-stockへ移設し撤去済み(下記「個別株」節参照)。
-    fund_status列(fund_stale/fund_coverageの表示)自体はダッシュボードに残っている。
-- `renderPriorityTier(report, "watchlist-tier-body")`: watchlist かつ priority 1 or null を RS降順・全件、
-  上記共通 `renderTable` に `initialSortKey: "rs"` を渡して描画(旧 `PRIORITY_COLUMNS`/`renderPriorityTable` は削除)。
+
+**一覧は単一リスト (2026-07-29改定)**。本命/候補プール/監視の3タブ・3ティアbody・
+`#cooled-tier-body` はすべて廃止し、描画先は `#stock-list-body` ただ1つ。実現の根拠は
+`combined_score` がVCPスコア欠損を0扱いに変えたこと(上記「ティアとフロント表示の対応」節)。
+経緯は log.md (143)。
+
+- `visibleListStocks(report)` → `{stocks, excluded}`: **並び順を決める唯一の場所**。
+  `applyListFilter` で絞ってから `CARD_SORTS[getCardSortKey()]` で降順ソート、同点は
+  `STATUS_ORDER` の並び → コード昇順で割る。
+  - `renderStockList` と `orderedListCodes`(個別画面の前後スワイプ順)が**同じ関数を呼ぶ**ので、
+    画面上の並びとスワイプ順が食い違うことがない。分けて実装しないこと。
+- `renderStockList(report)`: `#stock-list-body` をクリア → フィルタ注記 → `renderCardList(stocks)`。
+  0件時は「該当銘柄なし」/(フィルタで消えた場合)「フィルタ条件に合う銘柄なし」。
+  `updateListSummary` が `#list-summary` に `N件 (M件除外)` を出す。
+- `renderCardList(stocks)`: **呼び出し側が並べ替え済みの前提**で、内部ソートはしない。
+  1枚のカード = スコア / コード・銘柄名 / 終値・前日比 / バッジ行 (`.sc-flags`)。
+  - バッジ行 = `statusBadgeHtml(s)` + `marginBadgeHtml(s.margin)` + `fundVerdictBadgeHtml(s)`。
+  - `statusBadgeHtml`: `STATUS_BADGE` に一致すれば〔ブレイク〕〔ブレイク弱〕〔待機A/B〕〔禁追〕。
+    無ければ `setupStageGroupKey(s)` から〔あと一歩〕/〔形成中〕。
+  - `s.tier === "cooled"` のカードに `.sc-cooled`(opacity 0.55、hover/focusで1.0)を付ける。
+    **スコアは減点しない**(理由は「ティアとフロント表示の対応」節)。
+  - チャートJSON未生成(`has_chart === false`)はクリック不可。それ以外は
+    `window.location.hash = "stock/" + code` で view-stock へ遷移。
+- 並び替えキーは `CARD_SORTS`(`total_score` / `rs` / `change_pct`)、既定 `total_score`。
+  localStorage `minervini-card-sort` に**ティア別ではなく単一キー `list` で**保存する。
+- `rerenderStockList()`: フィルタ/並び替え変更時に `reportCache` から引き直して再描画。
 - **一覧フィルタは2層 (恒久 + アドホック、AND結合)**: 恒久=設定画面、localStorage
   `minervini_list_filters`。アドホック=ボトムシート、メモリ上の `adhocListFilter`(リロードで消える)。
   両方を `stockPassesListFilter` に通し、`applyListFilter` が `{kept, excluded}` を返す。

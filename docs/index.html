@@ -148,41 +148,21 @@
 </section>
 
 <section id="view-stocklist" class="view-section list-view" hidden>
+  <!-- 2026-07-29: 本命/候補/監視の3タブを廃止し、総合スコア降順の単一リストに統合。
+       ティア(ファンダ強度)・セットアップ進行度・追いかけ禁止はすべて行内のバッジで
+       表す。統合できた理由は combined_score が VCP欠損を0扱いに変わり、全ティアで
+       total_score の意味が揃ったから。経緯と設計は log.md (143)。 -->
   <div class="list-panels" id="list-panels">
-    <div class="list-panel" data-panel="confirmed">
+    <div class="list-panel active" data-panel="all">
       <section class="tier-section">
-        <div class="tier-head"><span class="tier-head-title">本命</span><button type="button" class="help-btn" data-help="tier_confirmed" aria-label="用語説明: 本命">?</button></div>
-        <div id="confirmed-tier-body"></div>
-      </section>
-    </div>
-
-    <div class="list-panel" data-panel="pool">
-      <section class="tier-section">
-        <div class="tier-head"><span class="tier-head-title">候補</span><button type="button" class="help-btn" data-help="tier_pool" aria-label="用語説明: 候補">?</button></div>
-        <div id="pool-tier-body"></div>
-      </section>
-    </div>
-
-    <div class="list-panel" data-panel="watchlist">
-      <section class="tier-section">
-        <div class="tier-head"><span class="tier-head-title">監視</span><button type="button" class="help-btn" data-help="tier_watchlist" aria-label="用語説明: 監視">?</button></div>
-        <div class="watchlist-tier-scroll">
-          <div id="watchlist-tier-body"></div>
-          <!-- 追いかけ禁止(EXTENDED/STALE)。既定ではフィルタのステータスチェックが
-               外れているので空。チェックを入れたときだけここに出る。 -->
-          <div id="cooled-tier-body"></div>
-        </div>
+        <div id="stock-list-body"></div>
       </section>
     </div>
   </div>
 
-  <!-- タブバー: 本命/候補/監視 + フィルタ/並び替えツール -->
+  <!-- ツールバー: フィルタ/並び替え(タブは廃止) -->
   <div class="list-tabs-bar">
-    <div class="list-tabs" id="list-tabs" role="tablist">
-      <button type="button" class="list-tab active" data-panel="confirmed" role="tab">本命</button>
-      <button type="button" class="list-tab" data-panel="pool" role="tab">候補</button>
-      <button type="button" class="list-tab" data-panel="watchlist" role="tab">監視</button>
-    </div>
+    <div class="list-summary" id="list-summary"></div>
     <div class="list-tools">
       <button type="button" class="list-tool-btn" id="list-sort-btn" aria-label="並び替え">
         <i class="bi bi-sort-down"></i>

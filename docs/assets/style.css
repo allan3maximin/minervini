@@ -177,7 +177,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: var(--text);
 }
 
-/* リスト画面: タブ行(本命/候補/監視)の右にフィルタ/並び替えツールを並べる。 */
+/* リスト画面のツールバー。2026-07-29に本命/候補/監視タブを廃止したので、
+   中身は「件数表示 + フィルタ/並び替えボタン」だけになった。 */
 .list-tabs-bar {
   display: flex;
   align-items: center;
@@ -1817,21 +1818,17 @@ a.nav-btn:hover { border-color: var(--link); }
   margin: 0 0 8px;
 }
 .tier-head-title { font-size: 16px; font-weight: 700; color: var(--text); }
-/* 全タブとも、中の status-section / stage-section が各自枠を持つので、外側の
-   tier-section は二重枠を避けるため背景・枠なしの透明コンテナにする。 */
+/* 外側の tier-section は二重枠を避けるため背景・枠なしの透明コンテナ。 */
 .list-panel .tier-section {
   background: transparent;
   border: none;
   padding: 0;
 }
 /* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
-   横スクロール表は廃止したので縦のみ(横は明示的に禁止)。
-   direct-child限定(> )にしているのは、監視タブだけ本文が
-   #watchlist-tier-body + #cooled-tier-body の2つに分かれており、descendant
-   セレクタだとこの2つが個別にflex:1 1 autoの独立スクロール領域になってしまい、
-   縦スペースが分割されて最後までスクロールできなくなる不具合があったため。
-   (2026-07-28: 監視タブのみコンテンツが画面下端まで見えない不具合の修正) */
-.list-panel .tier-section > [id$="-tier-body"] {
+   2026-07-29のリスト統合で、以前あった tier ごとの本文(#confirmed-tier-body
+   など)と監視タブ専用の2分割ラッパー(.watchlist-tier-scroll)は消え、
+   コンテナは #stock-list-body 1つだけになった。 */
+.list-panel .tier-section > #stock-list-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1839,22 +1836,6 @@ a.nav-btn:hover { border-color: var(--link); }
   -webkit-overflow-scrolling: touch;
   /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
   padding-bottom: var(--tabs-clear);
-}
-/* 監視タブのみ、本文が#watchlist-tier-body(通常監視)と#cooled-tier-body(追いかけ禁止)
-   の2つのdivに分かれている。この2つをまとめて1つのスクロール領域として扱うための
-   ラッパー。中身のtier-bodyは通常のflex項目(スクロールなし)に戻す。 */
-.list-panel .watchlist-tier-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: var(--tabs-clear);
-}
-.list-panel .watchlist-tier-scroll > [id$="-tier-body"] {
-  flex: 0 0 auto;
-  overflow: visible;
-  padding-bottom: 0;
 }
 
 /* -------------------------------------------- 市況画面(市況データ/市況分析) */
@@ -2821,8 +2802,74 @@ a.nav-btn:hover { border-color: var(--link); }
 .session-review-foot { margin: 10px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
 .session-review-status { margin-top: 6px; min-height: 16px; font-size: 12px; color: var(--text-dim); }
 
-/* cooled tier: 追いかけ禁止 (EXTENDED/STALE)。2026-07-27にアコーディオンを廃止し、
-   フィルタのステータスチェックで出し分ける方式に変更。既定では中身が空。 */
-#cooled-tier-body:not(:empty) {
-  margin-top: 10px;
+/* -------------------------------------------- リスト統合 (2026-07-29) ------ */
+/* 追いかけ禁止 (cooled = EXTENDED/STALE)。以前は専用セクション(#cooled-tier-body)に
+   隔離していたが、1リスト統合で本文に混ぜた。スコアには一切ペナルティを課さず
+   (実測エッジのない減点は指標の意味を濁らせる)、行を淡色にして「見えるが目立たない」
+   状態にするだけにしている。既定では一時フィルタのステータスチェックで非表示。 */
+.stock-card.sc-cooled {
+  opacity: 0.55;
 }
+.stock-card.sc-cooled:hover,
+.stock-card.sc-cooled:focus-visible {
+  opacity: 1;
+}
+
+/* 状態バッジ(ブレイク/待機/禁追/あと一歩/形成中)。スコアに入らない情報を
+   順位ではなくバッジで示すための行内ラベル。 */
+.sc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.sc-badge-breakout {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.sc-badge-breakout-weak {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.sc-badge-watch,
+.sc-badge-near {
+  background: rgba(250, 204, 21, 0.16);
+  color: #facc15;
+  border-color: rgba(250, 204, 21, 0.38);
+}
+.sc-badge-forming {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-dim);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+.sc-badge-cooled {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+/* 件数表示(旧タブの代わりにツールバー左へ置いた)。 */
+.list-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* 個別画面のスコア内訳: 合成スコアの下に tech_score の3成分を並べる。 */
+.score-subhead {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.score-subhead small { font-weight: 400; font-size: 11px; }
+.score-bar-row.score-bar-sub { opacity: 0.85; font-size: 12px; }
