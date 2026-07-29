@@ -38,3 +38,12 @@ docs/.git/
 
 # 閾値診断レポートの一時ファイル。確定版は data/backtest/ にコミットする。
 audit27.txt
+
+# ローカル解析用の秘密鍵置き場 (2026-07-29〜)。
+# DASHBOARD_DATA_KEY を .secrets/data_key に1行で置く。tools/pull_site_data.py が読む。
+# 公開リポジトリなので絶対にコミットしないこと。
+.secrets/
+
+# 復号済みの生成物 (2026-07-29〜)。tools/pull_site_data.py が gh-pages から
+# 取ってきて復号したもの。暗号化の意味が消えるので master には絶対に載せない。
+data/plain/

@@ -785,6 +785,23 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   data/配下の中間データは暗号化対象外で公開のまま。**本気で隠すならリポジトリをprivateにするのが正道**
   (Pagesは動き続けるが、github-api.jsの未認証 listWorkflowRuns はPAT必須になる)。
 
+### ローカルで生成物を読む (tools/pull_site_data.py、2026-07-29追加)
+- **動機**: 上の暗号化は配信物を守るためのもので維持したいが、手元で中身を見たい
+  (目視確認・集計スクリプト・Claudeに分析させる) ときは封筒のままだと何もできない。
+  「配信物は暗号化のまま、ローカルの作業コピーだけ平文」に分ける。
+- `python tools/pull_site_data.py` で origin/gh-pages の `data/` を
+  `git fetch --depth=1` + `git archive` で一時ディレクトリへ取り出し、復号して
+  `data/plain/` へ書く。**作業ツリーの `docs/data/` は触らない**
+  (パイプラインの読み戻し対象を勝手に書き換えないため)。
+- 鍵は env `DASHBOARD_DATA_KEY` → 無ければ `.secrets/data_key` の順。
+  どちらも無ければ手順を出して終了する。値は GitHub Secret / パスキー保管庫の
+  dataKey と同じもの。
+- オプション: `--charts` (charts/*.json も、約15MB)、`--all` (`*_maezyou.json` 等も
+  含めて直下の全JSON)、`--source local` (fetchせず手元の `docs/data/` を復号)。
+- 平文/封筒は自動判別するので、Secretを消して平文運用に戻しても同じコマンドで動く。
+- `.secrets/` と `data/plain/` は .gitignore 済み。**公開リポジトリなので、
+  この2つを追跡対象に入れたら暗号化の意味が消える**。
+
 ### 投資法ページ (view-invest)
 - 静的コンテンツ(fetch無し)。SEPAの基本サイクル、トレンドテンプレート8条件、VCP(V1〜V7)、
   エントリー/損切り・ポジションサイズ/利益確定の要点をプレーンなHTMLで記載(ユーザーが手法を

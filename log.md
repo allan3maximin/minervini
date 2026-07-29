@@ -21,6 +21,46 @@
 
 ---
 
+## 2026-07-29 (147): 生成物をローカルで読めるようにする (tools/pull_site_data.py)
+
+> 「リモートにある株データをローカルで参照できるようにしたい。今は暗号化されちゃってる
+> から、Claudeに見てもらうことができないんや」
+
+### 何が詰まっていたか
+
+`docs/data/*.json` は AES-256-GCM 封筒 (secure_io.py)。しかも 2026-07-27 以降
+`docs/data/` は .gitignore されていて実体は gh-pages にしか無い。つまりローカルで
+中身を見るには **(1) gh-pages から取り出す → (2) 復号する** の2段が要る。
+`--decrypt` のリカバリCLIはあったが1ファイルずつ標準出力に吐くだけで、
+(1) が手作業だった。
+
+### 方針: 配信物は暗号化のまま、作業コピーだけ平文
+
+暗号化を弱める案 (平文で置く / 鍵をリポジトリに入れる) は全部却下。公開リポジトリ +
+Pages で URL 直アクセスから守るのが元の目的で、そこは動かさない。代わりに
+**gitignore 済みの `data/plain/` という平文の作業コピーを別に作る**。
+
+- `tools/pull_site_data.py`: `git fetch --depth=1 origin gh-pages` +
+  `git archive FETCH_HEAD data` を一時ディレクトリへ展開 → 復号 → `data/plain/`。
+  取り出し方は `.github/actions/restore-site-data` と同じ手口を踏襲。
+- **作業ツリーの `docs/data/` は意図的に触らない**。あれはパイプラインが
+  breadth の履歴等を読み戻す対象なので、解析目的のコマンドが書き換えるのは危険。
+- 鍵は env `DASHBOARD_DATA_KEY` → `.secrets/data_key` の順。チャットに鍵を貼らずに
+  済ませるため、ファイル経由を既定の導線にした。
+- `.gitignore` に `.secrets/` と `data/plain/` を追加。
+
+### 検証
+
+- `--help` / 鍵なし時のエラーメッセージ確認
+- 封筒・平文の両方を `convert()` に通してラウンドトリップ一致を確認 (ダミー鍵)
+- `fetch_publish_data()` 疎通: gh-pages の data/ に主要JSON 11本 + charts 394本
+- `git check-ignore` で `data/plain/report.json` と `.secrets/data_key` が
+  無視対象になっていることを確認
+- **実データの復号は未検証** (鍵がまだ手元に無いため)。ユーザーが
+  `.secrets/data_key` を置いた後に1回実行して確認すること。
+
+---
+
 ## 2026-07-30 (146): かんたんフィルタを即日撤回 / 既定を直す / ヘッダに件数 / カード再設計
 
 (145) をコミットした直後にユーザーから折り返し:
