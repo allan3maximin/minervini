@@ -35,6 +35,7 @@ from src.report import dryup_log as dryup_log_mod
 from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
 from src.report import positions as positions_mod
+from src.report import stage_log as stage_log_mod
 from src.report import summary as summary_mod
 from src.report.secure_io import preflight_data_key
 from src.screener import entry as entry_mod
@@ -472,12 +473,25 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
         source_freshness=source_freshness,
         snapshot_suffix=snapshot_suffix,
     )
+    # 監視タブのバケット別内訳。vcp_funnel と違い stock_records (フロントが実際に
+    # 食う確定レコード) から数えるので、EXTENDED/STALE 上書き後の件数と一致する。
+    stage_funnel = stage_log_mod.build_stage_funnel(stock_records)
     build_site.update_breadth(
         today_str, len(codes), template_pass, watch_count, history,
         priority_counts=pr_counts, market_signal=signal_result,
         vcp_funnel=dict(vcp_status_counts),
+        stage_funnel=stage_funnel,
         snapshot_suffix=snapshot_suffix,
     )
+    # 「あと一歩」がどれだけ待機A/Bへ昇格するかを後日測るための銘柄別スナップショット
+    # (src/report/stage_log.py 参照)。集計値だけでは銘柄を跨いだ追跡ができない。
+    # スナップショット(前場)は EOD の確定履歴を汚さないので記録しない。
+    if not is_snapshot:
+        try:
+            n_stage = stage_log_mod.update_stage_history(today_str, stock_records, config)
+            print(f"Stage history: appended {n_stage} rows.")
+        except Exception as e:
+            print(f"Stage history update failed (ignored): {e}")
     # スナップショットは indices.json を直接生成しない(intraday-indices.yml が
     # 15分間隔で更新している canonical をそのまま断面として複製する)。
     if is_snapshot:

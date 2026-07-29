@@ -999,6 +999,7 @@ composite action 2種で実現している:
 |---|---|---|---|
 | `data/history/status.jsonl` | `{code, date, status, pivot, stop_ref_low}` | `(code, date)` | `data/status_history.json` |
 | `data/history/sector.jsonl` | `{date, topix_d1, sectors: {業種名: {...}}}` | `(date)` | `data/sector_history.json` |
+| `data/history/stage.jsonl` | `{code, date, bucket, status, stage, near, total_score, has_pivot}` | `(code, date)` | なし (2026-07-29新設) |
 
 **なぜ変えたか**: 旧方式は `{code: [エントリ...]}` の全量を毎回書き戻すので、1日ぶんの追記でも
 ファイル全行が書き換わり、日次コミットの差分が毎回数千行に膨れていた。追記だけなら差分は
@@ -1026,11 +1027,43 @@ pip install duckdb
 python -m src.analyze --list                    # ビューとプリセット一覧
 python -m src.analyze --preset status-daily     # 日別ステータス件数
 python -m src.analyze --preset status-streak    # 同ステータス継続日数
+python -m src.analyze --preset stage-daily      # 日別の監視バケット件数
+python -m src.analyze --preset stage-promotion  # バケット別の10営業日昇格率
 python -m src.analyze --preset sector-strength  # 直近日のセクター相対強度
 python -m src.analyze --sql "SELECT ... FROM status_latest"
 ```
-生ビュー `status` / `sector` は**重複行を含む**。dedup済みを見たいときは必ず
-`status_latest` / `sector_latest` を使うこと(プリセットは全てこちらを使用)。
+生ビュー `status` / `sector` / `stage` は**重複行を含む**。dedup済みを見たいときは必ず
+`status_latest` / `sector_latest` / `stage_latest` を使うこと(プリセットは全てこちらを使用)。
+
+#### stage.jsonl と監視バケット (src/report/stage_log.py、2026-07-29追加)
+
+`status.jsonl` は**エントリー評価が付いた銘柄しか入らない**(実測55行/12銘柄)。監視タブの
+母集団 = 非アクショナブル側がまるごと欠けているので、「今日の『あと一歩』21銘柄のうち
+何銘柄が後日 待機A/B に上がったか」が測れない。`breadth.vcp_funnel` は日次の集計値だけなので
+これも使えない(昇格率は銘柄を跨いだ追跡)。そこで **P1全銘柄のバケットを毎日1行ずつ**記録する。
+
+バケットは `docs/assets/app.js` の `statusVisible` / `cardBadgeIsForming` /
+`setupStageGroupKey` を**サーバ側でミラーしたもの**。定義がずれると計測が無意味になるので
+**app.js のフィルタ分岐を変えたら `stage_log.classify_bucket` も変えること**(tests/test_stage_log.py が両者の一致を担保)。
+
+| bucket | 条件 | 画面での既定 |
+|---|---|---|
+| `order` | ピボットのある BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B | 表示 |
+| `watch` | 同ステータスだがピボット未確定 | 表示 |
+| `cooled` | EXTENDED / STALE (追撃禁止) | 非表示 |
+| `near` | `setup_stage.near = true` (あと一歩) | 表示 |
+| `forming` / `fresh_high` / `rejected` | `setup_stage.stage` そのまま | 非表示(FORMING扱い) |
+| `inactive` | volatile / no_base | 非表示 |
+| `unknown` | status も setup_stage も無い(異常) | — |
+
+分類の入力は `vcp_result` ではなく **`stock_records`**(フロントが実際に食う確定レコード)。
+EXTENDED/STALE の上書きは entry 評価の後に載るため、`vcp_result` から数えると
+`breadth.vcp_funnel` のように report.json と件数がずれる(実測で待機A/Bが2件ずれていた)。
+`breadth.stage_funnel` はこちらから作るので画面と一致する。
+
+2026-07-29 実測 (219銘柄): order 3 / watch 4 / cooled 2 / **near 21** / forming 13 /
+fresh_high 117 / rejected 58 / inactive 1。既定表示は28件で、その**75%が near** = ピボットも
+損切り値も無い銘柄。この near を既定で出し続けるかを `stage-promotion` の実測で決める。
 
 ## 10. テスト・検証
 

@@ -21,6 +21,93 @@
 
 ---
 
+## 2026-07-30 (148): 監視バケットの日次記録 (src/report/stage_log.py)
+
+> 「正直フィルターの掛け方どうしたらいいかがわかんなくなってきてる。ドグマや昨日確立した
+> ルールは絶対でそれを尊重したフィルターを作りたいんやが」
+
+### 実データで分かったこと (data/plain/report.json、2026-07-29分・219銘柄)
+
+(146) で入れたフィルタを実データで検証したところ、方向は正しいが中身が空だった:
+
+- 既定表示は 219 → **28件**。全28件にバッジは付いており、ゴミは漏れていない。
+- ただし **28件のうち21件 (75%) が「あと一歩」** で、pivot 0 / buy_stop 0 / stop_loss 0。
+  **発注可能な情報を1つも持たない銘柄が画面の3/4を占めている。**
+- 枯れ度ソートが壊れている: 28件のうち20件が `dryup.value = null` → `-Infinity` で
+  同じ位置に固まる。「あと一歩」は21件中20件が null なので、ソートを切り替えると
+  何の警告も無く実効母集団がすり替わる。
+- チップが空っぽ: TOO_RECENT は自前0件で117件がFORMINGに吸われ、REJECTED は 1/58、
+  IMMATURE は 20/13。BREAKOUT / BREAKOUT_WEAK / NO_BASE は当日0件。
+- スコア上位が全部隠れている: 弘電社99.8 / ジェイ・エス・ビー98.3 / プロクレア95.3 に対し、
+  表示されている中の最高は85.1。
+- FORMINGバケットは4つのstageの混合物 (fresh_high 117 / rejected 58 / forming 13 / volatile 1)。
+
+**根本原因**: チップがエンジンの*理由コード* (TOO_RECENT / IMMATURE / REJECTED) を
+そのまま並べており、ユーザーの*意思決定* (発注する / 見張る / 寝かせる / 見ない) に
+対応していない。ドグマ側は既に3層 (トレンドテンプレート=土俵 1579→219 / VCP=タイミング →7 /
+ピボット=執行 →5) で階層化されているのに、UIがその階層を捨てている。
+
+### なぜ先に計測を入れたか
+
+「あと一歩を既定で出すべきか」を数字で答えたかったが、既存の履歴では出せない:
+
+- `data/history/status.jsonl` はエントリー評価が付いた銘柄だけ (実測55行/12銘柄)。
+  監視タブの母集団がまるごと入っていない。
+- `breadth.vcp_funnel` は日次の集計値のみ。昇格率は銘柄を跨いだ追跡なので集計では不可能。
+
+`status.jsonl` から取れたのは遷移3件だけ (8173: 07-23 WATCH_A → 07-27 BREAKOUT で4日、
+7716: 2日、9247: 3日。8418は左側打ち切り)。**3件とも WATCH_A を2〜4日経由しており、
+待機を飛ばして直接ブレイクしたものは0件**だった。方向としては「待機A/Bは意味がある」を
+支持するが n=3 なので結論にはできない。
+
+### 入れたもの
+
+- `src/report/stage_log.py` 新設。`classify_bucket()` が app.js の
+  `statusVisible` / `cardBadgeIsForming` / `setupStageGroupKey` をサーバ側でミラーし、
+  order / watch / cooled / near / forming / fresh_high / rejected / inactive / unknown に分類。
+  **入力は `vcp_result` ではなく `stock_records`** (EXTENDED/STALE 上書き後の確定レコード)。
+  これで `vcp_funnel` が report.json と2件ずれていた問題も回避できる。
+- `data/history/stage.jsonl` に P1全銘柄 × 毎日1行を追記 (dedupキー `(code, date)`)。
+  `history_store.append_records` を使うので同日再実行は後勝ち。compaction は遅延実行。
+- `breadth.stage_funnel` にバケット別件数。集計だけ見たいとき用。
+- `src/analyze.py` に `stage` ビューと `stage-daily` / `stage-promotion` プリセット。
+  昇格率は「10営業日ぶんの追跡窓が取れる観測日」だけを分母にする(直近日を混ぜると
+  まだ昇格する余地がある分だけ率が過小に出る)。合成データで動作確認済み。
+- `tests/test_stage_log.py` (16ケース)。status が setup_stage より優先されること、
+  near が stage名より優先されること、0件バケットのキーが消えないことを固定。
+
+**UIは意図的に一切触っていない**。2〜3週貯めて `stage-promotion` の実測が出てから
+線引きを決める。今決めると結局また感覚になる。
+
+### 次にやること
+
+1. 2〜3週後に `python -m src.analyze --preset stage-promotion` を見る。
+   near の昇格率が forming/fresh_high と大差なければ、near を既定表示から外す根拠になる。
+2. UIの4層化 (発注 / 監視 / 熟成待ち / 対象外)。理由コードのチップを意思決定の層に置き換える。
+3. 枯れ度ソートの修正 (null を末尾固定にする、または null 件数を明示する)。
+4. EXTENDED/STALE をチップから外し、レビュー専用ビューへ移す。
+
+### ついでに直したもの: tests/conftest.py の安全網の穴
+
+`conftest.py` の `isolate_write_paths` は**追記専用JSONLの定数を1つも塞いでいなかった**
+(`STATUS_HISTORY_PATH` = 旧JSONだけ差し替えていた)。`status.jsonl` / `sector.jsonl` は
+`test_pipeline.py` が自前で monkeypatch していたので露見していなかったが、
+今回 `stage.jsonl` を足したところ **test_pipeline が実リポジトリの
+`data/history/stage.jsonl` に架空銘柄 (1111/3333) を書き込んだ**。
+`STATUS_HISTORY_JSONL` / `SECTOR_HISTORY_JSONL` / `STAGE_HISTORY_JSONL` の3つを
+conftest 側に追加して塞いだ。汚染された stage.jsonl は 0 バイトへ戻した
+(sandbox では削除不可のため。空ファイルは `iter_records` が素通しするので無害)。
+
+### 検証
+
+- `pytest`: 464 passed。sandbox では pyarrow 未導入のため
+  `test_indices` / `test_prices` の3件が parquet エンジン不在で落ちるが、本件と無関係の環境要因。
+- 実データ (219銘柄) でバケット内訳が手計算と一致することを確認 (上記の数字)。unknown 0件。
+- `stage-promotion` の SQL は合成データ (28営業日 × 40銘柄) で昇格率が意図どおり出ることを確認。
+- テスト後に `data/history/stage.jsonl` が 0 バイトのままであることを確認 (安全網が効いている)。
+
+---
+
 ## 2026-07-29 (147): 生成物をローカルで読めるようにする (tools/pull_site_data.py)
 
 > 「リモートにある株データをローカルで参照できるようにしたい。今は暗号化されちゃってる

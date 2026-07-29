@@ -465,6 +465,7 @@ def update_breadth(
     priority_counts: dict | None = None,
     market_signal: dict | None = None,
     vcp_funnel: dict | None = None,
+    stage_funnel: dict | None = None,
     snapshot_suffix: str = "",
 ) -> dict:
     # snapshot_suffix 指定時は canonical breadth.json の履歴をベースに当日エントリを
@@ -495,6 +496,11 @@ def update_breadth(
         # VCP評価対象(P1)の origin/status 分布を地合い観測用に記録。
         # 二段目リーダーが高値更新中(TOO_RECENT)で土俵に乗らない比率などを追う。
         entry["vcp_funnel"] = vcp_funnel
+    if stage_funnel is not None:
+        # 監視タブのバケット別内訳 (src/report/stage_log.py)。vcp_funnel は
+        # VCP評価時点の status なので EXTENDED/STALE の上書き前で report.json と
+        # 数件ずれる。こちらは stock_records から数えるので画面と一致する。
+        entry["stage_funnel"] = stage_funnel
     breadth["history"] = [h for h in breadth["history"] if h.get("date") != date_str]
     breadth["history"].append(entry)
     breadth["history"] = breadth["history"][-keep_days:]

@@ -27,7 +27,7 @@ def isolate_write_paths(tmp_path, monkeypatch):
     import src.pipeline as pipeline_mod
     import src.universe as universe_mod
     from src.data import edinetdb, fundamentals, indices, jquants, prices
-    from src.report import build_site, dryup_log, heatmap, positions
+    from src.report import build_site, dryup_log, heatmap, positions, stage_log
     from src.screener import entry
 
     data_dir = tmp_path / "data"
@@ -45,6 +45,12 @@ def isolate_write_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(edinetdb, "STATE_PATH", data_dir / "edinetdb_state.json")
     monkeypatch.setattr(edinetdb, "STORE_PATH", data_dir / "edinetdb_auto.json")
     monkeypatch.setattr(entry, "STATUS_HISTORY_PATH", data_dir / "status_history.json")
+    # 追記専用JSONL (2026-07-27〜) の実体。旧JSONだけ差し替えても本体は素通しなので
+    # ここも塞ぐ。実際 stage.jsonl は安全網に無かったせいで test_pipeline が
+    # data/history/stage.jsonl を実リポジトリに書いた (2026-07-30)。
+    monkeypatch.setattr(entry, "STATUS_HISTORY_JSONL", data_dir / "history" / "status.jsonl")
+    monkeypatch.setattr(heatmap, "SECTOR_HISTORY_JSONL", data_dir / "history" / "sector.jsonl")
+    monkeypatch.setattr(stage_log, "STAGE_HISTORY_JSONL", data_dir / "history" / "stage.jsonl")
     # デフォルト引数束縛のため既定値には効かない(モジュール先頭docstring参照)。
     # それでも定数経由の将来コードのために差し替えておく。
     monkeypatch.setattr(dryup_log, "DRYUP_LOG_PATH", data_dir / "dryup_log.jsonl")

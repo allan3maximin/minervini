@@ -26,6 +26,7 @@ HISTORY_DIR = REPO_ROOT / "data" / "history"
 SOURCES = {
     "status": ("status.jsonl", ["code", "date"]),
     "sector": ("sector.jsonl", ["date"]),
+    "stage": ("stage.jsonl", ["code", "date"]),
 }
 
 PRESETS = {
@@ -55,6 +56,53 @@ PRESETS = {
         GROUP BY 1, 2
         ORDER BY same_status_days DESC
         LIMIT 30
+        """,
+    ),
+    "stage-daily": (
+        "日付ごとの監視バケット件数の推移(直近30日)",
+        """
+        SELECT date, bucket, count(*) AS n
+        FROM stage_latest
+        WHERE date >= (SELECT max(date) FROM stage_latest) - INTERVAL 30 DAY
+        GROUP BY 1, 2
+        ORDER BY date DESC, n DESC
+        """,
+    ),
+    "stage-promotion": (
+        "バケット別の10営業日以内の昇格率(→ order/watch/cooled)",
+        # 「あと一歩(near)を既定で表示すべきか」を決めるための本命クエリ。
+        # 日付は営業日でしか記録されないので、記録された日付そのものを
+        # 営業日カレンダーとして使う (di = 通し番号)。
+        # 観測日は「10営業日ぶんの追跡窓が取れる日」に限る。直近の日を混ぜると
+        # まだ昇格する余地がある分だけ率が過小に出る。
+        """
+        WITH days AS (
+            SELECT date, row_number() OVER (ORDER BY date) AS di
+            FROM (SELECT DISTINCT date FROM stage_latest)
+        ),
+        s AS (
+            SELECT st.code, st.date, st.bucket, d.di
+            FROM stage_latest st JOIN days d USING (date)
+        ),
+        src AS (
+            SELECT * FROM s
+            WHERE bucket IN ('near', 'forming', 'fresh_high', 'rejected')
+              AND di <= (SELECT max(di) FROM days) - 10
+        ),
+        agg AS (
+            SELECT src.bucket,
+                   count(*) AS observations,
+                   count(*) FILTER (WHERE EXISTS (
+                       SELECT 1 FROM s f
+                       WHERE f.code = src.code
+                         AND f.di > src.di AND f.di <= src.di + 10
+                         AND f.bucket IN ('order', 'watch', 'cooled')
+                   )) AS promoted
+            FROM src GROUP BY 1
+        )
+        SELECT bucket, observations, promoted,
+               round(promoted / nullif(observations, 0), 3) AS promotion_rate
+        FROM agg ORDER BY promotion_rate DESC NULLS LAST
         """,
     ),
     "sector-strength": (
