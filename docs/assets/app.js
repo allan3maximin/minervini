@@ -1365,51 +1365,50 @@ function emptyListFilter() {
 // アコーディオンに隔離していたが、「見たいときだけ出す」のはフィルタの仕事なので
 // 一時フィルタのチェックボックスに移した。既定では EXTENDED(伸びすぎ)と
 // STALE(ブレイク鮮度切れ) = 追いかけ禁止だけ非表示にする。
-const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["EXTENDED", "STALE"];
+// 2026-07-30: 既定の非表示に「形成中」を追加した。形成中はユニバースの大半を
+// 占めていて、毎朝のスキャンではまず消したい塊なので、既定で見えている意味が薄い。
+//
+// ただし形成中はエントリーステータス(status)ではなく、セットアップ進行度
+// (setup_stage)から導くカードバッジなので STATUS_ORDER には存在しない。
+// そこでフィルタUI上だけ擬似ステータス FORMING として並べ、showStatuses に
+// 同居させる。こうすると「消したい塊」の管理場所が1つで済み、詳細フィルタの
+// チップから出し入れもできる(専用のシンプルフィルタは不要になった)。
+const PSEUDO_STATUS_FORMING = "FORMING";
+// フィルタのチップに並べる順。形成中は待機Bの次(進行度の並び順)に置く。
+const FILTER_STATUS_ORDER = [
+  "BREAKOUT",
+  "BREAKOUT_WEAK",
+  "WATCH_A",
+  "WATCH_B",
+  PSEUDO_STATUS_FORMING,
+  "EXTENDED",
+  "STALE",
+  "REJECTED",
+  "IMMATURE",
+  "TOO_RECENT",
+  "TOO_VOLATILE",
+  "NO_BASE",
+];
+const FILTER_STATUS_LABELS = { ...STATUS_LABELS, [PSEUDO_STATUS_FORMING]: "形成中(セットアップ未成立)" };
+const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["EXTENDED", "STALE", PSEUDO_STATUS_FORMING];
 function defaultShownStatuses() {
-  return STATUS_ORDER.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
+  return FILTER_STATUS_ORDER.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
 }
 
-// 既定(追いかけ禁止だけ非表示)から変えられているか。既定のままなら「フィルタ適用中」
-// バッジ・除外件数バナーには数えない(常時点灯してノイズになるため)。
+// 既定(追いかけ禁止と形成中が非表示)から変えられているか。既定のままなら
+// 「フィルタ適用中」バッジ・除外件数バナーには数えない(常時点灯してノイズになるため)。
 function statusFilterCustom(f) {
   const st = f && f.showStatuses;
   if (!st) return false;
-  // 2026-07-30: 追禁(EXTENDED/STALE)の出し入れはシンプルフィルタ側のトグルが
-  // 担当するようになったので、詳細フィルタの「既定から変えたか」判定からは外す。
-  // 外さないと、シンプル側で追禁を出しただけで詳細側のバッジも点灯して二重計上に
-  // なる(実体の showStatuses は共有なので、片方で変えれば両方に効くのは正しい)。
-  const strip = (a) => a.filter((x) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(x));
-  const cur = strip(st);
-  const def = strip(defaultShownStatuses());
-  return cur.length !== def.length || cur.some((x) => !def.includes(x));
-}
-
-// ---- シンプルフィルタ (2026-07-30) -----------------------------------------
-// 詳細フィルタ(数値レンジ+市場+ステータス全種)は「たまに使う精密機械」で、
-// 毎朝のスキャンで触るのは「このノイズを消したい」という数個のトグルだけだった。
-// そこでボタンを2つに分け、日常操作をこちら側に出す。
-//
-// 4項目は**意味をすべて「チェック=隠す」に統一**する。詳細フィルタ側のチップは
-// 逆に「チェック=表示する」だが、あちらは全種を並べる一覧なのでその向きが自然で、
-// こちらは「消す」だけを選ぶ場なのでこの向きが自然。混ぜないよう別UIにしている。
-//
-// - 追禁だけは既定ON(=隠す)。従来の既定(EXTENDED/STALE 非表示)と同じ挙動を
-//   そのまま引き継ぐため。実体は showStatuses なので詳細フィルタと二重管理に
-//   ならない(片方で変えればもう片方の表示も追従する)。
-// - 進行度は「形成中を隠す」1個だけ。あと一歩/待機A/B/ブレイクは常に出す。
-//   細かい出し分けが要るときは詳細フィルタのステータスチップを使う。
-function emptySimpleFilter() {
-  return { hideFundFail: false, hideHeavyMargin: false, hideForming: false };
+  const def = defaultShownStatuses();
+  return st.length !== def.length || st.some((x) => !def.includes(x));
 }
 
 // リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
 // のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
 // showStatuses は一時フィルタ側にだけ持つ(恒久フィルタ=設定画面はユニバースの
 // 絞り込み専用で、ステータスは日々切り替える表示トグルのため)。
-// シンプルフィルタの3つのbooleanも同じオブジェクトに同居させ、「リストの見え方を
-// 決める一時状態」を1箇所にまとめる。
-let adhocListFilter = { ...emptyListFilter(), ...emptySimpleFilter(), showStatuses: defaultShownStatuses() };
+let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses() };
 
 // ---- フィルタフォームのチップUI共通ヘルパ (2026-07-27 UI刷新) --------------
 // 市場/ステータスの表示トグルは、小さいチェックボックスから「押せるチップ」に
@@ -1618,13 +1617,14 @@ function initAdhocFilter() {
   const segWrap = document.getElementById("alf-show-segments");
   const statWrap = document.getElementById("alf-show-statuses");
 
-  // ステータスのチェックボックスは STATUS_ORDER から動的生成する
+  // ステータスのチェックボックスは FILTER_STATUS_ORDER から動的生成する
   // (ステータスを増やしたときにHTML側の追記漏れが起きないように)。
+  // 擬似ステータスの FORMING(形成中)もここに混ざる。
   if (statWrap && !statWrap.dataset.built) {
     statWrap.dataset.built = "1";
-    statWrap.innerHTML = STATUS_ORDER.map(
+    statWrap.innerHTML = FILTER_STATUS_ORDER.map(
       (st) =>
-        `<label class="lf-chip"><input type="checkbox" value="${st}"><span>${escapeHtml(STATUS_LABELS[st] || st)}</span></label>`
+        `<label class="lf-chip"><input type="checkbox" value="${st}"><span>${escapeHtml(FILTER_STATUS_LABELS[st] || st)}</span></label>`
     ).join("");
   }
 
@@ -1706,8 +1706,6 @@ function applyAdhocFilterFromForm() {
   if (statWrap) {
     statWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => stats.push(cb.value));
   }
-  // 2026-07-30: 丸ごと作り直すとシンプルフィルタ側の3トグルが消えるので、
-  // 既存の値の上に詳細フィルタの項目だけを重ねる。
   adhocListFilter = {
     ...adhocListFilter,
     minClose: num("alf-min-close"),
@@ -1721,85 +1719,7 @@ function applyAdhocFilterFromForm() {
     showStatuses: statWrap ? stats : defaultShownStatuses(),
   };
   updateAdhocFilterBadge();
-  // 詳細フィルタ側でステータスを変えるとシンプル側の「追禁を隠す」の状態も
-  // 変わりうるので、チェックボックスを引き直す。
-  initSimpleFilter();
   rerenderStockList();
-}
-
-// ---- シンプルフィルタ (2026-07-30) のUI ------------------------------------
-// トグルは4つ。3つは adhocListFilter の boolean、追禁だけ showStatuses の
-// EXTENDED/STALE を出し入れする(詳細フィルタと実体を共有するため)。
-// 「適用」ボタンは置かず、押した瞬間に反映する(項目が4つしかない上に、
-// 毎朝ノイズを消すための道具なので往復させる理由がない)。
-
-// 追禁(EXTENDED/STALE)を隠している状態か。
-function simpleCooledHidden() {
-  const shown = adhocListFilter.showStatuses || defaultShownStatuses();
-  return !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.some((st) => shown.includes(st));
-}
-
-function setSimpleCooledHidden(hide) {
-  const shown = (adhocListFilter.showStatuses || defaultShownStatuses()).filter(
-    (st) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(st)
-  );
-  if (!hide) shown.push(...LIST_FILTER_DEFAULT_HIDDEN_STATUSES);
-  // STATUS_ORDER の並びを保つ(詳細フィルタのチップ同期で順序差が出ないように)。
-  adhocListFilter.showStatuses = STATUS_ORDER.filter((st) => shown.includes(st));
-}
-
-const SIMPLE_FILTER_TOGGLES = [
-  { key: "hideFundFail", label: "F不を隠す", title: "ファンダ不合格 (エントリー取り止め)" },
-  { key: "hideHeavyMargin", label: "買重を隠す", title: "信用買残が重い" },
-  { key: "hideForming", label: "形成中を隠す", title: "セットアップ形成中 (あと一歩・待機・ブレイクは残る)" },
-  { key: "cooled", label: "追禁を隠す", title: "追いかけ禁止 (伸びすぎ / ブレイク鮮度切れ)" },
-];
-
-function simpleToggleValue(key) {
-  return key === "cooled" ? simpleCooledHidden() : !!adhocListFilter[key];
-}
-
-function initSimpleFilter() {
-  const wrap = document.getElementById("slf-toggles");
-  if (!wrap) return;
-  if (!wrap.dataset.built) {
-    wrap.dataset.built = "1";
-    wrap.innerHTML = SIMPLE_FILTER_TOGGLES.map(
-      (t) =>
-        `<label class="lf-chip" title="${escapeHtml(t.title)}"><input type="checkbox" data-key="${t.key}"><span>${escapeHtml(t.label)}</span></label>`
-    ).join("");
-    wrap.addEventListener("change", (e) => {
-      const cb = e.target.closest("input[type=checkbox][data-key]");
-      if (!cb) return;
-      const key = cb.dataset.key;
-      if (key === "cooled") setSimpleCooledHidden(cb.checked);
-      else adhocListFilter[key] = cb.checked;
-      syncChipStates(wrap);
-      updateSimpleFilterBadge();
-      updateAdhocFilterBadge(); // 追禁は showStatuses を触るので詳細側の数も更新
-      rerenderStockList();
-    });
-  }
-  // ビューを離れて戻ったとき・詳細フィルタ側で追禁を出したときのために毎回同期。
-  wrap.querySelectorAll("input[type=checkbox][data-key]").forEach((cb) => {
-    cb.checked = simpleToggleValue(cb.dataset.key);
-  });
-  syncChipStates(wrap);
-  updateSimpleFilterBadge();
-}
-
-// シンプルフィルタボタンのバッジ。既定(追禁だけ隠す)からの差分を数える。
-// 追禁を隠している状態は既定なので数えない(常時点灯するとバッジの意味が無い)。
-function updateSimpleFilterBadge() {
-  const badge = document.getElementById("simple-filter-badge");
-  if (!badge) return;
-  let n = 0;
-  if (adhocListFilter.hideFundFail) n++;
-  if (adhocListFilter.hideHeavyMargin) n++;
-  if (adhocListFilter.hideForming) n++;
-  if (!simpleCooledHidden()) n++; // 既定と違う=追禁を出している
-  badge.textContent = n;
-  badge.hidden = n === 0;
 }
 
 // フィルタバーのsummaryに出す「適用中」バッジ。有効な項目数を数字で出す。
@@ -1814,7 +1734,7 @@ function updateAdhocFilterBadge() {
   // 市場: 全表示なら絞り込みなし。チェックを外した数だけ絞り込みとして数える。
   const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
   n += Math.max(0, LIST_FILTER_SEGMENTS.length - shown);
-  // ステータス: 既定(追いかけ禁止だけ非表示)から変えている時のみ1件として数える。
+  // ステータス: 既定(追禁と形成中が非表示)から変えている時のみ1件として数える。
   if (statusFilterCustom(f)) n += 1;
   if (n > 0) {
     badge.textContent = n;
@@ -1858,10 +1778,6 @@ function shownStatuses() {
   return (adhocListFilter && adhocListFilter.showStatuses) || defaultShownStatuses();
 }
 
-function statusVisible(status) {
-  return status == null || shownStatuses().includes(status);
-}
-
 // カードの状態バッジが「形成中」になる銘柄か。statusBadgeHtml と同じ判定順で
 // 書く(あちらを変えたらこちらも変える。ズレるとフィルタと表示が食い違う)。
 function cardBadgeIsForming(s) {
@@ -1870,22 +1786,22 @@ function cardBadgeIsForming(s) {
   return !!g && g !== "near";
 }
 
-// シンプルフィルタの3トグル。すべて「true = 隠す」。
-function simpleFilterVisible(s) {
-  const f = adhocListFilter || {};
-  if (f.hideFundFail && s.fund_verdict === "fail") return false;
-  if (f.hideHeavyMargin && s.margin && s.margin.badge === "heavy_buy") return false;
-  if (f.hideForming && cardBadgeIsForming(s)) return false;
-  return true;
+// ステータスチップによる表示判定。カードに「形成中」バッジが出る銘柄は、
+// 素の status(REJECTED/IMMATURE/…)ではなく擬似ステータス FORMING のチップで
+// 出し入れする。フィルタの見出しとカードの見た目を一致させるため
+// (チップに「形成中」と書いてあるのに消えない、を避ける)。
+function statusVisible(s) {
+  const shown = shownStatuses();
+  if (cardBadgeIsForming(s)) return shown.includes(PSEUDO_STATUS_FORMING);
+  return s.status == null || shown.includes(s.status);
 }
 
 function applyListFilter(stocks) {
   const perm = loadListFilters();
   const adhoc = adhocListFilter;
-  // ステータス/シンプルフィルタの出し分けは「除外件数」には数えない。既定で
-  // 追禁を隠している状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
-  // 「隠す」トグルは自分で押した結果が見えていれば十分で、件数告知は不要。
-  const visible = stocks.filter((s) => statusVisible(s.status) && simpleFilterVisible(s));
+  // ステータスの出し分けは「除外件数」には数えない。既定で追禁・形成中を隠して
+  // いる状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
+  const visible = stocks.filter((s) => statusVisible(s));
   if (!listFilterActive(perm) && !listFilterActive(adhoc)) {
     return { kept: visible, excluded: 0 };
   }
@@ -1952,8 +1868,9 @@ function renderStockList(report) {
   container.appendChild(renderCardList(stocks));
 }
 
-// ツールバー左の件数表示。タブが無くなって「今何件見ているか」の手掛かりが
-// 消えたので、その代わりに出す。
+// 件数表示。タブが無くなって「今何件見ているか」の手掛かりが消えたので出している。
+// 2026-07-30 にツールバー左からページヘッダ右上へ移した(表示/非表示は showView が
+// ビュー名で切り替えるので、ここでは中身だけ書く)。
 function updateListSummary(shown, excluded) {
   const el = document.getElementById("list-summary");
   if (!el) return;
@@ -2048,17 +1965,15 @@ function syncSortSheet() {
 // 呼ばれるが、イベント登録は初回のみ(dataset.wired)。ラベル/バッジ同期は毎回。
 function initListTools() {
   const filterBtn = document.getElementById("list-filter-btn");
-  const simpleBtn = document.getElementById("list-simple-filter-btn");
   const sortBtn = document.getElementById("list-sort-btn");
   const backdrop = document.getElementById("list-sheet-backdrop");
   const filterSheet = document.getElementById("filter-sheet");
-  const simpleSheet = document.getElementById("simple-filter-sheet");
   const sortSheet = document.getElementById("sort-sheet");
   if (!filterBtn || !sortBtn || !backdrop) return;
 
   const closeSheets = () => {
     backdrop.hidden = true;
-    [filterSheet, simpleSheet, sortSheet].forEach((sheet) => {
+    [filterSheet, sortSheet].forEach((sheet) => {
       if (sheet) { sheet.classList.remove("open"); sheet.hidden = true; }
     });
   };
@@ -2077,9 +1992,6 @@ function initListTools() {
   filterBtn.dataset.wired = "1";
 
   filterBtn.addEventListener("click", () => openSheet(filterSheet));
-  // シンプルフィルタは開くたびに現在値を引き直す(詳細フィルタ側で追禁を
-  // 出し入れした直後でも表示が食い違わないように)。
-  if (simpleBtn) simpleBtn.addEventListener("click", () => { initSimpleFilter(); openSheet(simpleSheet); });
   sortBtn.addEventListener("click", () => { syncSortSheet(); openSheet(sortSheet); });
   backdrop.addEventListener("click", closeSheets);
   document.querySelectorAll("#view-stocklist .sheet-close").forEach((b) => {
@@ -2176,27 +2088,46 @@ function renderCardList(stocks) {
     } else {
       card.classList.add("row-static");
     }
-    // 上段: 「銘柄名（コード）」+ 状態/ファンダ/信用バッジ + SC/RS チップ
-    // 下段: 終値（±前日比%） + セクター(強度) + 枯れ度
-    //   (下段はflex-wrapで、狭い画面でもバッジが潰れず自然に折り返す)
-    // 3段目: セットアップ進行度・不足理由(setup_stage がある銘柄のみ)
-    const stageLine = s.setup_stage
-      ? `<div class="sc-row sc-row-stage${s.setup_stage.near ? " sc-stage-near" : ""}">${escapeHtml(setupStageBadgeText(s))}</div>`
+    // カードのレイアウト (2026-07-30 作り直し)。
+    //
+    // 以前は1段目に「名前+バッジ群+SC+RS」を全部詰めていたので、iPhone実機
+    // (幅390px)では名前が長い銘柄でRSチップが右端で切れていた。名前は可変長で
+    // 上限が読めない一方、SC/RSは毎行必ず見る固定幅の情報なので、可変のものと
+    // 固定のものを同じ行で競わせたのが敗因。
+    //
+    // そこで「行ごとに1つだけ伸縮するものを置く」構成に直す:
+    //   1段目: [銘柄名（コード）… 伸縮/省略] ......... [SC][RS] (固定・絶対に縮めない)
+    //   2段目: [状態/F不/買重バッジ] [終値（±%）] ..... [DU]    (左詰め+右端DU)
+    //   3段目: [セクター 強度 ・ 進行度/不足理由] 1行に省略
+    //
+    // 2段目は wrap させない。以前は flex-wrap + セクターの text-align:right で、
+    // DUの有無によって右端の位置が行ごとに動いて「崩れて見える」原因になっていた。
+    // 3段目も1行固定にする。「未達: A / B / C / D」が3行に折り返してカードの
+    // 大半を占めていたが、詳細は個別画面で読むもので一覧では要らない(全文はtitle)。
+    const stageText = setupStageBadgeText(s);
+    // sectorStrengthHtml は業種不明のとき "-" を返すが、3段目では区切り記号だけが
+    // 浮くので空扱いにする。
+    const sectorHtml = s.sector33 ? sectorStrengthHtml(s) : "";
+    const metaText = [sectorHtml, stageText ? escapeHtml(stageText) : ""]
+      .filter(Boolean)
+      .join(" ・ ");
+    const metaTitle = escapeHtml([s.sector33 || "", stageText].filter(Boolean).join(" / "));
+    const metaLine = metaText
+      ? `<div class="sc-row sc-row-meta${s.setup_stage && s.setup_stage.near ? " sc-stage-near" : ""}" title="${metaTitle}">${metaText}</div>`
       : "";
     card.innerHTML = `
-      <div class="sc-row">
+      <div class="sc-row sc-row-main">
         <span class="sc-name">${escapeHtml(s.name ?? "-")}<span class="sc-code">（${escapeHtml(s.code)}）</span></span>
-        <span class="sc-metrics">
-          <span class="sc-flags">${statusBadgeHtml(s)}${marginBadgeHtml(s.margin)}${fundVerdictBadgeHtml(s)}</span>
+        <span class="sc-chips">
           <span class="sc-score-chip">SC ${s.total_score ?? "-"}</span>
           <span class="sc-rs-chip">RS ${s.rs ?? "-"}</span>
         </span>
       </div>
       <div class="sc-row sc-row-sub">
+        <span class="sc-flags">${statusBadgeHtml(s)}${fundVerdictBadgeHtml(s)}${marginBadgeHtml(s.margin)}</span>
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
-        <span class="sc-sector">${sectorStrengthHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
-      </div>${stageLine}`;
+      </div>${metaLine}`;
     list.appendChild(card);
   }
   return list;
@@ -2704,7 +2635,6 @@ function wireTabSlide(tabs, tabSelector, activate) {
 function initListView() {
   if (!document.getElementById("stock-list-body")) return;
   initAdhocFilter();
-  initSimpleFilter();
   initListTools();
 }
 
@@ -4942,9 +4872,17 @@ function showView(hash) {
   // ページ切替時に前回のスクロール位置を引き継がないようリセットする。
   const activeSection = document.getElementById(`view-${name}`);
   if (activeSection) activeSection.scrollTop = 0;
-  // タイトル(MinerviniScreener)はダッシュボードのみ表示。他ビューは縦領域を確保するため隠す。
+  // 2026-07-30: タイトル(MinerviniScreener)は全ビューで常時表示にした。以前は
+  // 縦領域を稼ぐためダッシュボード以外で隠していたが、上部に何も無いと現在地の
+  // 手掛かりが無く、件数の置き場所も無かった(ユーザー要望)。
+  // 代わりに嵩む要素だけ出し分ける: 最終更新行はダッシュボードのみ、
+  // 件数はリスト画面のみ。
   const pageHeader = document.querySelector(".page-header");
-  if (pageHeader) pageHeader.hidden = name !== "dashboard";
+  if (pageHeader) pageHeader.hidden = false;
+  const metaLine = document.getElementById("generated-at");
+  if (metaLine) metaLine.hidden = name !== "dashboard";
+  const listCount = document.getElementById("list-summary");
+  if (listCount) listCount.hidden = name !== "stocklist";
   document.querySelectorAll(".dock-btn").forEach((btn) => {
     const active = btn.dataset.view === name;
     btn.classList.toggle("active", active);

@@ -81,15 +81,35 @@ a { color: var(--link); }
 .page-header { flex: 0 0 auto; margin-bottom: 10px; }
 .page-header[hidden] { display: none; }
 .meta-line { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; }
+.meta-line[hidden] { display: none; }
 
+/* 2026-07-30: 全ビューで常時表示になったので、折り返さない1行に固定する
+   (flex-wrap があるとタイトルと件数が段違いになりヘッダの高さが跳ねる)。 */
 .page-header-top {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   margin-bottom: 4px;
 }
+.page-header-top h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* リスト画面の件数。右上に置く「今何件見ているか」の手掛かり。 */
+.page-header-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.page-header-count[hidden] { display: none; }
 /* 市況分析タブのカード(シグナル/スクリーニング状況/VCPファネル)と
    見た目を揃える: padding 12px 16px / margin-bottom 14px / タイトル13px 700 */
 .breadth-meter {
@@ -346,9 +366,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .stage-near .stage-label { border-color: var(--accent); color: var(--accent); }
 .stage-desc { color: var(--text-dim); font-size: 11px; }
 
-/* カード3段目: 進行度・不足理由(監視タブのみ) */
-.sc-row-stage { font-size: 11px; color: var(--text-dim); }
-.sc-row-stage.sc-stage-near { color: var(--accent); }
+/* カード3段目(.sc-row-stage)は 2026-07-30 に .sc-row-meta へ置き換えた。
+   規則は .stock-card 側にまとめてある。 */
 
 .status-section h3 {
   display: inline-block;
@@ -1924,6 +1943,13 @@ a.nav-btn:hover { border-color: var(--link); }
 .stock-card.row-static { cursor: default; }
 .stock-card.row-static:hover { background: var(--panel); }
 
+/* 2026-07-30 カード作り直し。「1つの行で伸縮するのは1要素だけ」を徹底する。
+     1段目 = 銘柄名(伸縮・省略) ......... SC/RSチップ(固定・絶対に縮めない)
+     2段目 = 状態バッジ + 終値(左詰め) ... DU(右端)
+     3段目 = 業種・進行度(1行に省略)
+   以前は1段目に名前もバッジもSC/RSも全部積んでいたため、iPhone実機(幅390px)で
+   名前が長い銘柄のRSチップが右端で切れていた。可変長(名前)と固定幅(チップ)を
+   同じ行で競わせたのが原因。 */
 .sc-row {
   display: flex;
   align-items: baseline;
@@ -1932,7 +1958,25 @@ a.nav-btn:hover { border-color: var(--link); }
   font-size: 13px;
   line-height: 1.5;
 }
-.sc-row-sub { font-size: 12px; color: var(--text-dim); flex-wrap: wrap; row-gap: 4px; }
+/* 2段目は折り返さない。以前は flex-wrap + セクターの text-align:right だったので、
+   DUの有無で右端の位置が行ごとに動き「崩れて見える」原因になっていた。 */
+.sc-row-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+/* 3段目(業種・セットアップ進行度)。「未達: A / B / C / D」が3行に折り返して
+   カードの大半を占めていたので1行固定にした。全文は title 属性で読める。 */
+.sc-row-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc-row-meta.sc-stage-near { color: var(--accent); }
 
 /* 銘柄名だけ伸縮させ、あふれたら省略。他は成り行き幅 */
 .sc-name {
@@ -1944,13 +1988,21 @@ a.nav-btn:hover { border-color: var(--link); }
   font-weight: 600;
 }
 .sc-code { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
-/* バッジが増えた日でもカード幅を超えないよう縮められるようにする(0 0 autoだと
-   はみ出して一覧が横スクロールする)。中身は各バッジがnowrapなので潰れはしない。 */
-.sc-metrics { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 5px; }
+/* SC/RSは毎行必ず読む固定幅の情報なので、絶対に縮めない・切らない。
+   同じ行で伸縮するのは名前だけ(flex:1 1 auto + min-width:0)なので、
+   幅が足りなければ必ず名前の方が省略される。 */
+.sc-chips { flex: 0 0 auto; display: flex; align-items: baseline; gap: 5px; }
 
-/* 2026-07-27: 買重(信用買残)/F不(ファンダ不合格)バッジは短縮表記にしてSCチップの
-   左横へ移動。3段目のバッジ行に置くとカード幅を食って折り返しが起きていた。 */
-.sc-flags { display: inline-flex; align-items: baseline; gap: 4px; }
+/* 状態(ブレイク/待機/あと一歩/形成中)・F不・買重のバッジ。2026-07-30に1段目から
+   2段目の先頭へ移した。幅が足りないときはここが最初に縮む。 */
+.sc-flags {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+}
 .sc-flags:empty { display: none; }
 .sc-flags .sell-signal-badge,
 .sc-flags .fund-badge {
@@ -1982,19 +2034,12 @@ a.nav-btn:hover { border-color: var(--link); }
 .chg-pos { color: var(--accent); }
 .chg-neg { color: var(--danger); }
 .chg-flat { color: var(--text-dim); }
-.sc-sector {
-  flex: 1 1 100px;
-  min-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
-.sc-dryup { flex: 0 0 auto; white-space: nowrap; }
-/* 枯れ度が無い銘柄は「-」を出さず要素ごと消す(2026-07-30)。gapの分だけ
-   余白が残るのを防ぐため display:none にする。 */
+/* DUは2段目の右端に固定する(margin-left:auto)。値が無い銘柄は要素ごと消えるが、
+   右端が空くだけなので他の要素の位置は動かない。 */
+.sc-dryup { flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
 .sc-dryup:empty { display: none; }
-/* .sc-margin / .sc-fund は 2026-07-27 に .sc-flags(1段目)へ移動して廃止。 */
+/* .sc-margin / .sc-fund は 2026-07-27 に .sc-flags へ移動して廃止。
+   .sc-sector は 2026-07-30 に3段目(.sc-row-meta)へ統合して廃止。 */
 
 /* ------------------------------------------------------- 投資法ページ */
 
@@ -2335,19 +2380,6 @@ a.nav-btn:hover { border-color: var(--link); }
   border-color: rgba(52, 211, 153, 0.55);
   color: var(--accent);
   font-weight: 600;
-}
-
-/* かんたんフィルタ (2026-07-30)。詳細フィルタのチップは「チェック=表示する」で
-   点灯が緑=良い状態だが、こちらは「チェック=隠す」なので同じ緑だと意味が逆に
-   読める。点灯色を琥珀(=間引いている状態)に変えて取り違えを防ぐ。
-   1行1項目にして、指で押す的を横幅いっぱいに広げる。 */
-.lf-chips-hide { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 12px; }
-.lf-chips-hide .lf-chip { justify-content: center; min-height: 40px; font-size: 13px; }
-.lf-chips-hide .lf-chip:has(input:checked),
-.lf-chips-hide .lf-chip.is-on {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.5);
-  color: var(--warn);
 }
 
 .lf-actions {
@@ -2900,14 +2932,8 @@ a.nav-btn:hover { border-color: var(--link); }
   border-color: rgba(248, 113, 113, 0.36);
 }
 
-/* 件数表示(旧タブの代わりにツールバー左へ置いた)。 */
-.list-summary {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-dim);
-  padding: 0 4px;
-  white-space: nowrap;
-}
+/* 件数表示。2026-07-30 にツールバー左からページヘッダ右上へ移した
+   (.page-header-count を参照)。旧クラス .list-summary の規則は廃止。 */
 
 /* 個別画面のスコア内訳: 合成スコアの下に tech_score の3成分を並べる。 */
 .score-subhead {

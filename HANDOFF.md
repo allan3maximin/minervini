@@ -666,10 +666,25 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
     画面上の並びとスワイプ順が食い違うことがない。分けて実装しないこと。
 - `renderStockList(report)`: `#stock-list-body` をクリア → フィルタ注記 → `renderCardList(stocks)`。
   0件時は「該当銘柄なし」/(フィルタで消えた場合)「フィルタ条件に合う銘柄なし」。
-  `updateListSummary` が `#list-summary` に `N件 (M件除外)` を出す。
+  `updateListSummary` が `#list-summary` に `N件 (M件除外)` を出す。**この要素は
+  ツールバーではなくページヘッダ右上** (`.page-header-count`) にある (2026-07-30移動)。
+  出し分けは `showView` の担当で、`updateListSummary` は中身を書くだけ。
+- **ページヘッダ (`.page-header`) は全ビューで常時表示** (2026-07-30改定。以前は
+  ダッシュボードのみ)。縦領域を稼ぐより「現在地の手掛かり」を優先した結果。
+  嵩む要素だけ `showView` がビュー名で出し分ける: 最終更新行 `#generated-at` は
+  dashboard のみ、件数 `#list-summary` は stocklist のみ。
 - `renderCardList(stocks)`: **呼び出し側が並べ替え済みの前提**で、内部ソートはしない。
-  1枚のカード = スコア / コード・銘柄名 / 終値・前日比 / バッジ行 (`.sc-flags`)。
-  - バッジ行 = `statusBadgeHtml(s)` + `marginBadgeHtml(s.margin)` + `fundVerdictBadgeHtml(s)`。
+  カードは3段固定 (2026-07-30に作り直し。経緯は log.md (146))。
+  **設計原則は「1つの行で伸縮するのは1要素だけ」**:
+  1. `.sc-row-main` = `.sc-name`(伸縮・省略) + `.sc-chips`(SC/RS、`flex:0 0 auto`)
+  2. `.sc-row-sub` = `.sc-flags`(状態/F不/買重) + `.sc-close`(終値・前日比) …
+     右端に `.sc-dryup`(`margin-left:auto`)。**`flex-wrap: nowrap`**
+  3. `.sc-row-meta` = 業種(強度) ・ 進行度/不足理由。**1行に省略**(全文は title 属性)
+  - 旧構成(1段目に名前もバッジもSC/RSも全部積む)は実機iPhone(幅390px)で
+    RSチップが右端で切れていた。**可変長(銘柄名)と固定幅(チップ)を同じ行で
+    競わせないこと**。2段目を wrap させると DU の有無で右端位置が行ごとに動き、
+    3段目を折り返させると「未達: A / B / C / D」が3行に伸びてカードを支配する。
+  - バッジ = `statusBadgeHtml(s)` + `fundVerdictBadgeHtml(s)` + `marginBadgeHtml(s.margin)`。
   - `statusBadgeHtml`: `STATUS_BADGE` に一致すれば〔ブレイク〕〔ブレイク弱〕〔待機A/B〕〔追禁〕。
     無ければ `setupStageGroupKey(s)` から〔あと一歩〕/〔形成中〕。
   - `s.tier === "cooled"` のカードに `.sc-cooled`(opacity 0.55、hover/focusで1.0)を付ける。
@@ -691,35 +706,28 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
   `minervini_list_filters`。アドホック=ボトムシート、メモリ上の `adhocListFilter`(リロードで消える)。
   両方を `stockPassesListFilter` に通し、`applyListFilter` が `{kept, excluded}` を返す。
   - **表示ステータス (`showStatuses`) はアドホック側だけが持つ** (2026-07-27追加)。既定は
-    `defaultShownStatuses()` = `STATUS_ORDER` から `LIST_FILTER_DEFAULT_HIDDEN_STATUSES`
-    (= EXTENDED/STALE = 追いかけ禁止) を除いたもの。チェックボックスは `initAdhocFilter` が
-    `STATUS_ORDER` から動的生成する(`#alf-show-statuses`)ので、ステータスを増やしてもHTML修正不要。
+    `defaultShownStatuses()` = `FILTER_STATUS_ORDER` から `LIST_FILTER_DEFAULT_HIDDEN_STATUSES`
+    (= EXTENDED / STALE = 追禁、および FORMING = 形成中) を除いたもの。チェックボックスは
+    `initAdhocFilter` が `FILTER_STATUS_ORDER` から動的生成する(`#alf-show-statuses`)ので、
+    ステータスを増やしてもHTML修正不要。
+  - **`FORMING`(形成中)は擬似ステータス** (2026-07-30追加)。実体は `status` ではなく
+    `setup_stage` 由来のカードバッジなので `STATUS_ORDER` には無く、**フィルタUI上だけ**
+    同列に並べる。判定は `statusVisible(s)`: `cardBadgeIsForming(s)` が真なら素の
+    `status`(REJECTED/IMMATURE/…)ではなく `FORMING` チップだけを見る。
+    - **なぜ専用トグルではなく擬似ステータスなのか**: 形成中も追禁も利用者から見れば
+      同じ「毎朝まず消したい塊」で、消し方が2箇所に分かれていると管理が破綻する。
+      1つの `showStatuses` に寄せれば既定値も差分判定も1箇所で済む。
+    - `cardBadgeIsForming` は **`statusBadgeHtml` と同じ判定順で書くこと**。ズレると
+      チップに「形成中」と書いてあるのにカードが消えない、が起きる。
   - 実装上の注意2点: (a) ステータス絞り込みは他フィルタが未設定でも効く必要があるため、
     `applyListFilter` の早期returnより**前**で filter する。(b) 除外件数 `excluded` には
     **含めない**(含めると「フィルタでN件を除外中」バナーが常時点灯する)。同じ理由で
     `statusFilterCustom()` は全ステータスではなく**既定セット**との差分でカスタム判定する。
-- **UIはシンプル/詳細の2ボタン構成 (2026-07-30追加)**。詳細フィルタ(`#filter-sheet`、
-  数値レンジ・市場・ステータス全種)は従来のまま。左に「かんたんフィルタ」
-  (`#list-simple-filter-btn` → `#simple-filter-sheet`)を追加し、毎朝使う
-  「このノイズを消す」操作だけを出した。経緯は log.md (145)。
-  - 4トグルは**すべて「チェック=隠す」で意味を統一**する(詳細側のチップは逆に
-    「チェック=表示する」。取り違え防止に点灯色を緑ではなく琥珀にしてある)。
-    中身は `SIMPLE_FILTER_TOGGLES` から `initSimpleFilter` が生成する。
-  - `hideFundFail` / `hideHeavyMargin` / `hideForming` は `adhocListFilter` の
-    boolean。既定は全て false(=表示する)。判定は `simpleFilterVisible` が行い、
-    ステータスと同じく `applyListFilter` の**前段**で落とす(=`excluded` に数えない)。
-  - `hideForming` の判定 `cardBadgeIsForming` は **`statusBadgeHtml` と同じ順序で
-    書くこと**。ズレるとバッジ表示とフィルタの対象が食い違う。あと一歩・待機A/B・
-    ブレイクは対象外(進行度の細かい出し分けは詳細フィルタの仕事)。
-  - **「追禁を隠す」だけは専用フィールドを持たず `showStatuses` を実体にする**
-    (既定ON=隠す)。専用booleanを足すと詳細フィルタのステータスチップと二重管理に
-    なり、片方だけ変えたときに矛盾する。共有していれば追従が自動で成立する。
-    代わりに `statusFilterCustom()` は EXTENDED/STALE を除いて比較し、2つのボタンの
-    バッジが同じ操作を二重に数えないようにしている。
-  - かんたんフィルタに「適用」ボタンは無く、押した瞬間に反映する。
-  - `applyAdhocFilterFromForm` は `adhocListFilter` を組み立て直すので、
-    **先頭の `...adhocListFilter` を消さないこと**。消すと詳細フィルタの「適用」を
-    押すたびにシンプル側の3トグルがリセットされる。
+- **フィルタのボタンは1つ (`#list-filter-btn` → `#filter-sheet`) だけ**。
+  2026-07-30に「かんたんフィルタ」を足したが同日中に撤去した。ユーザーの結論は
+  **「トグルを増やすより既定を正しくしろ」**で、既定で追禁と形成中を隠し、
+  出したいときだけ詳細フィルタのステータスチップから戻す形に落ち着いた。
+  同種の提案をするときはこの経緯を先に読むこと。log.md (145)(146)。
 - `renderP1Warning`: report.p1_scarce で警告バナー (#p1-warning)
 - `renderMarketSignal(breadth)` (2026-07-11追加、2026-07-18に地合い詳細パネル+
   market_score/score_trendバッジ+スパークライン2本を追加): breadth.jsonのhistory
