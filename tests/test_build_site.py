@@ -57,6 +57,55 @@ DRYUP_CONFIG = {
     "vcp": {"last_depth_max": 0.12},
 }
 
+# ------------------------------------------- 日中レンジ(始値/高値/安値)と出来高
+# 日次レビューが「終値が日中レンジのどこで引けたか」を判定するための素材 (2026-07-31)。
+
+_EMPTY_VCP = {"vcp_score": None, "footprint": None, "must_flags": None, "contractions": []}
+
+
+def _ohlcv_row(**overrides):
+    row = {
+        "open": 1000.0, "high": 1050.0, "low": 990.0, "close": 1010.0,
+        "volume": 300000.0, "vol_ma50": 200000.0, "rs": 85,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_assemble_stock_record_carries_intraday_range_and_volume():
+    record = assemble_stock_record(
+        "7134", "T", _ohlcv_row(), {}, _EMPTY_VCP, {"status": "WATCH_B", "pivot": None},
+        _fund_info(), DRYUP_CONFIG,
+    )
+    assert (record["open"], record["high"], record["low"], record["close"]) == (
+        1000.0, 1050.0, 990.0, 1010.0)
+    assert record["volume"] == 300000  # 株数なので整数に丸める
+    # ピボットが無い銘柄は出来高の平均比をここで計算する: 300000 / 200000
+    assert record["rvol"] == 1.5
+
+
+def test_assemble_stock_record_reuses_entry_volume_multiple_for_rvol():
+    """エントリー判定が既に出している出来高倍率をそのまま使う(二重計算しない)。"""
+    entry_result = {"status": "BREAKOUT", "pivot": 1000, "volume_multiple": 2.31}
+    record = assemble_stock_record(
+        "7134", "T", _ohlcv_row(), {}, _EMPTY_VCP, entry_result, _fund_info(), DRYUP_CONFIG,
+    )
+    assert record["rvol"] == 2.31
+
+
+def test_assemble_stock_record_drops_nan_and_missing_price_fields():
+    """欠損値は None に落とす。NaN をそのまま書くとブラウザ側のJSON読み込みが
+    ファイルまるごと失敗するため。"""
+    row = _ohlcv_row(high=float("nan"), vol_ma50=float("nan"))
+    del row["low"]
+    record = assemble_stock_record(
+        "7134", "T", row, {}, _EMPTY_VCP, {"status": "WATCH_B", "pivot": None},
+        _fund_info(), DRYUP_CONFIG,
+    )
+    assert record["high"] is None
+    assert record["low"] is None
+    assert record["rvol"] is None  # 50日平均が出せない = 比較対象なし
+
 
 def _vcp_with_v5(recent10_median, vol_ma50):
     return {

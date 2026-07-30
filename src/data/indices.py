@@ -11,13 +11,16 @@ Design notes:
   differences (e.g. TOPIX itself isn't on Yahoo, so an ETF proxy follows).
 - A per-index failure never fails the job: the index is simply reported
   with its cached history (or omitted when there is no cache at all).
+- 日足の系列とは別に、実行のたびの「今の値」を data/history/indices_intraday.jsonl
+  へ1行ずつ追記する。indices.json は毎回上書きなので、これが無いとザラ場中の
+  値動きの形(寄り天/後場V字/だらだら安)が翌日には残らない。
 """
 from __future__ import annotations
 
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 
@@ -28,6 +31,19 @@ from src.config import REPO_ROOT, load_config
 
 INDICES_CACHE_DIR = REPO_ROOT / "data" / "indices"
 INDICES_JSON_PATH = REPO_ROOT / "docs" / "data" / "indices.json"
+
+JST = timezone(timedelta(hours=9))
+
+# 指数の日中ティック履歴 (2026-07-31 新設)。1実行 = 1行。
+INTRADAY_TICKS_PATH = REPO_ROOT / "data" / "history" / "indices_intraday.jsonl"
+# 同一実行時刻の行は後勝ちで潰す(ワークフローの再実行対策)。
+INTRADAY_TICKS_KEY = ("ts",)
+# 保持は当日+数日。「その日の地合いの形」を読むための素材なので、日足系列と違って
+# 長期保存する意味がない(長期の形は indices.json の series 側にある)。
+INTRADAY_TICKS_KEEP_DAYS = 7
+# 15分間隔 × 平日ほぼ終日で1日80行前後。間引き(compaction)は毎回やると
+# 全行書き戻しになって git 差分が膨らむので、行数が保持想定を大きく超えた時だけ。
+INTRADAY_TICKS_MAX_LINES = 1200
 
 STOOQ_URL = "https://stooq.com/q/d/l/?s={symbol}&i=d"
 STOOQ_USER_AGENT = "Mozilla/5.0 (compatible; minervini-screener/1.0)"
@@ -188,6 +204,69 @@ def build_index_entry(spec: IndexSpec, df: pd.DataFrame) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# 日中ティック履歴
+# ---------------------------------------------------------------------------
+
+def _last_intraday_tick() -> dict | None:
+    """JSONL の最終行を返す(無ければ None)。間引き判定用。"""
+    from src.history_store import iter_records
+
+    last = None
+    for record in iter_records(INTRADAY_TICKS_PATH):
+        last = record
+    return last
+
+
+def append_intraday_tick(entries: list[dict], now: datetime | None = None) -> bool:
+    """指数の「今この瞬間の値」を1行 data/history/indices_intraday.jsonl へ追記する。
+
+    なぜ要るか: indices.json は実行のたびにまるごと作り直されるので、ザラ場中に
+    どう動いたか(寄ってすぐ天井をつけたのか、後場にV字で戻したのか、じりじり
+    安かったのか)が翌日には一切残らない。日足の終値系列だけでは「その日の地合いの
+    形」を後から復元できない。15分間隔で走るワークフローの各実行を1行ずつ残す。
+
+    - `date` は JST 基準で入れる。この cron は米国市場の時間帯(JST 22:00〜翌8:45)
+      にも走るので、読み手が「東証のザラ場 = JSTの9:00〜15:30 の行」だけを選べる
+      ようにするため。記録自体は時間帯を問わず全部残す(ドル円やNASDAQの夜間の
+      動きは翌朝の地合いの前提になる)。
+    - 直前の行と全指数の値が完全に一致する実行は追記しない。市場が閉じていて値が
+      動かない時間帯に同じ行が延々増えるのを防ぐ、単純な間引き。
+
+    追記したら True。
+    """
+    from src.history_store import append_records, compact, count_lines
+
+    values = {
+        entry["key"]: entry.get("last")
+        for entry in entries
+        if entry.get("key") and entry.get("last") is not None
+    }
+    if not values:
+        return False
+
+    previous = _last_intraday_tick()
+    if previous is not None and (previous.get("values") or {}) == values:
+        return False
+
+    now = (now or datetime.now(JST)).astimezone(JST)
+    date_str = now.date().isoformat()
+    append_records(
+        INTRADAY_TICKS_PATH,
+        [{"ts": now.isoformat(timespec="seconds"), "date": date_str, "values": values}],
+    )
+
+    if count_lines(INTRADAY_TICKS_PATH) > INTRADAY_TICKS_MAX_LINES:
+        removed = compact(
+            INTRADAY_TICKS_PATH,
+            INTRADAY_TICKS_KEY,
+            keep_days=INTRADAY_TICKS_KEEP_DAYS,
+            today=date_str,
+        )
+        print(f"indices_intraday: compaction で {removed} 行を削減")
+    return True
+
+
 def update_indices(config: dict | None = None) -> dict:
     """Fetch/refresh every index, update caches, and write indices.json.
 
@@ -227,6 +306,14 @@ def update_indices(config: dict | None = None) -> dict:
     }
     from src.report.secure_io import write_docs_json
     write_docs_json(INDICES_JSON_PATH, payload, indent=1)
+
+    # 日中ティックの蓄積。指数表示そのものは既に書き終わっているので、ここが
+    # 失敗しても指数更新は成功扱いのままにする(このファイル全体の「1つの指数が
+    # 取れなくてもジョブは落とさない」方針と同じ)。
+    try:
+        append_intraday_tick(entries)
+    except Exception as e:
+        print(f"Intraday tick append failed (ignored): {e}")
 
     return {"updated": updated, "failed": failed}
 

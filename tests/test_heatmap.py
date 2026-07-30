@@ -213,6 +213,37 @@ def test_sector_history_same_date_overwrite(patched_paths):
     assert dates == ["2026-07-06", "2026-07-07"]
 
 
+def test_snapshot_run_writes_suffixed_json_and_no_history(patched_paths):
+    """前場断面: heatmap_maezyou.json だけを書き、大引JSONも履歴も触らない。"""
+    universe, frames, bench, records, config = build_fixture_inputs()
+    result = hm.build_heatmap(
+        universe, frames, bench, records, config, "2026-07-06", snapshot_suffix="_maezyou"
+    )
+
+    assert (patched_paths / "heatmap_maezyou.json").exists()
+    # 大引の heatmap.json は前場ランでは生成すらしない(上書き以前に触らない)。
+    assert not (patched_paths / "heatmap.json").exists()
+    # 日次バッチが落ちた日に前場の値が確定値になってしまわないよう履歴は書かない。
+    assert hm.load_sector_history()["history"] == []
+    assert not (patched_paths / "sector_history_public.json").exists()
+    # レコードに載せる表示属性(所属セクター・強弱)は前場でも返す。
+    assert result["sector_strength_by_code"]["1001"]["sector"] == "電気機器"
+
+
+def test_snapshot_run_does_not_overwrite_existing_eod_heatmap(patched_paths):
+    """大引ランのあとに前場ランが走っても、大引JSON・履歴は前場の値で潰れない。"""
+    universe, frames, bench, records, config = build_fixture_inputs()
+    hm.build_heatmap(universe, frames, bench, records, config, "2026-07-06")
+    eod_before = (patched_paths / "heatmap.json").read_text(encoding="utf-8")
+
+    hm.build_heatmap(
+        universe, frames, bench, records, config, "2026-07-07", snapshot_suffix="_maezyou"
+    )
+    assert (patched_paths / "heatmap.json").read_text(encoding="utf-8") == eod_before
+    dates = [e["date"] for e in hm.load_sector_history()["history"]]
+    assert dates == ["2026-07-06"]
+
+
 def test_sector_history_keep_days(patched_paths):
     universe, frames, bench, records, config = build_fixture_inputs()
     config["heatmap"] = {"history_keep_days": 2}

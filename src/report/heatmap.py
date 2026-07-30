@@ -5,7 +5,10 @@
   - 時価総額 = 発行済株式数(月次取得) × 最新終値。取得不可は None (最小面積フォールバック)
   - TSE33業種で集計 (data/sector_map.json / universe.json 由来の静的マッピング)
   - セクターRS(対TOPIX): 強/中/弱 + 方向(↑/→/↓)。銘柄の独立属性でプライオリティには不参入
-  - セクター集計履歴を data/sector_history.json に蓄積 (グラフ化は対象外)
+  - セクター集計履歴を data/history/sector.jsonl に蓄積 (グラフ化は対象外)
+
+前場スナップショット実行 (snapshot_suffix 指定) では docs/data/heatmap_maezyou.json
+だけを書き、大引の heatmap.json と履歴には一切触らない (build_heatmap の説明を参照)。
 """
 from __future__ import annotations
 
@@ -17,6 +20,18 @@ import pandas as pd
 from src.config import REPO_ROOT, load_config
 
 HEATMAP_PATH = REPO_ROOT / "docs" / "data" / "heatmap.json"
+
+
+def heatmap_output_path(snapshot_suffix: str = ""):
+    """公開先のヒートマップJSONのパス。前場断面は別名(heatmap_maezyou.json)にする。
+
+    大引の断面は従来どおり heatmap.json。前場ランは suffix 付きの別ファイルへ書く。
+    """
+    if not snapshot_suffix:
+        return HEATMAP_PATH
+    return HEATMAP_PATH.with_name(f"{HEATMAP_PATH.stem}{snapshot_suffix}.json")
+
+
 # 旧: 全量書き戻し方式の JSON (2026-07-27 まで)。移行後は読み取り専用の
 # フォールバックとしてのみ参照する。
 SECTOR_HISTORY_PATH = REPO_ROOT / "data" / "sector_history.json"
@@ -142,9 +157,26 @@ def build_heatmap(
     stock_records: list[dict],
     config: dict | None = None,
     today_str: str | None = None,
+    snapshot_suffix: str = "",
 ) -> dict:
     """heatmap.json + sector_history.json を生成し、レポート付与用の
-    sector_strength_by_code を返す。"""
+    sector_strength_by_code を返す。
+
+    `snapshot_suffix` に "_maezyou" のようなラベルが入ると**前場断面モード**になる
+    (2026-07-31)。この場合:
+
+    - 公開JSONは heatmap_maezyou.json へ書き、大引の heatmap.json には一切触らない。
+      これが無いと、前場バッチが11:40頃に前場の途中足で作ったセクター値を
+      heatmap.json として公開してしまい、夕方の日次バッチが走るまでの数時間、
+      途中の値が確定値の顔をして表示される。
+    - セクターの日次履歴(sector.jsonl / 公開用 sector_history.json)は一切書かない。
+      履歴は後勝ちなので通常は夕方の日次バッチが上書きしてくれるが、**日次バッチが
+      落ちた日はその日のセクター履歴が前場の値のまま確定してしまう**。履歴は後から
+      見返して「その日どうだったか」を語る土台なので、途中の値を混ぜない。
+
+    返り値の sector_strength_by_code は前場ランでも通常どおり返す。これは銘柄
+    レコードに載せる表示用の属性(所属セクターと強弱)で、履歴には残らないため。
+    """
     config = config or load_config()
     cfg = _cfg(config)
     periods = cfg["periods"]
@@ -234,10 +266,13 @@ def build_heatmap(
         "sectors": sectors,
     }
     from src.report.secure_io import write_docs_json
-    write_docs_json(HEATMAP_PATH, heatmap)
+    write_docs_json(heatmap_output_path(snapshot_suffix), heatmap)
 
-    history = update_sector_history(today_str, sectors, topix_returns, cfg)
-    publish_sector_history(history)
+    # 前場断面はここで打ち切る。履歴を「書いてから消す/上書きする」のではなく
+    # そもそも書かないので、日次バッチが落ちた日でも履歴に途中の値は残らない。
+    if not snapshot_suffix:
+        history = update_sector_history(today_str, sectors, topix_returns, cfg)
+        publish_sector_history(history)
 
     return {"heatmap": heatmap, "sector_strength_by_code": sector_strength_by_code}
 

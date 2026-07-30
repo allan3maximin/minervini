@@ -2816,7 +2816,7 @@ function initSettingsSubtabs() {
   });
 }
 
-// 市況画面(市況データ/市況分析)のタブ切替。タブのタップ/スライドに加え、
+// 市況画面(市況データ/市況分析/レビュー)のタブ切替。タブのタップ/スライドに加え、
 // パネル全体の横スワイプでもループ切替(端でラップ)できる。切替時はスライドイン。
 // initDashboard はファンダ保存後などに再実行されうるため、dataset.wired で重複防止。
 function initMarketTabs() {
@@ -2833,6 +2833,9 @@ function initMarketTabs() {
       p.classList.toggle("active", on);
       if (on) p.scrollTop = 0;
     });
+    // レビューは大引バッチの産物で、市況データ/市況分析とは別ファイル(review.json)。
+    // 開いたときに初めて取りに行く(2回目以降はキャッシュを見るだけで何もしない)。
+    if (name === "review") ensureReviewLoaded();
   };
 
   const initial = (tabs.querySelector(".market-tab.active") || tabs.querySelector(".market-tab"));
@@ -2848,7 +2851,8 @@ function initMarketTabs() {
   });
   wireTabSlide(tabs, ".market-tab", (btn) => setActive(btn.dataset.panel));
 
-  // 横スワイプでループ切替(2枚なので左右どちらでも相手側へ)。dir>0=次,dir<0=前。
+  // 横スワイプでループ切替(タブの並び順に回り、端まで来たら反対の端へラップ)。
+  // タブ名はボタンから拾うので、タブが増えてもここは変更不要。dir>0=次,dir<0=前。
   wireLoopSwipe(panels, (dir) => {
     const names = Array.from(tabs.querySelectorAll(".market-tab")).map((b) => b.dataset.panel);
     if (!names.length) return;
@@ -5223,6 +5227,451 @@ async function ensureDataAccess() {
     overlay.setAttribute("role", "button");
     overlay.focus();
   });
+}
+
+// ---------------------------------------------------------------------------
+// 市況「レビュー」タブ (2026-07-31)
+//
+// 大引バッチが吐く docs/data/review.json を読んで、その日の相場を機械的に
+// まとめて出すだけのタブ。ここは描画専用で、判定も集計も一切しない
+// (何を出すかはバックエンド側が決める。フロントで再計算すると両者の数字が
+// ずれたときにどちらが正しいのか分からなくなる)。
+//
+// review.json は「どのキーも欠けうる」前提で書く。前場バッチが落ちた日は
+// has_maezyou:false で afternoon や前場の列がまるごと来ないし、日中の値動きが
+// 取れなければ shape.available:false、履歴が浅ければ followup が空になる。
+// 欠けたブロックは黙って畳んで、来ているものだけ描く(「データがありません」を
+// 至る所に並べると、何が読めて何が読めないのかかえって分からなくなる)。
+//
+// ヘッダの断面切替(大引/前場)とは連動させない。レビューは大引が終わって初めて
+// 作れる集計なので、前場を選んでいる間も中身は大引のまま。代わりにパネルの先頭に
+// 「大引時点の集計」と一言添えて取り違えを防ぐ。
+// ---------------------------------------------------------------------------
+
+// review.json の signal は GREEN/AMBER/RED。画面の表記は市況分析タブと同じ
+// 攻め/中立/守り に揃える(同じ地合いを2通りの言い方で出すと混乱するため)。
+const REVIEW_SIGNAL_KEY = { GREEN: "green", AMBER: "yellow", YELLOW: "yellow", RED: "red" };
+
+// スコア内訳の内部キー→日本語。運用ルール(2026-07-30)により内部キーは画面に出さない。
+// 知らないキーが増えた日はキーのまま出す(黙って消すと増えたことに気付けない)。
+const REVIEW_BREAKDOWN_LABEL = {
+  breadth: "値上がり銘柄の広がり",
+  index_trend: "指数の向き",
+  momentum: "勢い",
+  risk_appetite: "リスクの取りやすさ",
+};
+
+// 監視バケットの内部キー→日本語(HANDOFF の stage_log と同じ対応)。review.json 側が
+// すでに日本語ラベルで送ってくる想定だが、内部キーが素通しで来ても読めるようにしておく。
+const REVIEW_BUCKET_LABEL = {
+  order: "発注",
+  watch: "監視",
+  cooled: "追撃禁止",
+  near: "あと一歩",
+  forming: "形成中",
+  fresh_high: "新高値直後",
+  rejected: "未達",
+  inactive: "対象外",
+  unknown: "不明",
+};
+
+// 後場の判定。色は既存の3色(accent/warn/danger)から選ぶだけで新しい色は作らない。
+const REVIEW_VERDICT_TONE = { "伸長": "review-up", "失速": "review-down", "横ばい": "review-flat", "不明": "review-flat" };
+
+// 3断面の列。review.json 側で欠けている列は自動的に落ちる(前場バッチが落ちた日など)。
+const REVIEW_COLS = [
+  { key: "prev_close", label: "前日終値" },
+  { key: "maezyou", label: "前場" },
+  { key: "close", label: "大引" },
+];
+
+function reviewSignalMeta(v) {
+  const key = REVIEW_SIGNAL_KEY[String(v ?? "").toUpperCase()];
+  return key ? MARKET_SIGNAL_META[key] : null;
+}
+
+// 数値の体裁。整数はそのまま、小数は1桁まで。数値でないものはそのまま出す
+// (バックエンドが文字列を入れてきても壊さない)。
+function reviewNum(v, unit) {
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  if (!isFinite(n)) return escapeHtml(String(v));
+  const s = Number.isInteger(n) ? n.toLocaleString("ja-JP") : n.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
+  return escapeHtml(s + (unit || ""));
+}
+
+function reviewSigned(v, unit) {
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  if (!isFinite(n)) return escapeHtml(String(v));
+  const abs = Math.abs(n);
+  const body = Number.isInteger(n) ? abs.toLocaleString("ja-JP") : abs.toFixed(1);
+  const sign = n > 0 ? "+" : n < 0 ? "-" : "±";
+  return escapeHtml(`${sign}${body}${unit || ""}`);
+}
+
+// 増えた=緑 / 減った=赤 / 変わらず=無色。数値以外は無色。
+function reviewTone(v) {
+  const n = Number(v);
+  if (v == null || !isFinite(n) || n === 0) return "review-flat";
+  return n > 0 ? "review-up" : "review-down";
+}
+
+function reviewBlockHtml(title, sub, bodyParts) {
+  const body = bodyParts.filter(Boolean).join("");
+  if (!body) return "";
+  const subHtml = sub ? `<span class="review-block-sub">${escapeHtml(sub)}</span>` : "";
+  return `<section class="review-block"><h3 class="review-block-title">${escapeHtml(title)}${subHtml}</h3>${body}</section>`;
+}
+
+function reviewHeadingHtml(text, sub) {
+  const subHtml = sub ? `<span class="market-detail-heading-sub">${escapeHtml(sub)}</span>` : "";
+  return `<h4 class="market-detail-heading">${escapeHtml(text)}${subHtml}</h4>`;
+}
+
+function reviewListHtml(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<ul class="review-points">${items.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`;
+}
+
+// 銘柄1行。既存の銘柄カードと同じくタップで個別銘柄画面(#stock/CODE)へ飛ばす。
+// 遷移そのものは親コンテナ側の委譲で処理する(行ごとにリスナーを付けない)。
+function reviewStockRowHtml(s) {
+  if (!s || !s.code) return "";
+  const nums = [];
+  if (s.close != null) nums.push(`終値 ${reviewNum(s.close)}`);
+  if (s.pivot != null) nums.push(`ピボット ${reviewNum(s.pivot)}`);
+  const note = s.note ? `<div class="review-stock-note">${escapeHtml(s.note)}</div>` : "";
+  return `
+    <div class="review-stock-row" role="button" tabindex="0" data-review-code="${escapeHtml(s.code)}">
+      <div class="review-stock-head">
+        <span class="review-stock-name">${escapeHtml(s.name || s.code)}<span class="review-stock-code">${escapeHtml(s.code)}</span></span>
+        <span class="review-stock-nums">${nums.join(" / ")}</span>
+      </div>
+      ${note}
+    </div>`;
+}
+
+// 銘柄が多い日は縦に長くなりすぎるので、先頭5件だけ出して残りは折りたたむ。
+// <details> なので開閉に JS を持たない。
+function reviewStockListHtml(items, limit = 5) {
+  const rows = items.map(reviewStockRowHtml).filter(Boolean);
+  if (!rows.length) return "";
+  const head = rows.slice(0, limit).join("");
+  const rest = rows.slice(limit);
+  if (!rest.length) return head;
+  return `${head}<details class="review-more"><summary>もっと見る(残り${rest.length}件)</summary>${rest.join("")}</details>`;
+}
+
+function reviewStockGroupHtml(title, desc, items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const rows = reviewStockListHtml(items);
+  if (!rows) return "";
+  return `
+    <div class="review-group">
+      <div class="review-group-head">
+        <span class="review-group-title">${escapeHtml(title)}</span>
+        <span class="review-group-count">${items.length}件</span>
+      </div>
+      <p class="review-group-desc">${escapeHtml(desc)}</p>
+      ${rows}
+    </div>`;
+}
+
+// ブロック1: 地合いの動き。
+function reviewMarketHtml(m) {
+  if (!m || typeof m !== "object") return "";
+  const parts = [];
+
+  // 前日終値→前場→大引 のスコアと地合い。列は来ているものだけ並べる。
+  const score = m.score || {};
+  const signal = m.signal || {};
+  const steps = REVIEW_COLS.filter((c) => score[c.key] != null || signal[c.key] != null).map((c) => {
+    const meta = reviewSignalMeta(signal[c.key]);
+    const chip = meta ? `<span class="review-chip ${meta.className}">${escapeHtml(meta.label)}</span>` : "";
+    const sc = score[c.key] != null ? `<span class="review-step-score">${reviewNum(score[c.key])}</span>` : "";
+    return `<div class="review-step"><span class="review-step-label">${escapeHtml(c.label)}</span>${sc}${chip}</div>`;
+  });
+  if (steps.length) {
+    parts.push(
+      reviewHeadingHtml("地合いスコアの推移", "点数と攻め・中立・守り") +
+        `<div class="review-steps">${steps.join('<span class="review-step-arrow" aria-hidden="true">→</span>')}</div>`
+    );
+  }
+
+  const bd = m.breakdown_delta;
+  if (bd && typeof bd === "object" && Object.keys(bd).length) {
+    const rows = Object.keys(bd)
+      .map((k) => {
+        const label = REVIEW_BREAKDOWN_LABEL[k] || k;
+        return `<div class="market-detail-row"><span>${escapeHtml(label)}</span><span class="${reviewTone(bd[k])}">${reviewSigned(bd[k], "pt")}</span></div>`;
+      })
+      .join("");
+    parts.push(reviewHeadingHtml("点数の増減", "前日終値からの差") + `<div class="market-detail-indicators">${rows}</div>`);
+  }
+
+  const drivers = reviewListHtml(m.drivers);
+  if (drivers) parts.push(reviewHeadingHtml("動いた理由") + drivers);
+
+  // 1日の値動きの形(寄り天・後場高など)。日中の値が取れない日は available:false で来る。
+  const shape = m.shape;
+  if (shape && shape.available !== false && (shape.label || shape.detail)) {
+    const detail = shape.detail ? `<span class="review-shape-detail">${escapeHtml(shape.detail)}</span>` : "";
+    parts.push(
+      reviewHeadingHtml("1日の値動きの形") +
+        `<div class="review-shape"><span class="review-shape-label">${escapeHtml(shape.label || "-")}</span>${detail}</div>`
+    );
+  }
+
+  const moves = Array.isArray(m.index_moves) ? m.index_moves.filter((x) => x && (x.name || x.key)) : [];
+  if (moves.length) {
+    // 前場の値が1本も来ていない日(前場バッチが落ちた日)は、空欄だけの列を出しても
+    // 意味が無いので列ごと落とす。
+    const hasMaezyou = moves.some((x) => x.maezyou_pct != null);
+    const rows = moves
+      .map(
+        (x) => `<tr>
+          <td>${escapeHtml(x.name || x.key)}</td>
+          ${hasMaezyou ? `<td class="${reviewTone(x.maezyou_pct)}">${reviewSigned(x.maezyou_pct, "%")}</td>` : ""}
+          <td class="${reviewTone(x.close_pct)}">${reviewSigned(x.close_pct, "%")}</td>
+        </tr>`
+      )
+      .join("");
+    parts.push(
+      reviewHeadingHtml("主な指数の騰落", "前日終値からの変化") +
+        `<div class="market-detail-table-wrap"><table class="market-detail-table">
+          <thead><tr><th></th>${hasMaezyou ? "<th>前場</th>" : ""}<th>大引</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`
+    );
+  }
+
+  return reviewBlockHtml("地合いの動き", "", parts);
+}
+
+// ブロック2: 後場で失速したか伸びたか。前場のデータが無い日はブロックごと出ない。
+function reviewAfternoonHtml(a) {
+  if (!a || typeof a !== "object") return "";
+  const parts = [];
+
+  if (a.verdict) {
+    const tone = REVIEW_VERDICT_TONE[a.verdict] || "review-flat";
+    parts.push(`<div class="review-verdict ${tone}">${escapeHtml(a.verdict)}</div>`);
+  }
+  const reasons = reviewListHtml(a.reasons);
+  if (reasons) parts.push(reasons);
+
+  const metrics = Array.isArray(a.metrics) ? a.metrics.filter((x) => x && x.label) : [];
+  if (metrics.length) {
+    const rows = metrics
+      .map((x) => {
+        const unit = x.unit || "";
+        // 差は前場と大引が両方揃っているときだけ出す(片方欠けた行は空欄)。
+        const both = typeof x.maezyou === "number" && typeof x.close === "number";
+        const diff = both ? x.close - x.maezyou : null;
+        return `<tr>
+          <td>${escapeHtml(x.label)}</td>
+          <td>${reviewNum(x.maezyou, unit)}</td>
+          <td>${reviewNum(x.close, unit)}</td>
+          <td class="${reviewTone(diff)}">${both ? reviewSigned(diff, unit) : "-"}</td>
+        </tr>`;
+      })
+      .join("");
+    parts.push(
+      `<div class="market-detail-table-wrap"><table class="market-detail-table">
+        <thead><tr><th></th><th>前場</th><th>大引</th><th>差</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`
+    );
+  }
+
+  return reviewBlockHtml("後場はどうだったか", "前場の数字と大引の数字を比べたもの", parts);
+}
+
+// ブロック3: 銘柄がどう入れ替わったか。
+function reviewStocksHtml(st) {
+  if (!st || typeof st !== "object") return "";
+  const parts = [];
+
+  const c = st.counts;
+  if (c && typeof c === "object") {
+    const items = [];
+    if (c.maezyou_breakout != null) items.push(`<span>前場でブレイク <b>${reviewNum(c.maezyou_breakout)}件</b></span>`);
+    if (c.close_breakout != null) items.push(`<span>大引でブレイク <b>${reviewNum(c.close_breakout)}件</b></span>`);
+    if (c.held != null) items.push(`<span>引けまで維持 <b>${reviewNum(c.held)}件</b></span>`);
+    if (items.length) parts.push(`<div class="review-counts">${items.join("")}</div>`);
+  }
+
+  parts.push(reviewStockGroupHtml("だまし", "前場はブレイクしていたが、大引で押し戻された銘柄", st.fakeout));
+  parts.push(reviewStockGroupHtml("引け際のブレイク", "前場は監視だったが、引けにかけてブレイクした銘柄", st.late_breakout));
+  parts.push(reviewStockGroupHtml("新しく候補入り", "きょう新たに発注候補へ上がってきた銘柄", st.new_candidates));
+  parts.push(reviewStockGroupHtml("候補から外れた", "きょう候補から落ちた銘柄", st.dropped));
+
+  return reviewBlockHtml("銘柄の入れ替わり", "", parts);
+}
+
+// ブロック4: 監視バケットの増減とブレイクの実績。
+function reviewBucketsHtml(b) {
+  if (!b || typeof b !== "object") return "";
+  const parts = [];
+
+  const funnel = Array.isArray(b.stage_funnel) ? b.stage_funnel.filter((x) => x && x.label != null) : [];
+  if (funnel.length) {
+    // 前日終値/前場/大引 のうち、1行でも値が入っている列だけ表示する。
+    const cols = REVIEW_COLS.filter((c) => funnel.some((x) => x[c.key] != null));
+    const head = cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("");
+    const rows = funnel
+      .map((x) => {
+        const label = REVIEW_BUCKET_LABEL[x.label] || x.label;
+        const tds = cols.map((c) => `<td>${reviewNum(x[c.key])}</td>`).join("");
+        return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
+      })
+      .join("");
+    parts.push(
+      reviewHeadingHtml("段階ごとの銘柄数", "件") +
+        `<div class="market-detail-table-wrap"><table class="market-detail-table">
+          <thead><tr><th></th>${head}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`
+    );
+  }
+
+  const rows = [];
+  const md = b.median_dist_to_pivot;
+  if (md && typeof md === "object" && (md.maezyou != null || md.close != null)) {
+    const both = typeof md.maezyou === "number" && typeof md.close === "number";
+    // 距離が縮む=買い場に近づく なので、減った方を緑にする(増減の色を逆に取る)。
+    const tone = both ? reviewTone(md.maezyou - md.close) : "review-flat";
+    rows.push(
+      `<div class="market-detail-row"><span>ピボットまでの距離(真ん中の銘柄)</span><span class="${tone}">${reviewNum(md.maezyou, "%")} → ${reviewNum(md.close, "%")}</span></div>`
+    );
+  }
+  if (b.breakout_success_rate != null) {
+    rows.push(`<div class="market-detail-row"><span>ブレイクがそのまま伸びた割合</span><span>${formatPct1(b.breakout_success_rate)}</span></div>`);
+  }
+  if (rows.length) parts.push(reviewHeadingHtml("そのほかの目安") + `<div class="market-detail-indicators">${rows.join("")}</div>`);
+
+  return reviewBlockHtml("監視している銘柄の状況", "", parts);
+}
+
+// おまけ: 前日「あと一歩」だった銘柄がきょうどうなったかの答え合わせ。
+// 履歴が浅いうちは空で来るので、その場合はブロックごと出さない。
+function reviewFollowupHtml(f) {
+  if (!f || typeof f !== "object") return "";
+  const parts = [];
+  if (f.hit_rate != null) {
+    parts.push(`<div class="review-counts"><span>前日の見立てが当たった割合 <b>${formatPct1(f.hit_rate)}</b></span></div>`);
+  }
+  const items = Array.isArray(f.items) ? f.items.filter((x) => x && x.code) : [];
+  if (items.length) {
+    const rows = items
+      .map(
+        (x) => `<tr data-review-code="${escapeHtml(x.code)}" role="button" tabindex="0">
+          <td>${escapeHtml(x.name || x.code)}<span class="review-stock-code">${escapeHtml(x.code)}</span></td>
+          <td>${escapeHtml(x.yesterday ?? "-")}</td>
+          <td>${escapeHtml(x.today ?? "-")}</td>
+          <td>${escapeHtml(x.result ?? "-")}</td>
+        </tr>`
+      )
+      .join("");
+    parts.push(
+      `<div class="market-detail-table-wrap"><table class="market-detail-table review-followup-table">
+        <thead><tr><th></th><th>前日</th><th>きょう</th><th>結果</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`
+    );
+  }
+  return reviewBlockHtml("前日の答え合わせ", "おまけ", parts);
+}
+
+function reviewPlaceholderHtml(message) {
+  return `<p class="tier-note review-placeholder">${escapeHtml(message)}</p>`;
+}
+
+function renderReview(data) {
+  const el = document.getElementById("review-body");
+  if (!el) return;
+  wireReviewNavigation(el);
+
+  if (!data || typeof data !== "object") {
+    el.innerHTML = reviewPlaceholderHtml("まだレビューがありません(大引のバッチ実行後に作られます)。");
+    return;
+  }
+
+  // 見出し: 対象日と作った時刻。ヘッダの断面切替とは無関係なので、そこも一言添える。
+  const when = data.generated_at ? new Date(data.generated_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const metaBits = [];
+  if (data.date) metaBits.push(escapeHtml(data.date));
+  if (when) metaBits.push(`${escapeHtml(when)}時点`);
+  const head = `
+    <div class="review-head">
+      <div class="review-head-title">きょうのふりかえり${metaBits.length ? `<span class="review-head-meta">${metaBits.join(" / ")}</span>` : ""}</div>
+      <p class="tier-note review-head-note">レビューは大引時点の集計です(ヘッダで「前場」を選んでいても中身は変わりません)。</p>
+    </div>`;
+
+  // 注意書き。前場が無い日は理由が notes に入ってくることが多いが、入っていなくても
+  // 前場との比較が消えている理由が画面から読み取れるよう1行足す。
+  const notes = Array.isArray(data.notes) ? data.notes.filter(Boolean) : [];
+  if (data.has_maezyou === false) notes.push("前場のデータが無いため、前場との比較は省略しています。");
+  const notesHtml = notes.length
+    ? `<div class="review-notes">${notes.map((n) => `<div class="review-note">${escapeHtml(n)}</div>`).join("")}</div>`
+    : "";
+
+  const blocks = [
+    reviewMarketHtml(data.market),
+    reviewAfternoonHtml(data.afternoon),
+    reviewStocksHtml(data.stocks),
+    reviewBucketsHtml(data.buckets),
+    reviewFollowupHtml(data.followup),
+  ].filter(Boolean);
+
+  el.innerHTML =
+    head +
+    notesHtml +
+    (blocks.length ? blocks.join("") : reviewPlaceholderHtml("この日のレビューには表示できる中身がありませんでした。"));
+}
+
+// 行のタップ→個別銘柄画面。行ごとにリスナーを付けず、描き直しても配線が
+// 生き残るようコンテナ1つに委譲する(既存の銘柄カードと同じハッシュ遷移)。
+function wireReviewNavigation(el) {
+  if (el.dataset.wired) return;
+  el.dataset.wired = "1";
+  const go = (row) => {
+    const code = row.dataset.reviewCode;
+    if (code) window.location.hash = `stock/${encodeURIComponent(code)}`;
+  };
+  el.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-review-code]");
+    if (row) go(row);
+  });
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = e.target.closest("[data-review-code]");
+    if (!row) return;
+    e.preventDefault();
+    go(row);
+  });
+}
+
+// レビューは市況ページを開くたびに取り直さない(大引に1回しか変わらないため)。
+// 失敗したときだけキャッシュを捨てて、次にタブを押したときに取り直せるようにする。
+let reviewLoadPromise = null;
+
+function ensureReviewLoaded() {
+  if (reviewLoadPromise) return reviewLoadPromise;
+  reviewLoadPromise = window.MinerviniData
+    .fetchJson("data/review.json", { optional: true })
+    .then((data) => {
+      renderReview(data);
+      return data;
+    })
+    .catch(() => {
+      reviewLoadPromise = null;
+      const el = document.getElementById("review-body");
+      if (el) el.innerHTML = reviewPlaceholderHtml("レビューを読み込めませんでした。もう一度タブを開くと取り直します。");
+      return null;
+    });
+  return reviewLoadPromise;
 }
 
 async function bootApp() {

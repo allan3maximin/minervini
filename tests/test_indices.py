@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
 
 from src.data import indices as indices_mod
-from src.data.indices import INDEX_SPECS, IndexSpec, _merge, build_index_entry, update_indices
+from src.data.indices import (
+    INDEX_SPECS,
+    IndexSpec,
+    _merge,
+    append_intraday_tick,
+    build_index_entry,
+    update_indices,
+)
+from src.history_store import iter_records
 
 
 def make_frame(start: str, days: int, base: float = 100.0) -> pd.DataFrame:
@@ -70,6 +79,8 @@ def test_update_indices_writes_json_and_survives_failures(tmp_path, monkeypatch)
     monkeypatch.setattr(indices_mod, "INDICES_CACHE_DIR", tmp_path / "cache")
     json_path = tmp_path / "docs" / "indices.json"
     monkeypatch.setattr(indices_mod, "INDICES_JSON_PATH", json_path)
+    # 日中ティック履歴も tmp へ逃がす(テストで実リポジトリの data/history を汚さない)。
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", tmp_path / "indices_intraday.jsonl")
     monkeypatch.setattr(indices_mod.time, "sleep", lambda *_: None)
 
     fail_keys = {"sox", "jgb10y"}
@@ -104,3 +115,64 @@ def test_update_indices_writes_json_and_survives_failures(tmp_path, monkeypatch)
     keys2 = [e["key"] for e in payload2["indices"]]
     assert set(keys2) == set(keys)
     assert set(payload2["stale_keys"]) == set(keys)
+
+    # 日中ティックは1回目の実行で1行できる。2回目は値が変わっていないので増えない。
+    ticks = list(iter_records(tmp_path / "indices_intraday.jsonl"))
+    assert len(ticks) == 1
+    assert set(ticks[0]["values"]) == set(keys)
+
+
+# ------------------------------------------------------- append_intraday_tick
+
+
+def _tick_entries(last: float) -> list[dict]:
+    return [
+        {"key": "topix", "last": last},
+        {"key": "nikkei225", "last": last * 10},
+    ]
+
+
+def test_append_intraday_tick_writes_jst_date_and_values(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+
+    # JST 09:15 = UTC 00:15。date は JST 基準で入ること(東証のザラ場の行だけを
+    # 後段が選べるようにするため)。
+    now = datetime(2026, 7, 31, 9, 15, tzinfo=indices_mod.JST)
+    assert append_intraday_tick(_tick_entries(2850.1), now=now) is True
+
+    rows = list(iter_records(path))
+    assert len(rows) == 1
+    assert rows[0]["date"] == "2026-07-31"
+    assert rows[0]["ts"].startswith("2026-07-31T09:15:00")
+    assert rows[0]["values"] == {"topix": 2850.1, "nikkei225": 28501.0}
+
+
+def test_append_intraday_tick_uses_jst_date_for_us_session(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+
+    # UTC 23:30 (= JST 翌日08:30)。UTC日付ではなくJST日付が入る。
+    now = datetime(2026, 7, 30, 23, 30, tzinfo=timezone.utc)
+    append_intraday_tick(_tick_entries(2850.1), now=now)
+    assert list(iter_records(path))[0]["date"] == "2026-07-31"
+
+
+def test_append_intraday_tick_skips_unchanged_values(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+
+    base = datetime(2026, 7, 31, 22, 0, tzinfo=indices_mod.JST)
+    assert append_intraday_tick(_tick_entries(2850.1), now=base) is True
+    # 市場が閉じていて値が動かない実行は行を増やさない。
+    assert append_intraday_tick(_tick_entries(2850.1), now=base + timedelta(minutes=15)) is False
+    assert append_intraday_tick(_tick_entries(2851.0), now=base + timedelta(minutes=30)) is True
+    assert len(list(iter_records(path))) == 2
+
+
+def test_append_intraday_tick_ignores_entries_without_value(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+
+    assert append_intraday_tick([{"key": "topix", "last": None}]) is False
+    assert not path.exists()

@@ -62,11 +62,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     today = datetime.now().date()
 
     # スナップショット方式(前場終了バッチ用、2026-07-21): env SCREENER_SNAPSHOT に
-    # ラベル(例 "maezyou")が入っていると、report/breadth/positions/indices を
+    # ラベル(例 "maezyou")が入っていると、report/breadth/positions/indices/heatmap を
     # _<label>.json へ書き出し、canonical(EOD)ファイルとフォワード検証の永続状態
-    # (status_history / dryup_log / per-stock charts)を一切上書きしない。これで
-    # 前場断面が EOD の後場ボタン用データと独立に残る。価格ストア・指数・ヒートマップ
-    # 等の途中足汚染は夕方の日次バッチ(RECHECK_DAYS=30)が自己修復する既存設計に従う。
+    # (status_history / dryup_log / stage.jsonl / sector.jsonl / per-stock charts)を
+    # 一切上書きしない。これで前場断面が EOD の後場ボタン用データと独立に残る。
+    # 価格ストアの途中足だけは夕方の日次バッチ(RECHECK_DAYS=30)が自己修復する。
+    # (2026-07-31: ヒートマップは自己修復頼みだったが、大引バッチが落ちた日に前場の
+    #  セクター値がその日の履歴として確定してしまうため、書かない側へ倒した)
     snapshot_label = (os.environ.get("SCREENER_SNAPSHOT") or "").strip()
     snapshot_suffix = f"_{snapshot_label}" if snapshot_label else ""
     is_snapshot = bool(snapshot_suffix)
@@ -400,9 +402,13 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
 
     # 機能B: セクターヒートマップ生成 + セクター強度属性の付与。
     # 失敗してもスクリーナー本体は止めない。
+    # スナップショット(前場)は heatmap_maezyou.json へ書き、大引の heatmap.json と
+    # セクターの日次履歴には触らない(判断は build_heatmap 側の説明を参照)。
+    # 返ってくる sector_strength_by_code はレコードの表示属性なので前場でも付ける。
     try:
         hm_result = heatmap_mod.build_heatmap(
-            universe, price_result.frames, benchmark_close, stock_records, config, today_str
+            universe, price_result.frames, benchmark_close, stock_records, config, today_str,
+            snapshot_suffix=snapshot_suffix,
         )
         strength_by_code = hm_result["sector_strength_by_code"]
         for record in stock_records:
@@ -496,6 +502,21 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     # 15分間隔で更新している canonical をそのまま断面として複製する)。
     if is_snapshot:
         build_site.snapshot_docs_json("indices", snapshot_suffix)
+
+    # 日次レビュー(src/report/review.py)。前場断面と大引断面を突き合わせて
+    # 「前場に出ていた候補が引けまでにどうなったか」を1枚にまとめる。大引ランでしか
+    # 作らない: 前場ランで書くと途中の値が「その日の確定レビュー」の顔をして半日
+    # 公開されてしまう。読むファイルは docs/data 配下なので、report/breadth を
+    # 書き終えたこの位置より前には置けない。失敗しても本体は止めない。
+    if not is_snapshot:
+        try:
+            from src.report import review as review_mod
+            result = review_mod.update_review(today_str)
+            if result is not None:
+                compared = "あり" if result.get("has_maezyou") else "なし"
+                print(f"Review: {today_str} 分を生成しました (前場との比較: {compared})。")
+        except Exception as e:
+            print(f"Review build failed (ignored): {e}")
 
     watchlist_count = len(stock_records) - actionable_count - cooled_count
     print(

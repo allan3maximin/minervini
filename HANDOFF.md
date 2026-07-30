@@ -47,7 +47,8 @@ src/
     scoring.py              線形スコア/正規化/合成のユーティリティ
   report/
     build_site.py           report.json / breadth.json / charts/*.json の生成
-    heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/sector_history.json)
+    heatmap.py              東証33業種ヒートマップ (docs/data/heatmap.json + data/history/sector.jsonl)
+                            前場ランは docs/data/heatmap_maezyou.json だけを書き、大引JSONとセクター履歴には触らない(2026-07-31)
     market_signal.py        地合いシグナル (市場ブレッドス + TOPIXトレンド合成、breadth.json historyへ格納。2026-07-11追加)
     positions.py             ポジション管理 (manual/positions.csv → docs/data/positions.json、R倍数/売りシグナル計算。2026-07-11追加)
     summary.py              個別銘柄のルールベース日本語サマリー生成 (LLM不使用。status/VCP詳細/ファンダ/地合いの言語化を
@@ -1040,6 +1041,13 @@ composite action 2種で実現している:
 | `data/history/status.jsonl` | `{code, date, status, pivot, stop_ref_low}` | `(code, date)` | `data/status_history.json` |
 | `data/history/sector.jsonl` | `{date, topix_d1, sectors: {業種名: {...}}}` | `(date)` | `data/sector_history.json` |
 | `data/history/stage.jsonl` | `{code, date, bucket, status, stage, near, total_score, has_pivot}` + backfill行のみ `backfilled: true` | `(code, date)` | なし (2026-07-29新設) |
+| `data/history/indices_intraday.jsonl` | `{ts, date, values: {指数キー: 値}}` | `(ts)` | なし (2026-07-31新設) |
+
+`indices_intraday.jsonl` だけは日次でなく**1実行1行**(15分間隔の intraday-indices.yml)。
+`indices.json` は毎回上書きされるためザラ場中の値動きの形(寄り天/後場V字/だらだら安)が
+翌日には残らない、という穴を埋めるためのもの。`ts` / `date` はどちらもJST基準
+(cronは米国市場の時間帯にも走るので、読む側が東証ザラ場=9:00〜15:30の行だけを選べるように)。
+直前の行と全指数の値が一致する実行は追記しない。保持は7日(`INTRADAY_TICKS_KEEP_DAYS`)。
 
 **なぜ変えたか**: 旧方式は `{code: [エントリ...]}` の全量を毎回書き戻すので、1日ぶんの追記でも
 ファイル全行が書き換わり、日次コミットの差分が毎回数千行に膨れていた。追記だけなら差分は

@@ -124,6 +124,18 @@ def assemble_stock_record(
         "tier": tier,
         "status": entry_result.get("status"),
         "close": latest_row.get("close"),
+        # 日中レンジ(始値・高値・安値)と出来高。日次レビューが「終値が日中レンジの
+        # どこで引けたか」を機械的に判定するための素材(2026-07-31追加)。終値だけでは
+        # 「上ヒゲを残して失速した日」と「高値引けした日」が同じ数字に見えてしまう。
+        # 前場スナップショットの終値は前場終値なので、前場と大引の2断面を突き合わせると
+        # 「前場に高値をつけて大引は安値引け(寄り天)」のような形まで復元できる。
+        "open": _finite(latest_row.get("open")),
+        "high": _finite(latest_row.get("high")),
+        "low": _finite(latest_row.get("low")),
+        # 出来高は株数なので小数は要らない(レポートの肥大を避けて整数に丸める)。
+        "volume": _finite(latest_row.get("volume"), digits=0),
+        # 出来高の平均比。詳細は _relative_volume の説明を参照。
+        "rvol": _relative_volume(latest_row, entry_result),
         "total_score": total_score,
         "tech_score": fund_info.get("tech_score"),
         # tech_score の3成分(当日断面パーセンタイル)。個別画面のスコア内訳用。
@@ -166,6 +178,50 @@ def assemble_stock_record(
         # (「スコアは順位付け、フラグは事実」。dryupと同じ方針)。データ無しはNone。
         "margin": _build_margin_metrics(code, latest_row, margin_store, config),
     }
+
+
+def _finite(value, digits: int | None = 2):
+    """数値を丸めて返す。数値でないもの・NaN・無限大は None に落とす。
+
+    docs/data の JSON はブラウザの JSON.parse が読む。Python の json は NaN を
+    そのまま `NaN` というリテラルで書き出すが、これは JSON の規格外でパースが
+    ファイルまるごと失敗する。指標の計算元が欠損している行(上場直後で平均が
+    出せない等)を素通しさせないための関門。
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):  # NaN / ±Inf
+        return None
+    if digits == 0:
+        return int(round(number))
+    return round(number, digits) if digits is not None else number
+
+
+def _relative_volume(latest_row: dict, entry_result: dict) -> float | None:
+    """出来高の平均比(当日出来高 ÷ 50日平均出来高)。1.0 なら平均並み。
+
+    分母を50日平均にしているのは、このリポジトリで「出来高が多い/枯れている」を
+    語っている場所がすべて50日平均を基準にしているため。エントリー判定のブレイク時
+    出来高条件(volume_multiple)も、VCPの枯れ度バッジ(直近10日中央値÷50日平均)も
+    50日平均。ここだけ20日平均にすると、同じ銘柄レコードの中に基準の違う「出来高
+    倍率」が2つ並ぶことになり、レビューを読む側が取り違える。
+
+    ピボットが立っている銘柄はエントリー判定側で既に同じ割り算を済ませているので、
+    その値をそのまま使う(二重計算しない)。ピボットが無い銘柄(監視ティア等)は
+    エントリー判定が途中で打ち切られていて値が無いので、ここで計算する。
+    """
+    ratio = _finite(entry_result.get("volume_multiple"))
+    if ratio is not None:
+        return ratio
+    volume = _finite(latest_row.get("volume"), digits=None)
+    vol_ma50 = _finite(latest_row.get("vol_ma50"), digits=None)
+    if volume is None or not vol_ma50:
+        return None
+    return round(volume / vol_ma50, 2)
 
 
 def _build_margin_metrics(code: str, latest_row: dict, margin_store: dict | None, config: dict) -> dict | None:

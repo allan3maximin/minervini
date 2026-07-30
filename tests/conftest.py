@@ -51,6 +51,8 @@ def isolate_write_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(entry, "STATUS_HISTORY_JSONL", data_dir / "history" / "status.jsonl")
     monkeypatch.setattr(heatmap, "SECTOR_HISTORY_JSONL", data_dir / "history" / "sector.jsonl")
     monkeypatch.setattr(stage_log, "STAGE_HISTORY_JSONL", data_dir / "history" / "stage.jsonl")
+    monkeypatch.setattr(
+        indices, "INTRADAY_TICKS_PATH", data_dir / "history" / "indices_intraday.jsonl")
     # デフォルト引数束縛のため既定値には効かない(モジュール先頭docstring参照)。
     # それでも定数経由の将来コードのために差し替えておく。
     monkeypatch.setattr(dryup_log, "DRYUP_LOG_PATH", data_dir / "dryup_log.jsonl")

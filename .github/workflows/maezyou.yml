@@ -12,7 +12,9 @@ name: Maezyou (morning session) screener run
 # データソース: 価格は yfinance(場中は当日足=前場終了時点の途中足を返す)。
 # 価格ストア(data/prices/*)への途中足書き込みは当日夕方の daily.yml が
 # RECHECK_DAYS=30 で上書き再取得するため、引け後には確定値へ自然に更新される。
-# indices.json / heatmap.json も intraday 更新扱いで日次バッチが自己修復する。
+# indices.json は intraday-indices.yml が15分間隔で更新している canonical をそのまま
+# 断面として複製する。heatmap は heatmap_maezyou.json へ書き、大引の heatmap.json と
+# セクター履歴(data/history/sector.jsonl)には触らない(2026-07-31)。
 #
 # セッションラベル: pipeline は実行時刻(JST)から market_session() で自動判定
 # するので、この時間帯の実行は report_maezyou.json に "market_session": "前場" が入る。

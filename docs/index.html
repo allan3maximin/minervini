@@ -130,11 +130,22 @@
       <div id="breadth-meter" class="breadth-meter"></div>
       <div id="vcp-funnel-card" class="vcp-funnel-card" hidden></div>
     </div>
+
+    <!-- レビュー(2026-07-31)。大引バッチが吐く docs/data/review.json を読んで、
+         その日の相場を機械的にまとめて出すだけのタブ。中身はすべて app.js の
+         renderReview() が組み立てるので、ここは受け皿の器だけ置いておく。
+         タブを最初に開いたときに1回だけ読む(ensureReviewLoaded)。 -->
+    <div class="market-panel" data-panel="review">
+      <div id="review-body" class="review-body">
+        <p class="tier-note">読み込み中...</p>
+      </div>
+    </div>
   </div>
 
   <div class="market-tabs" id="market-tabs" role="tablist">
     <button type="button" class="market-tab active" data-panel="data" role="tab">市況データ</button>
     <button type="button" class="market-tab" data-panel="analysis" role="tab">市況分析</button>
+    <button type="button" class="market-tab" data-panel="review" role="tab">レビュー</button>
   </div>
 </section>
 

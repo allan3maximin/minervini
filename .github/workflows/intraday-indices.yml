@@ -56,7 +56,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # docs/data/indices.json は gh-pages 側にだけ置く (master には積まない)。
-          git add data/indices/
+          # data/history/indices_intraday.jsonl (指数の日中ティック) はこのワークフロー
+          # でしか増えないので、add し忘れると毎回チェックアウト時点へ巻き戻り
+          # 何も蓄積されない。1実行1行の追記なので差分も小さい。
+          git add data/indices/ data/history/
           if git diff --cached --quiet; then
             echo "No changes to commit."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
