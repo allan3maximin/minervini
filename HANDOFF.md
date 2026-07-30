@@ -999,7 +999,7 @@ composite action 2種で実現している:
 |---|---|---|---|
 | `data/history/status.jsonl` | `{code, date, status, pivot, stop_ref_low}` | `(code, date)` | `data/status_history.json` |
 | `data/history/sector.jsonl` | `{date, topix_d1, sectors: {業種名: {...}}}` | `(date)` | `data/sector_history.json` |
-| `data/history/stage.jsonl` | `{code, date, bucket, status, stage, near, total_score, has_pivot}` | `(code, date)` | なし (2026-07-29新設) |
+| `data/history/stage.jsonl` | `{code, date, bucket, status, stage, near, total_score, has_pivot}` + backfill行のみ `backfilled: true` | `(code, date)` | なし (2026-07-29新設) |
 
 **なぜ変えたか**: 旧方式は `{code: [エントリ...]}` の全量を毎回書き戻すので、1日ぶんの追記でも
 ファイル全行が書き換わり、日次コミットの差分が毎回数千行に膨れていた。追記だけなら差分は
@@ -1029,6 +1029,7 @@ python -m src.analyze --preset status-daily     # 日別ステータス件数
 python -m src.analyze --preset status-streak    # 同ステータス継続日数
 python -m src.analyze --preset stage-daily      # 日別の監視バケット件数
 python -m src.analyze --preset stage-promotion  # バケット別の10営業日昇格率
+python -m src.analyze --preset stage-promotion-lag  # near→待機A/B の先行営業日数
 python -m src.analyze --preset sector-strength  # 直近日のセクター相対強度
 python -m src.analyze --sql "SELECT ... FROM status_latest"
 ```
@@ -1063,7 +1064,58 @@ EXTENDED/STALE の上書きは entry 評価の後に載るため、`vcp_result` 
 
 2026-07-29 実測 (219銘柄): order 3 / watch 4 / cooled 2 / **near 21** / forming 13 /
 fresh_high 117 / rejected 58 / inactive 1。既定表示は28件で、その**75%が near** = ピボットも
-損切り値も無い銘柄。この near を既定で出し続けるかを `stage-promotion` の実測で決める。
+損切り値も無い銘柄。
+
+#### stage.jsonl の過去データ backfill (scripts/backfill_stage_history.py、2026-07-30追加)
+
+`stage.jsonl` は 2026-07-29 新設なので、`stage-promotion` が10営業日の追跡窓を満たすまで
+0行しか返さない(実運用の積み上がりを待つと2週間かかる)。そこで `data/prices_long/` の
+長期価格から**過去日を1日ずつリプレイして stage 行を合成**する。
+
+```bash
+python scripts/backfill_stage_history.py prepare --days 120   # 指標フレームを pickle 化
+python scripts/backfill_stage_history.py replay  --max-dates 20  # 日ごとに再現(再開可)
+python scripts/backfill_stage_history.py commit                # stage.jsonl へ追記
+python scripts/backfill_stage_history.py status                # 進捗確認
+```
+中間物は `data/backfill_cache/`(gitignore済み、百MB級)。`--reset` で作り直せる。
+
+**1日ずつ順番に回さないといけない理由**: エントリー評価は経路依存。ピボットは WATCH_A の日に
+ロックされて翌日以降に持ち越され(`locked_pivot`)、`lock_drop_reason` で落ち、
+`breakout_age_days` は現ピボット期間内の初回ブレイクから数える。ある1日だけを単独で
+計算しても実運用と同じ status は出ない。指標そのもの(ma / atr20 / 52w / rs_raw)は全て
+後ろ向きの rolling なので、全期間で `compute_all()` してから `df[df.date <= D]` で切るのは
+look-ahead にならない(`scripts/backfill_breadth_history.py` と同じ理屈)。
+
+**既知の制約**(混ぜて平均を取ってはいけない):
+1. `total_score` は常に `None` — ファンダは現在スナップショットしか無いので過去日に当てられない。
+2. ユニバースは今日の候補リスト = 生存バイアスあり(`src/backtest.py` と同じ)。
+3. backfill 行には必ず `backfilled: true` が付く。実運用行にはこのキーが無い。
+   プリセットは `src` 列で分けて集計する。
+4. backfill の合成 `status_history` は最初から積み上がるのでピボットロックが実運用より育つ。
+   実運用の `status.jsonl` は12銘柄/3週間ぶんしか無く order/watch が構造的に少なく出る
+   (実運用履歴を種にして 07-28 を再実行すると order 6 / watch 3 で実運用と整合した = 再現性は検証済み)。
+
+**実測結果** (120営業日リプレイ、warmup 30日を除いた90営業日 = 2026-03-17〜07-28、27,899行):
+
+| grp | observations | codes | promoted | 10営業日昇格率 |
+|---|---|---|---|---|
+| `near:forming` | 2746 | 491 | 720 | **0.262** |
+| `forming` | 2928 | 474 | 461 | 0.157 |
+| `near:rejected` | 771 | 204 | 22 | **0.029** |
+| `rejected` | 7638 | 561 | 132 | 0.017 |
+| `fresh_high` | 9432 | 563 | 98 | 0.010 |
+
+**結論 = near は割るべき**。`setup_stage.near` は「forming で最短日数まであと数日」と
+「rejected で未達フラグが1個」を同じフラグに畳んでいるが、前者は素の forming の1.7倍
+(26.2%)昇格する一方、**後者は 2.9% = 素の rejected (1.7%) とほぼ区別が付かない**。
+既定表示に値するのは `near:forming` だけ。フィルタの線引きに迷っていた原因はこの畳み込み。
+
+`stage-promotion-lag` では `near:forming` → order/watch の到達が**1〜5営業日に集中**
+(lag 2〜5 が各120〜125件、lag 6 で37件、以降1桁台まで崩れる)。`setup_stage_near_days = 5` と
+一致しており、昇格の主因は「ベースが機械的に `base_min_days` に達すること」。
+つまり near:forming は「数日待てば待機に上がる予約席」として扱えばよく、逆に
+`near:rejected` は待っても上がらない。
 
 ## 10. テスト・検証
 

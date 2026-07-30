@@ -32,6 +32,12 @@ data/prices_long/
 # 消しても --stage build からやり直せば再生成できる。
 data/audit_cache/
 
+# stage.jsonl backfill の中間状態 (2026-07-30〜)。
+# scripts/backfill_stage_history.py の prepare が作る指標フレームの pickle
+# (1579銘柄×460本で百MB級) と、replay の進捗・合成 status_history。
+# commit フェーズまで通したら消してよい(--reset でも作り直せる)。
+data/backfill_cache/
+
 # publish-site アクションが公開ブランチ用に作る一時ファイル
 # (publish-price-cache はリポジトリ外の一時ディレクトリで作業するので対象外)
 docs/.git/

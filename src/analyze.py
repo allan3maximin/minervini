@@ -59,12 +59,14 @@ PRESETS = {
         """,
     ),
     "stage-daily": (
-        "日付ごとの監視バケット件数の推移(直近30日)",
+        "日付ごとの監視バケット件数の推移(直近30日、backfill行は別扱い)",
         """
-        SELECT date, bucket, count(*) AS n
+        SELECT date,
+               CASE WHEN coalesce(backfilled, false) THEN 'backfill' ELSE 'live' END AS src,
+               bucket, count(*) AS n
         FROM stage_latest
         WHERE date >= (SELECT max(date) FROM stage_latest) - INTERVAL 30 DAY
-        GROUP BY 1, 2
+        GROUP BY 1, 2, 3
         ORDER BY date DESC, n DESC
         """,
     ),
@@ -75,34 +77,78 @@ PRESETS = {
         # 営業日カレンダーとして使う (di = 通し番号)。
         # 観測日は「10営業日ぶんの追跡窓が取れる日」に限る。直近の日を混ぜると
         # まだ昇格する余地がある分だけ率が過小に出る。
+        #
+        # near は forming 由来(最短日数まであと数日)と rejected 由来(未達フラグが
+        # 1個)が混ざっており意味がまるで違うので、grp で分けて出す。ここを一括で
+        # 「あと一歩」と呼んでいたのが線引きに迷う原因だった。
+        #
+        # src 列で backfill 行(scripts/backfill_stage_history.py 生成)と実運用行を
+        # 分ける。backfill は合成 status_history 上で回すためピボットロックが
+        # 実運用より育っており、order/watch の出方が構造的に違う。混ぜて平均を
+        # 取ってはいけない。
         """
         WITH days AS (
             SELECT date, row_number() OVER (ORDER BY date) AS di
             FROM (SELECT DISTINCT date FROM stage_latest)
         ),
         s AS (
-            SELECT st.code, st.date, st.bucket, d.di
+            SELECT st.code, st.date, st.bucket, st.stage, d.di,
+                   CASE WHEN coalesce(st.backfilled, false) THEN 'backfill' ELSE 'live' END AS src
             FROM stage_latest st JOIN days d USING (date)
         ),
-        src AS (
-            SELECT * FROM s
+        srcrows AS (
+            SELECT *,
+                   CASE WHEN bucket = 'near'
+                        THEN 'near:' || coalesce(stage, '?') ELSE bucket END AS grp
+            FROM s
             WHERE bucket IN ('near', 'forming', 'fresh_high', 'rejected')
               AND di <= (SELECT max(di) FROM days) - 10
         ),
         agg AS (
-            SELECT src.bucket,
+            SELECT srcrows.src, srcrows.grp,
                    count(*) AS observations,
+                   count(DISTINCT srcrows.code) AS codes,
                    count(*) FILTER (WHERE EXISTS (
                        SELECT 1 FROM s f
-                       WHERE f.code = src.code
-                         AND f.di > src.di AND f.di <= src.di + 10
+                       WHERE f.code = srcrows.code
+                         AND f.di > srcrows.di AND f.di <= srcrows.di + 10
                          AND f.bucket IN ('order', 'watch', 'cooled')
                    )) AS promoted
-            FROM src GROUP BY 1
+            FROM srcrows GROUP BY 1, 2
         )
-        SELECT bucket, observations, promoted,
+        SELECT src, grp, observations, codes, promoted,
                round(promoted / nullif(observations, 0), 3) AS promotion_rate
-        FROM agg ORDER BY promotion_rate DESC NULLS LAST
+        FROM agg ORDER BY src, promotion_rate DESC NULLS LAST
+        """,
+    ),
+    "stage-promotion-lag": (
+        "near から order/watch へ届くまでの営業日数の分布(先行日数の実測)",
+        # 「何日前から監視に載せておくべきか」を決めるための補助クエリ。
+        # status.jsonl の実運用サンプルは n=3 しか無かったので backfill で数を稼ぐ。
+        """
+        WITH days AS (
+            SELECT date, row_number() OVER (ORDER BY date) AS di
+            FROM (SELECT DISTINCT date FROM stage_latest)
+        ),
+        s AS (
+            SELECT st.code, st.bucket, st.stage, d.di,
+                   CASE WHEN coalesce(st.backfilled, false) THEN 'backfill' ELSE 'live' END AS src
+            FROM stage_latest st JOIN days d USING (date)
+        ),
+        first_hit AS (
+            SELECT n.src, n.stage, n.code, n.di,
+                   (SELECT min(f.di) FROM s f
+                    WHERE f.code = n.code AND f.di > n.di AND f.di <= n.di + 20
+                      AND f.bucket IN ('order', 'watch')) - n.di AS lag_days
+            FROM s n
+            WHERE n.bucket = 'near'
+              AND n.di <= (SELECT max(di) FROM days) - 20
+        )
+        SELECT src, stage, lag_days, count(*) AS n
+        FROM first_hit
+        WHERE lag_days IS NOT NULL
+        GROUP BY 1, 2, 3
+        ORDER BY src, stage, lag_days
         """,
     ),
     "sector-strength": (
