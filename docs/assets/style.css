@@ -83,6 +83,29 @@ a { color: var(--link); }
 .meta-line { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; }
 .meta-line[hidden] { display: none; }
 
+/* データ断面(大引/前場)の切り替え。ヘッダの最終更新行の下に置く小さな一行。
+   銘柄の絞り込みフィルタと見間違えないよう、控えめだが操作できると分かる見た目にする。 */
+.snapshot-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.snapshot-switch[hidden] { display: none; }
+.snapshot-switch label {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.snapshot-switch select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  max-width: 100%;
+}
+
 /* 2026-07-30: 全ビューで常時表示になったので、折り返さない1行に固定する
    (flex-wrap があるとタイトルと件数が段違いになりヘッダの高さが跳ねる)。 */
 .page-header-top {

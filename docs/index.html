@@ -57,6 +57,17 @@
     <span class="page-header-count" id="list-summary" hidden></span>
   </div>
   <div id="generated-at" class="meta-line"></div>
+  <!-- データ断面の切り替え(2026-07-30)。既定は report.json / report_maezyou.json の
+       generated_at が新しい方(app.js の resolveDefaultSnapshot が決める)。ここで
+       手動固定できる。銘柄の絞り込みフィルタとは別物(ページ全体のデータ元が変わる)
+       なので、ツールバーではなくヘッダに置いている。 -->
+  <div id="snapshot-switch" class="meta-line snapshot-switch" hidden>
+    <label for="snapshot-select">断面</label>
+    <select id="snapshot-select" aria-label="データ断面">
+      <option value="">大引</option>
+      <option value="_maezyou">前場</option>
+    </select>
+  </div>
 </header>
 
 <main>
@@ -65,6 +76,8 @@
   <div id="p1-warning" class="p1-warning" hidden></div>
   <div id="positions-warning" class="warning-banner" hidden></div>
   <div id="staleness-warning" class="warning-banner" hidden></div>
+  <!-- 前場断面のときだけ出す。途中の値なので確定していないものをまとめて1本で注意喚起。 -->
+  <div id="snapshot-warning" class="warning-banner" hidden></div>
 
   <div class="market-panels" id="market-panels">
     <div class="market-panel active" data-panel="data">

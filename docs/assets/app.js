@@ -600,7 +600,146 @@ function prefetchAdjacentCharts() {
   });
 }
 
-async function initDashboard() {
+// ---------------------------------------------------------------------------
+// データ断面(大引 / 前場)の切り替え (2026-07-30)
+//
+// 日次バッチ(daily.yml, 16時以降)が canonical の report/breadth/positions を、
+// 前場バッチ(maezyou.yml, 11:35 JST)が同じ形の *_maezyou.json を吐いている。
+// これまでフロントは canonical しか描画せず、前場断面は「前場情報をコピー」
+// ボタンからしか触れなかったので、画面でも切り替えられるようにした。
+//
+// 既定の断面は「時計」ではなく report の generated_at 同士の比較で決める。
+// 前場バッチの cron は落ちることがある(だから 11:35 と 12:05 の2回投げている)
+// ので、時計で「今は前場だから前場データ」と決めると、落ちた日に前日の古い前場
+// 断面を黙って出してしまう。generated_at で比べれば落ちた日は自動的に大引へ
+// フォールバックする。時計は「前場を取りに行くか」の事前判定にだけ使う
+// (canonical が当日11:35以降のものなら前場より新しいと確定するので取りに行かない)。
+//
+// 指数(indices.json)は断面を切り替えない。市場概況は intraday-indices.yml が
+// 15分間隔で更新するライブ表示("● 自動更新中")で、断面より新しい値を見たい
+// 場所だから。前場断面の indices_maezyou.json はコピーボタン用に残る。
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_LABELS = { "": "大引", _maezyou: "前場" };
+const MAEZYOU_READY_JST_MIN = 11 * 60 + 35; // 前場バッチの最速発火時刻 11:35 JST
+
+let snapshotSuffix = ""; // 現在描画中の断面 ("" = 大引 / "_maezyou" = 前場)
+// suffix -> generated_at。ヘッダの選択肢に「7/30 11:41時点」を出すために持つ。
+// まだ取りに行っていない断面は undefined のまま(ラベルは時刻なしになる)。
+const snapshotGeneratedAt = {};
+
+// 前場スナップショットが canonical より新しい可能性があるか。false なら取りに
+// 行かない(前場の report は約870KBあるので、無駄打ちすると回線を焼く)。
+function maezyouCouldBeNewer(canonicalGeneratedAt, now) {
+  now = now || new Date();
+  const nowJst = new Date(now.getTime() + JST_OFFSET_MS);
+  const nowMin = nowJst.getUTCHours() * 60 + nowJst.getUTCMinutes();
+  if (nowMin < MAEZYOU_READY_JST_MIN) return false; // まだ前場バッチが走る時刻ではない
+  if (!canonicalGeneratedAt) return true;
+  const genMs = new Date(canonicalGeneratedAt).getTime();
+  if (!Number.isFinite(genMs)) return true;
+  const genJst = new Date(genMs + JST_OFFSET_MS);
+  const sameDay =
+    genJst.getUTCFullYear() === nowJst.getUTCFullYear() &&
+    genJst.getUTCMonth() === nowJst.getUTCMonth() &&
+    genJst.getUTCDate() === nowJst.getUTCDate();
+  if (!sameDay) return true; // canonical は前営業日 → 当日の前場が新しいかもしれない
+  const genMin = genJst.getUTCHours() * 60 + genJst.getUTCMinutes();
+  return genMin < MAEZYOU_READY_JST_MIN; // 当日11:35以降の canonical なら前場より新しい
+}
+
+// 既定断面を決める。canonical は必ず要るので先に取り、必要なときだけ前場も取って
+// generated_at の新しい方を採用する。戻り値の report は再フェッチを避けるため同梱。
+async function resolveDefaultSnapshot() {
+  const report = await window.MinerviniData.fetchJson("data/report.json");
+  snapshotGeneratedAt[""] = (report && report.generated_at) || null;
+  if (!maezyouCouldBeNewer(snapshotGeneratedAt[""])) return { suffix: "", report };
+
+  const mz = await window.MinerviniData.fetchJson("data/report_maezyou.json", { optional: true });
+  if (!mz) return { suffix: "", report }; // 前場バッチ未実行 → 大引のまま
+  snapshotGeneratedAt._maezyou = mz.generated_at || null;
+  const mzMs = new Date(mz.generated_at || "").getTime();
+  const canMs = new Date(snapshotGeneratedAt[""] || "").getTime();
+  if (Number.isFinite(mzMs) && (!Number.isFinite(canMs) || mzMs > canMs)) {
+    return { suffix: "_maezyou", report: mz };
+  }
+  return { suffix: "", report };
+}
+
+// initDashboard(forcedSuffix) から呼ぶ、明示指定された断面のロード。
+// 前場を選んだのにファイルが無い場合は大引へ落とす(選択も戻す)。
+async function loadForcedSnapshot(suffix) {
+  if (!suffix) {
+    const report = await window.MinerviniData.fetchJson("data/report.json");
+    snapshotGeneratedAt[""] = (report && report.generated_at) || null;
+    return { suffix: "", report };
+  }
+  const report = await window.MinerviniData.fetchJson(`data/report${suffix}.json`, { optional: true });
+  if (!report) return loadForcedSnapshot("");
+  snapshotGeneratedAt[suffix] = report.generated_at || null;
+  return { suffix, report };
+}
+
+function formatSnapshotTime(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleString("ja-JP", {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+// ヘッダの断面セレクタ。選択はページ内だけの状態にして localStorage に残さない
+// (残すと翌朝も前場に張り付いたまま大引データを見逃す)。
+let snapshotSwitchReady = false; // 選択肢を組み終わったか(組む前に出すと空欄が見える)
+let currentViewName = "dashboard";
+
+// 断面セレクタはダッシュボードと銘柄リストにだけ出す。どちらも report を直接
+// 描画する画面で、切り替えると initDashboard が両方まとめて描き直すため。
+function applySnapshotSwitchVisibility() {
+  const wrap = document.getElementById("snapshot-switch");
+  if (!wrap) return;
+  const onDataView = currentViewName === "dashboard" || currentViewName === "stocklist";
+  wrap.hidden = !(snapshotSwitchReady && onDataView);
+}
+
+function renderSnapshotSwitch() {
+  const sel = document.getElementById("snapshot-select");
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const when = formatSnapshotTime(snapshotGeneratedAt[opt.value]);
+    opt.textContent = when
+      ? `${SNAPSHOT_LABELS[opt.value]} (${when}時点)`
+      : SNAPSHOT_LABELS[opt.value];
+  }
+  sel.value = snapshotSuffix;
+  if (!sel.dataset.wired) {
+    sel.dataset.wired = "1";
+    sel.addEventListener("change", () => { initDashboard(sel.value); });
+  }
+  snapshotSwitchReady = true;
+  applySnapshotSwitchVisibility();
+}
+
+// 前場断面で「途中足なので正しくない」ものをまとめて1本で警告する。
+// 個別チャート(docs/data/charts/)はスナップショット実行では生成しないので
+// 大引時点のまま。エントリー判定・追撃禁止などの状態も前場では確定していない。
+function renderSnapshotWarning() {
+  const el = document.getElementById("snapshot-warning");
+  if (!el) return;
+  if (snapshotSuffix !== "_maezyou") {
+    el.hidden = true;
+    return;
+  }
+  const when = formatSnapshotTime(snapshotGeneratedAt._maezyou);
+  el.textContent =
+    `⚠ 前場断面${when ? `(${when}時点)` : ""}を表示中です。値は前場終了時点の途中の値なので、` +
+    "エントリー判定は大引で変わることがあります。個別チャートと、追撃禁止など前日の結果を" +
+    "引き継ぐ状態は大引時点のままです。";
+  el.hidden = false;
+}
+
+async function initDashboard(forcedSuffix) {
   if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
     hidePasskeyAuthUi();
   } else {
@@ -613,14 +752,23 @@ async function initDashboard() {
   // no-store: the daily bot commit refreshes these files; a heuristically
   // cached copy is exactly the "dashboard shows two-day-old data" failure.
   // fetchJson: 暗号化封筒(パスキー解錠後のデータ鍵で復号)/平文の両対応。
-  const [report, breadth, indices, positionsData] = await Promise.all([
-    window.MinerviniData.fetchJson("data/report.json"),
-    window.MinerviniData.fetchJson("data/breadth.json", { optional: true }).then((b) => b || { history: [] }),
+  // forcedSuffix は断面セレクタからの明示指定。省略時は generated_at 比較で決める。
+  // (onSaved = initDashboard 経由の再実行では Event が渡り得るので文字列だけ受ける)
+  const forced = typeof forcedSuffix === "string" ? forcedSuffix : undefined;
+  const resolved = forced === undefined
+    ? await resolveDefaultSnapshot()
+    : await loadForcedSnapshot(forced);
+  snapshotSuffix = resolved.suffix;
+  const report = resolved.report;
+
+  const [breadth, indices, positionsData] = await Promise.all([
+    window.MinerviniData.fetchJson(`data/breadth${snapshotSuffix}.json`, { optional: true }).then((b) => b || { history: [] }),
     // indices.json only exists after the first pipeline run with the market
     // overview feature; render nothing (section stays hidden) until then.
+    // 断面は切り替えない(上のコメント参照 — ここはライブ表示)。
     window.MinerviniData.fetchJson("data/indices.json", { optional: true }),
     // positions.json only exists once manual/positions.csv has at least one row.
-    window.MinerviniData.fetchJson("data/positions.json", { optional: true }),
+    window.MinerviniData.fetchJson(`data/positions${snapshotSuffix}.json`, { optional: true }),
   ]);
   reportCache = { data: report, fetchedAt: Date.now() };
 
@@ -629,6 +777,8 @@ async function initDashboard() {
     : {};
 
   renderHeader(report);
+  renderSnapshotSwitch();
+  renderSnapshotWarning();
   initMarketTabs();
   renderMarketSignal(breadth);
   renderVcpFunnel(breadth);
@@ -2215,9 +2365,11 @@ async function initStockPage(codeOverride) {
   // report.jsonはダッシュボード表示時のキャッシュ(reportCache)を再利用し、
   // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。チャートは
   // loadChart 経由でメモリキャッシュ(前後銘柄の先読み結果)を再利用する。
+  // 直リンク時は断面の解決がまだなので snapshotSuffix は "" (大引)。ダッシュボードを
+  // 経由していれば選択中の断面がそのまま reportCache に入っている。
   const reportPromise = reportCache
     ? Promise.resolve(reportCache.data)
-    : window.MinerviniData.fetchJson("data/report.json").then((r) => {
+    : window.MinerviniData.fetchJson(`data/report${snapshotSuffix}.json`).then((r) => {
         reportCache = { data: r, fetchedAt: Date.now() };
         return r;
       });
@@ -3590,9 +3742,16 @@ function buildSessionReviewMarkdown(session, report, indices, breadth, positions
 // なくonclick代入にして二重配線を防ぐ。
 function wireSessionReview(report, indices, breadth, positionsData) {
   const statusEl = document.getElementById("session-review-status");
-  // canonical = initDashboardで読み込み済みのデータ。ザラ場前(寄り前=前営業日EOD)と
-  // 後場(当日EOD)はこれをそのまま使う。前場だけ _maezyou スナップショットを都度フェッチ。
-  const canonical = { report, indices, breadth, positionsData };
+  // ザラ場前(寄り前=前営業日EOD)と後場(当日EOD)は必ず canonical を渡す。
+  // 断面セレクタで前場を選んでいると initDashboard が渡してくるのは前場データ
+  // なので、そのまま使うと「後場情報をコピー」で前場の途中足が出てしまう。
+  // 大引断面のときだけ読み込み済みを再利用し、前場断面のときは canonical を取り直す。
+  const loaded = { report, indices, breadth, positionsData };
+  let canonicalCache = snapshotSuffix === "" ? loaded : null;
+  const getCanonical = async () => {
+    if (!canonicalCache) canonicalCache = (await loadSnapshotBundle("")) || loaded;
+    return canonicalCache;
+  };
 
   const run = async (btn, session, getData) => {
     const original = btn.textContent;
@@ -3617,21 +3776,24 @@ function wireSessionReview(report, indices, breadth, positionsData) {
     btn.onclick = () => run(btn, session, getData);
   };
 
-  bind("copy-zaraba-mae-btn", "ザラ場前", async () => canonical);
-  bind("copy-goba-btn", "後場", async () => canonical);
-  bind("copy-maezyou-btn", "前場", async () => (await loadMaezyouSnapshot()) || canonical);
+  bind("copy-zaraba-mae-btn", "ザラ場前", getCanonical);
+  bind("copy-goba-btn", "後場", getCanonical);
+  bind("copy-maezyou-btn", "前場", async () => (await loadSnapshotBundle("_maezyou")) || (await getCanonical()));
 }
 
-// 前場スナップショット束(report/breadth/indices/positions の _maezyou.json)を
-// フェッチする。report_maezyou.json が未生成(前場バッチ未実行)なら null を返し、
-// 呼び出し側は canonical へフォールバックする(Markdown側にmismatch警告が出る)。
-async function loadMaezyouSnapshot() {
-  const report = await window.MinerviniData.fetchJson("data/report_maezyou.json", { optional: true });
+// 断面ひと揃い(report/breadth/indices/positions)をフェッチする。suffix="" なら
+// canonical、"_maezyou" なら前場スナップショット。report が未生成(前場バッチ未実行)
+// なら null を返し、呼び出し側は canonical へフォールバックする
+// (Markdown側にセッション不一致の警告が出る)。
+// コピーボタン用なので indices もその断面のものを使う(ダッシュボード描画とは違い、
+// 貼り付け先のClaudeにはその時点の切り口で揃った数字を渡したいため)。
+async function loadSnapshotBundle(suffix) {
+  const report = await window.MinerviniData.fetchJson(`data/report${suffix}.json`, { optional: true });
   if (!report) return null;
   const [breadth, indices, positionsData] = await Promise.all([
-    window.MinerviniData.fetchJson("data/breadth_maezyou.json", { optional: true }).then((b) => b || { history: [] }),
-    window.MinerviniData.fetchJson("data/indices_maezyou.json", { optional: true }),
-    window.MinerviniData.fetchJson("data/positions_maezyou.json", { optional: true }),
+    window.MinerviniData.fetchJson(`data/breadth${suffix}.json`, { optional: true }).then((b) => b || { history: [] }),
+    window.MinerviniData.fetchJson(`data/indices${suffix}.json`, { optional: true }),
+    window.MinerviniData.fetchJson(`data/positions${suffix}.json`, { optional: true }),
   ]);
   return { report, breadth, indices, positionsData };
 }
@@ -4881,6 +5043,8 @@ function showView(hash) {
   if (pageHeader) pageHeader.hidden = false;
   const metaLine = document.getElementById("generated-at");
   if (metaLine) metaLine.hidden = name !== "dashboard";
+  currentViewName = name;
+  applySnapshotSwitchVisibility();
   const listCount = document.getElementById("list-summary");
   if (listCount) listCount.hidden = name !== "stocklist";
   document.querySelectorAll(".dock-btn").forEach((btn) => {
