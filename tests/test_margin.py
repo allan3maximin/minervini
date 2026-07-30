@@ -235,9 +235,9 @@ def test_backfill_margin_history_adds_multiple_weeks(tmp_path, monkeypatch):
         ("https://www.jpx.co.jp/.../syumatsu2026061900.pdf", b"pdf-0619"),
         ("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"pdf-0626"),
     ]
-    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config, include_existing=False: fetched)
 
-    def fake_parse(content, universe_codes):
+    def fake_parse(content, universe_codes=None):
         return {"1301": {"buy": len(content), "sell": 1}}, []
 
     monkeypatch.setattr(margin_mod, "parse_margin_pdf", fake_parse)
@@ -261,8 +261,10 @@ def test_backfill_margin_history_respects_keep_weeks_trim(tmp_path, monkeypatch)
         ("https://www.jpx.co.jp/.../syumatsu2026061900.pdf", b"b"),
         ("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"c"),
     ]
-    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
-    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes: ({}, []))
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config, include_existing=False: fetched)
+    # 1行もパースできなかった週(空dict)は追加しないので、中身のある週を返す
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf",
+                        lambda content, universe_codes=None: ({"1301": {"buy": 1, "sell": 1}}, []))
 
     store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 2}})
     dates = [h["date"] for h in store["history"]]
@@ -284,15 +286,91 @@ def test_backfill_margin_history_does_not_duplicate_existing_dates(tmp_path, mon
     )
     monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
     monkeypatch.setattr(universe_mod, "load_universe", lambda: {"stocks": []})
-    # fetch_all_available自体が既存日付をスキップする前提だが、念のためbackfill側の
-    # 重複ガードも検証(同一日付が二重に混ざっても壊れないこと)。
+    # 同一日付を取り直しても週が二重にならず、既存の値も上書きされないこと。
     fetched = [("https://www.jpx.co.jp/.../syumatsu2026062600.pdf", b"new-content")]
-    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: fetched)
-    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes: ({"1301": {"buy": 1, "sell": 1}}, []))
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config, include_existing=False: fetched)
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes=None: ({"1301": {"buy": 1, "sell": 1}}, []))
 
     store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 13}})
     assert len(store["history"]) == 1
     assert store["history"][0]["by_code"]["1301"]["buy"] == 999  # 既存値のまま(上書きされない)
+
+
+def test_backfill_margin_history_widen_fills_missing_codes(tmp_path, monkeypatch):
+    """候補リストが増える前に保存した週へ、後から足りない銘柄だけを足せること。
+
+    2026-07-28に候補リストが1000→1579銘柄へ増えた際、保存済みの週は古いリストぶん
+    しか入っておらず新しく入った銘柄の需給が全週で空になった。widen=True の取り直しで
+    その穴を埋める(既存銘柄の値は触らない)。
+    """
+    store_path = tmp_path / "margin_weekly.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "updated_at": "2026-07-28T09:33:44+09:00",
+                "last_url": "https://old",
+                "warnings": [],
+                # 旧リストぶん(1301だけ)しか入っていない既存週
+                "history": [{"date": "2026-07-24", "by_code": {"1301": {"buy": 999, "sell": 1}}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+
+    seen = {}
+
+    def fake_fetch_all(config, include_existing=False):
+        seen["include_existing"] = include_existing
+        return [("https://www.jpx.co.jp/.../syumatsu2026072400.pdf", b"pdf")]
+
+    monkeypatch.setattr(margin_mod, "fetch_all_available", fake_fetch_all)
+    monkeypatch.setattr(
+        margin_mod,
+        "parse_margin_pdf",
+        lambda content, universe_codes=None: (
+            {"1301": {"buy": 1, "sell": 1}, "146A": {"buy": 500, "sell": 20}}, []
+        ),
+    )
+
+    store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 26}})
+    assert seen["include_existing"] is True  # 既存週も取り直す
+    assert len(store["history"]) == 1
+    by_code = store["history"][0]["by_code"]
+    assert by_code["1301"]["buy"] == 999  # 既存値は温存
+    assert by_code["146A"] == {"buy": 500, "sell": 20}  # 足りなかった銘柄が入る
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert "146A" in on_disk["history"][0]["by_code"]
+
+
+def test_backfill_margin_history_no_widen_skips_existing_dates(tmp_path, monkeypatch):
+    store_path = tmp_path / "margin_weekly.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "updated_at": "2026-07-28T09:33:44+09:00",
+                "last_url": "https://old",
+                "warnings": [],
+                "history": [{"date": "2026-07-24", "by_code": {"1301": {"buy": 999, "sell": 1}}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
+    monkeypatch.setattr(
+        margin_mod, "fetch_all_available",
+        lambda config, include_existing=False: [
+            ("https://www.jpx.co.jp/.../syumatsu2026072400.pdf", b"pdf")
+        ],
+    )
+    monkeypatch.setattr(
+        margin_mod, "parse_margin_pdf",
+        lambda content, universe_codes=None: ({"146A": {"buy": 500, "sell": 20}}, []),
+    )
+
+    store = margin_mod.backfill_margin_history({"margin": {"keep_weeks": 26}}, widen=False)
+    assert list(store["history"][0]["by_code"]) == ["1301"]  # 何も足されない
 
 
 def test_backfill_margin_history_no_fetch_keeps_existing(tmp_path, monkeypatch):
@@ -306,7 +384,7 @@ def test_backfill_margin_history_no_fetch_keeps_existing(tmp_path, monkeypatch):
     store_path.write_text(json.dumps(existing), encoding="utf-8")
     monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", store_path)
     monkeypatch.setattr(universe_mod, "load_universe", lambda: {"stocks": []})
-    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config: [])
+    monkeypatch.setattr(margin_mod, "fetch_all_available", lambda config, include_existing=False: [])
 
     result = margin_mod.backfill_margin_history({"margin": {}})
     assert result["history"] == existing["history"]
@@ -342,7 +420,7 @@ def test_update_margin_store_writes_history_and_trims(tmp_path, monkeypatch):
     monkeypatch.setattr(
         margin_mod,
         "parse_margin_pdf",
-        lambda content, universe_codes: ({"1301": {"buy": 100 + fetch_calls["n"], "sell": 50}}, []),
+        lambda content, universe_codes=None: ({"1301": {"buy": 100 + fetch_calls["n"], "sell": 50}}, []),
     )
 
     config = {"margin": {"keep_weeks": 2}}
@@ -363,7 +441,7 @@ def test_update_margin_store_replaces_same_date(tmp_path, monkeypatch):
 
     url = "https://www.jpx.co.jp/.../syumatsu2026062600.pdf"
     monkeypatch.setattr(margin_mod, "fetch_latest", lambda config: (url, b"dummy"))
-    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes: ({"1301": {"buy": 999, "sell": 1}}, []))
+    monkeypatch.setattr(margin_mod, "parse_margin_pdf", lambda content, universe_codes=None: ({"1301": {"buy": 999, "sell": 1}}, []))
 
     margin_mod.update_margin_store({"margin": {"keep_weeks": 13}})
     margin_mod.update_margin_store({"margin": {"keep_weeks": 13}})  # same URL/date twice
@@ -454,13 +532,23 @@ def test_jq_records_to_by_code_normalizes_and_filters():
     records = [
         {"Code": "13010", "LongVol": "20000", "ShrtVol": "10000"},  # 5桁→1301
         {"Code": "166A0", "LongVol": 5000, "ShrtVol": 0},            # 英数字→166A
-        {"Code": "99990", "LongVol": 100, "ShrtVol": 100},          # universe外→捨てる
+        {"Code": "99990", "LongVol": 100, "ShrtVol": 100},          # 指定集合外→捨てる
     ]
     by_code = margin_mod._jq_records_to_by_code(records, {"1301", "166A"})
     assert by_code == {
         "1301": {"buy": 20000, "sell": 10000},
         "166A": {"buy": 5000, "sell": 0},
     }
+
+
+def test_jq_records_to_by_code_keeps_all_codes_by_default():
+    """既定では絞らず全銘柄を保存する(2026-07-30改定)。"""
+    records = [
+        {"Code": "13010", "LongVol": 1, "ShrtVol": 2},
+        {"Code": "99990", "LongVol": 3, "ShrtVol": 4},
+    ]
+    by_code = margin_mod._jq_records_to_by_code(records)
+    assert set(by_code) == {"1301", "9999"}
 
 
 def test_jq_records_to_by_code_skips_missing_or_bad_values():
@@ -516,6 +604,37 @@ def test_backfill_jquants_populates_history(monkeypatch, tmp_path):
     assert store["history"][-1]["by_code"]["1301"]["sell"] == 50
 
 
+def test_backfill_jquants_widen_fills_missing_codes(monkeypatch, tmp_path):
+    """保存済みの週に足りない銘柄だけを足す(既定 widen=True)。
+
+    候補リストで絞って保存していた時代の週には、後から候補リストに入った銘柄が
+    抜けている。取り直して穴を埋めるが、既に入っている値は上書きしない。
+    """
+    monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
+    store_path = tmp_path / "margin_weekly.json"
+    import json as _json
+    store_path.write_text(_json.dumps({
+        "updated_at": None, "last_url": None, "warnings": [],
+        "history": [{"date": "2026-07-17", "by_code": {"1301": {"buy": 1, "sell": 1}}}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", str(store_path))
+
+    def fake_fetch(api_key, date_str, config):
+        return [
+            {"Code": "13010", "LongVol": 999, "ShrtVol": 9},
+            {"Code": "146A0", "LongVol": 500, "ShrtVol": 20},
+        ]
+
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date", fake_fetch)
+    monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
+                        lambda weeks, today=None: ["2026-07-17"])
+    store = margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 26}}, weeks=1)
+    assert len(store["history"]) == 1
+    by_code = store["history"][0]["by_code"]
+    assert by_code["1301"]["buy"] == 1  # 既存値は温存
+    assert by_code["146A"] == {"buy": 500, "sell": 20}  # 足りなかった銘柄が入る
+
+
 def test_backfill_jquants_skips_existing_dates(monkeypatch, tmp_path):
     monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
     store_path = tmp_path / "margin_weekly.json"
@@ -533,8 +652,9 @@ def test_backfill_jquants_skips_existing_dates(monkeypatch, tmp_path):
     monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date", fake_fetch)
     monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
                         lambda weeks, today=None: ["2026-07-17", "2026-07-10"])
-    store = margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 26}}, weeks=2)
-    # 既存の 07-17 は上書きされず(buy=1のまま)、07-10 だけ取得
+    store = margin_mod.backfill_margin_jquants(
+        config={"margin": {"keep_weeks": 26}}, weeks=2, widen=False)
+    # widen=False なら既存の 07-17 は取り直さず(buy=1のまま)、07-10 だけ取得
     assert "2026-07-17" not in seen
     by = {h["date"]: h["by_code"]["1301"]["buy"] for h in store["history"]}
     assert by["2026-07-17"] == 1

@@ -338,6 +338,23 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   ファンダカードの下)に「需給(信用取引)」カードを追加: 信用倍率(大きく表示)、買残
   (前週比%色付き)/売残、買残回転日数、「M/D申込時点」+週次データにつき最大5営業日
   遅れる旨の注記。`record.margin`がnullなら「信用残データなし」のみ表示。
+- **保存範囲 = PDFに載っている全上場銘柄 (2026-07-30改定)**: 以前は保存時に候補リスト
+  (`data/universe.json`)で行を絞っていたため、候補リストが1000→1579銘柄に増えた週
+  (2026-07-28)に新しく入った581銘柄の需給が全週で空になった。しかも絞り込みは黙って
+  行われるため警告も出なかった。現在は `parse_margin_pdf(content)` / `_jq_records_to_by_code(records)`
+  が絞り込みをせず、PDF・J-Quantsに載っている全銘柄(約4,258件)をそのまま保存する。
+  絞り込みたい場合のみ第2引数 `universe_codes` を渡す(テスト用)。
+  この設計にしておけば、今後候補リストが入れ替わっても過去週に穴が空かない。
+- **過去週の穴埋め = widen (2026-07-30追加)**: `backfill_margin_history(widen=True)` /
+  `backfill_margin_jquants(widen=True)` が既定。既に保存済みの週も取り直し、
+  **その週に入っていない銘柄だけを足す**(既存の銘柄は上書きしない)。以前は保存済みの
+  日付を丸ごとスキップしていたので、絞り込み時代に作られた週の穴は永久に残った。
+  保存済みの週を触りたくない場合は CLI `--no-widen` / `widen=False`。
+  実行経路: GitHub Actions `margin_backfill.yml`(weeks=26、J-Quants経由で過去半年)、
+  `scripts/backfill_margin_history.py`(JPXページに残る直近5週分)。
+- **注意: pipeline内の実行順**: `src/pipeline.py` は `update_margin_store()` を
+  `build_universe()` より **前** に呼ぶ。絞り込みを撤去したので実害は無くなったが、
+  再び候補リストで絞る実装に戻すとその週は「古い候補リスト」で保存されることになる。
 - **次のタスク候補**: 信用残をスコアに組み込む(逆張り的な「買い長すぎる=過熱」フラグを
   priorityへ反映する等)かどうかは、`src/backtest.py`(§13)で13週間程度の実績を見てから
   再検討する(現時点では表示専用のまま様子見。ユーザーからの明示的な指示があるまでは
@@ -472,6 +489,27 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
   `test_update_priority_by_code_unlisted_codes_sort_last`,
   `test_update_priority_by_code_none_leaves_backlog_order_unchanged`(edinetdb.py側)、
   `test_run_daily_passes_priority_rank_to_edinetdb`(pipeline.py側)。
+- **新規銘柄のオンボード(2026-07-30追加)**: 上記の設計だと、backlogに入る経路が
+  `/events`(当日の開示)しかないため、**既に決算発表を終えている新規追加銘柄は永久に
+  取得されない**。候補リストが1000→1579銘柄に増えた2026-07-28で581銘柄がこれに該当した。
+  対策は2つ:
+  1. **対応表(codemap)の取り直し条件を追加**: 従来は30日周期のみ。現在は
+     「候補リストに載っているのに対応表に無い銘柄が1つでもあれば取り直す」も条件に加えた。
+     ただしEDINETに元々存在しないコード(ETF等)のために毎日1req焼き続けないよう、
+     取り直して `/companies` に無かったコードを `state["codemap_unmapped"]` に記録し、
+     以後それらは未カバー扱いにしない。取得結果が0件のときは誤記録を避けるため記録しない。
+     テスト: `test_update_refreshes_codemap_when_universe_code_uncovered`,
+     `test_update_does_not_refresh_codemap_for_known_unmapped_codes`,
+     `test_update_codemap_refresh_does_not_record_unmapped_when_map_empty`。
+  2. **オンボードキュー(手順2.2)**: J-Quantsストア(`base_store`)にも自ストアにも
+     四半期データが1件も無い銘柄をbacklogへ積む(`_has_quarters`で判定)。成果ゼロの
+     銘柄で毎日予算を焼かないよう `state["onboard_attempts"]` に銘柄ごとの試行回数を持ち、
+     `config.yaml: edinetdb.onboard_max_attempts`(既定3)に達したら以後積まない。
+     データが入った銘柄はカウンタを削除する(将来また消えれば改めて試行される)。
+     テスト: `test_update_onboards_codes_with_no_fundamentals_at_all`,
+     `test_update_onboard_stops_after_max_attempts`,
+     `test_update_onboard_attempts_cleared_once_data_arrives`。
+  581銘柄は90req/日の予算なので**約7営業日かけて自動的に埋まる**(手動操作不要)。
 - **リペアCLI `--requeue-stale`(2026-07-12追加)**: `python -m src.data.edinetdb --requeue-stale
   [--stale-days N]`。backlog消化は「取得できたが1件も採用できなかった」銘柄も消費済みとして
   落とす(無限リトライ防止)ため、パース不具合の期間に消化された銘柄は成果ゼロのまま二度と
@@ -490,7 +528,9 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 - **永続化**:
   - `data/edinetdb_auto.json`: `{code: {"quarters":[...], "checked_date":"YYYY-MM-DD", "source":"edinetdb"}}`
     (`fundamentals.load_auto_store`と同形式。銘柄あたり `max_quarters_keep`=12 四半期に切り詰め)。
-  - `data/edinetdb_state.json`: `{"codemap":{...}, "codemap_date":..., "last_events_date":..., "backlog":[...]}`
+  - `data/edinetdb_state.json`: `{"codemap":{...}, "codemap_date":..., "last_events_date":..., "backlog":[...],
+    "codemap_unmapped":[...], "onboard_attempts":{code: n}}`
+    (後ろ2つは2026-07-30追加。上記「新規銘柄のオンボード」参照)
 
 ### マージ (src/data/fundamentals.py :: merge_fundamentals) — 3ソース拡張
 - `merge_fundamentals(auto_by_code, manual_by_code, tanshin_by_code=None)` — 優先度は
@@ -611,7 +651,7 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
 - `entry`: breakout_vol_mult 1.4, stop_loss_pct 0.05, tick_table (JPX呼値簡易版)
 - `fundamentals`: min_quarters_for_full 7, stale_days 120
 - `jquants`: enabled true, api_url, data_delay_days 85(Free 12週遅延+マージン), lookback_days 7, sleep_sec 1.1, max_quarters_keep 12
-- `edinetdb`: enabled **true**(2026-07-08〜), api_url, requests_per_day 90, earnings_limit 8, codemap_refresh_days 30, max_quarters_keep 12
+- `edinetdb`: enabled **true**(2026-07-08〜), api_url, requests_per_day 90, earnings_limit 8, codemap_refresh_days 30, max_quarters_keep 12, onboard_max_attempts 3(2026-07-30追加)
 - `scoring`: phase1_weight 0.5, vcp_weight 0.5
 
 ## 7. フロントエンド詳細 (docs/assets/app.js)

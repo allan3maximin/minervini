@@ -272,6 +272,25 @@ def test_merge_into_store_recomputes_eps_on_share_change():
 
 
 # ---------------------------------------------------------------------------
+# select_missing_codes -- 未取得分だけに絞ってバックフィルする
+# ---------------------------------------------------------------------------
+
+def test_select_missing_codes_keeps_only_codes_without_quarters():
+    store = {
+        "7203": {"quarters": [{"fiscal_quarter": "2025Q1", "eps": 1.0}]},  # 取得済み
+        "6758": {"quarters": []},   # 登録はあるが中身が空 -> 未取得扱い
+        "9984": {},                 # quartersキー自体が無い -> 未取得扱い
+    }
+    # 146Aはストアに未登録 -> 未取得扱い。引数の順序は保たれる。
+    assert jq.select_missing_codes(["7203", "6758", "146A", "9984"], store) == \
+        ["6758", "146A", "9984"]
+
+
+def test_select_missing_codes_empty_store_returns_all():
+    assert jq.select_missing_codes(["7203", "6758"], {}) == ["7203", "6758"]
+
+
+# ---------------------------------------------------------------------------
 # fetch_summaries (pagination + 429 retry)
 # ---------------------------------------------------------------------------
 

@@ -2,8 +2,12 @@ name: Margin history backfill (J-Quants)
 
 # JPXの無料PDF(05.html)は直近5週分しかバックナンバーを残さないため、過去に遡った
 # 信用残は取れない。J-Quants /markets/margin-interest から過去週分を一括取得して
-# data/margin_weekly.json を埋める一回限りの手動ワークフロー。日次(daily.yml)とは別。
+# data/margin_weekly.json を埋める手動ワークフロー。日次(daily.yml)とは別。
 # 実行後は日次パイプラインが従来どおり最新週を1週ずつ追記していく。
+#
+# 【2026-07-30改定】既に保存済みの週も取り直し、その週に入っていない銘柄だけを足す
+# ようになった。候補リストが増えて古い週に穴が空いたときも、このワークフローを
+# 再実行すれば埋まる(週の追加だけでなく銘柄の追加もされる)。
 
 on:
   workflow_dispatch:

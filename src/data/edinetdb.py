@@ -481,6 +481,11 @@ def _merge_into_store(store: dict, code: str, quarters: list[dict], checked_date
 # Update entrypoint
 # ---------------------------------------------------------------------------
 
+def _has_quarters(store: dict, code: str) -> bool:
+    """ストアにその銘柄の四半期データが1件でも入っているか(未登録・空はFalse)。"""
+    return bool((store.get(code) or {}).get("quarters"))
+
+
 def update_fundamentals_auto(codes: list[str], config: dict | None = None,
                               base_store: dict | None = None,
                               priority_by_code: dict[str, int] | None = None) -> dict:
@@ -512,19 +517,36 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
     today = datetime.now().date()
 
     # 1. codemap更新判定: 空 or codemap_refresh_daysより古ければ再取得 (1req)。
+    #    加えて「今回の対象コードのうちcodemapに載っていないものがある」場合も
+    #    再取得する。ユニバースを拡張すると、追加された銘柄は次に開示するまで
+    #    codemapに載らず、backlogに積んでもEDINETコードが引けないまま毎日
+    #    持ち越されてしまう(2026-07-28のユニバース1000→1579銘柄拡張で発生)。
+    #    ただしEDINETに元々存在しないコードのために毎日1req焼き続けないよう、
+    #    再取得の際「要求したのに/companiesに無かったコード」を
+    #    state["codemap_unmapped"] に記録し、それらは未カバー扱いにしない。
     codemap: dict[str, str] = dict(state.get("codemap") or {})
     codemap_date = state.get("codemap_date")
+    unmapped: set[str] = set(state.get("codemap_unmapped") or [])
     refresh_days = cfg.get("codemap_refresh_days", 30)
-    needs_refresh = not codemap or not codemap_date or (
+    is_stale = not codemap or not codemap_date or (
         today - date.fromisoformat(codemap_date)
     ).days >= refresh_days
+    uncovered = [c for c in codes if c not in codemap and c not in unmapped]
+    needs_refresh = is_stale or bool(uncovered)
     if needs_refresh and budget > 0:
+        if uncovered and not is_stale:
+            print(f"EDINET DB: {len(uncovered)} universe code(s) missing from codemap "
+                  f"(e.g. {uncovered[:5]}) -- refreshing codemap.")
         try:
             full_map = fetch_companies_map(api_key, config)
             budget -= 1
             codemap = {c: full_map[c] for c in codes if c in full_map}
             state["codemap"] = codemap
             state["codemap_date"] = today.isoformat()
+            # full_mapが空(APIのフィールド名変更等で0件)のときは「全コードが
+            # EDINETに無い」と誤記録してしまうため記録しない(次回も再取得を試す)。
+            if full_map:
+                state["codemap_unmapped"] = sorted(c for c in codes if c not in full_map)
         except Exception as e:
             print(f"EDINET DB codemap refresh failed (kept old): {e}")
 
@@ -564,6 +586,34 @@ def update_fundamentals_auto(codes: list[str], config: dict | None = None,
             state["last_events_date"] = today.isoformat()
         except Exception as e:
             print(f"EDINET DB events fetch failed (state not advanced): {e}")
+
+    # 2.2 新規オンボード: /events は last_events_date翌日以降に開示があった銘柄しか
+    # 拾えないため、「ユニバースに追加された時点より前に開示を済ませている銘柄」は
+    # 次の開示までキューに入らない(2026-07-28のユニバース拡張で581銘柄がこの状態に
+    # なった)。J-Quantsストア(base_store)にも自ストアにも四半期データが1件も無い
+    # 銘柄をここで積んで初回取得する。
+    # backlog消化は「取得はできたが1件も採用できなかった」銘柄も消費済みとして
+    # 落とすため、無条件に積み直すと成果ゼロの銘柄で毎日requests_per_dayの予算を
+    # 焼き続けてしまう。state["onboard_attempts"] に銘柄ごとの試行回数を持ち、
+    # onboard_max_attempts回に達したら以後は積まない(データが入った銘柄は
+    # カウンタを削除するので、将来また消えれば改めて試行される)。
+    attempts: dict[str, int] = dict(state.get("onboard_attempts") or {})
+    max_attempts = cfg.get("onboard_max_attempts", 3)
+    onboard_queued = 0
+    for code in codes:
+        if _has_quarters(base_store, code) or _has_quarters(store, code):
+            attempts.pop(code, None)  # 取得済み -> カウンタ不要
+            continue
+        if code in backlog_set or attempts.get(code, 0) >= max_attempts:
+            continue
+        attempts[code] = attempts.get(code, 0) + 1
+        backlog.append(code)
+        backlog_set.add(code)
+        onboard_queued += 1
+    state["onboard_attempts"] = attempts
+    if onboard_queued:
+        print(f"EDINET DB: {onboard_queued} universe codes with no fundamentals at all "
+              f"were queued for onboarding (up to {max_attempts} attempts each).")
 
     # 2.5 優先順位付け: priority_by_codeが指定されていれば、backlogをそのランク
     # (P1=1〜P4=4、未指定コードは99)の昇順に並べ替える。安定ソートなので

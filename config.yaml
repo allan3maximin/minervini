@@ -225,6 +225,9 @@ edinetdb:
   earnings_limit: 8         # /earnings の limit (default 8, max 30)
   codemap_refresh_days: 30  # 証券コード→EDINETコード表の再取得間隔
   max_quarters_keep: 12     # jquants と同じ
+  onboard_max_attempts: 3   # ファンダが皆無の銘柄を初回取得のためbacklogへ積み直す上限回数。
+                            # 取得できても1件も採用できない銘柄(EDINET DBに決算短信が
+                            # 無い等)で毎日 requests_per_day の予算を焼き続けないための上限。
 
 # 枯れ度(DRY-UP)ダッシュボード表示レイヤー。VCP MUST条件(V1〜V7)とも vcp_score とも
 # 独立したバッジ/ソート用メトリクス(スコア融合はしない=「スコアは順位付け、フラグは事実」)。

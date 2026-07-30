@@ -1,9 +1,19 @@
 name: J-Quants fundamentals backfill
 
-# 手動実行専用。全ユニバース銘柄の決算履歴をJ-Quantsから取得して
-# data/fundamentals_auto.json を構築する(約1000銘柄で20分前後)。
+# 手動実行専用。ユニバース銘柄の決算履歴をJ-Quantsから取得して
+# data/fundamentals_auto.json を構築する(1銘柄1リクエスト・約1.1秒)。
+# scope入力で「未取得銘柄だけ」と「全銘柄」を選べる。
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "取得範囲。missing=ストアに決算データが無い銘柄だけ(約580銘柄・11分前後。ユニバース追加分のオンボードはこれで足りる) / all=全ユニバース銘柄(約1580銘柄・29分前後。既存データも取り直す)"
+        type: choice
+        required: false
+        default: missing
+        options:
+          - missing
+          - all
 
 concurrency:
   group: minervini-jquants-backfill
@@ -29,7 +39,13 @@ jobs:
       - name: Run backfill
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
-        run: python -m src.data.jquants --backfill
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ "${SCOPE:-missing}" = "all" ]; then
+            python -m src.data.jquants --backfill
+          else
+            python -m src.data.jquants --backfill --missing-only
+          fi
 
       - name: Commit results
         id: commit

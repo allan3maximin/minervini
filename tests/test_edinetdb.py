@@ -448,6 +448,9 @@ def test_update_events_all_fail_does_not_advance_last_events_date(isolated_paths
         raise RuntimeError("HTTP 500")
 
     monkeypatch.setattr(ed, "fetch_events", boom_events)
+    # 2026-07-30追加のオンボード経路(データ皆無の銘柄をbacklogへ積む)で
+    # 7203が積まれ /earnings まで進むため、ネットワークに出ないようモックする。
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
     ed.update_fundamentals_auto(["7203"], _CFG)
 
     state = json.loads(state_path.read_text())
@@ -469,6 +472,9 @@ def test_update_code_missing_from_codemap_stays_in_backlog(isolated_paths, monke
         raise AssertionError("fetch_earnings should not be called for unmapped code")
 
     monkeypatch.setattr(ed, "fetch_earnings", boom)
+    # codemapが空なので再取得判定が立つ。ネットワークに出ないよう空マップを返す
+    # (=9999は依然マップに無い)。
+    monkeypatch.setattr(ed, "fetch_companies_map", lambda api_key, config: {})
     ed.update_fundamentals_auto(["9999"], _CFG)
 
     state = json.loads(state_path.read_text())
@@ -535,6 +541,162 @@ def test_update_prints_sample_when_records_fetched_but_none_usable(isolated_path
     # 第6弾でrecord_to_pointの実データ対応は完了したので、診断printは軽量な
     # キー一覧のみに戻した(全フィールドダンプは調査完了に伴い撤去)。
     assert "sample record keys: ['eps_value', 'period']" in out
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-30追加: 候補リストが増えたとき新しい銘柄を取りこぼさない仕組み
+#   (1) 証券コード→EDINETコードの対応表を「載っていない銘柄がある」ときに取り直す
+#   (2) データが1件も無い銘柄を初回取得の待ち行列に積む
+# ---------------------------------------------------------------------------
+
+def test_update_refreshes_codemap_when_universe_code_uncovered(isolated_paths, monkeypatch, capsys):
+    # 対応表の取得日が今日(=期限切れではない)でも、候補リストに載っているのに
+    # 対応表に無い銘柄があれば取り直す。これが無いと候補リストが増えた週に
+    # 追加された銘柄は最大30日間ずっとEDINETコードが引けないままになる。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001"},  # 146Aが無い
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": [],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_companies_map",
+                        lambda api_key, config: {"7203": "E001", "146A": "E999"})
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    ed.update_fundamentals_auto(["7203", "146A"], _CFG, base_store={})
+
+    state = json.loads(state_path.read_text())
+    assert state["codemap"]["146A"] == "E999"
+    assert state["codemap_unmapped"] == []
+    assert "missing from codemap" in capsys.readouterr().out
+
+
+def test_update_does_not_refresh_codemap_for_known_unmapped_codes(isolated_paths, monkeypatch):
+    # EDINETに元々存在しない銘柄(ETF等)のために毎日1リクエストを焼き続けないよう、
+    # 一度取り直して見つからなかった銘柄は記録しておき、未カバー扱いにしない。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001"},
+        "codemap_date": today,
+        "codemap_unmapped": ["9999"],  # 前回取り直して見つからなかった
+        "last_events_date": today,
+        "backlog": [],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+
+    def boom(*a, **kw):
+        raise AssertionError("codemap should not be refreshed")
+
+    monkeypatch.setattr(ed, "fetch_companies_map", boom)
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    ed.update_fundamentals_auto(["7203", "9999"], _CFG, base_store={})
+
+    state = json.loads(state_path.read_text())
+    assert state["codemap_unmapped"] == ["9999"]  # 記録はそのまま残る
+
+
+def test_update_codemap_refresh_does_not_record_unmapped_when_map_empty(isolated_paths, monkeypatch):
+    # 対応表の取得が0件で返ってきた(APIのフィールド名変更等)ときに
+    # 「全銘柄がEDINETに無い」と誤記録すると、以後永久に取り直さなくなる。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": [],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_companies_map", lambda api_key, config: {})
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+
+    ed.update_fundamentals_auto(["7203", "146A"], _CFG, base_store={})
+
+    state = json.loads(state_path.read_text())
+    assert "codemap_unmapped" not in state
+
+
+def test_update_onboards_codes_with_no_fundamentals_at_all(isolated_paths, monkeypatch, capsys):
+    # 開示イベント経由でしか待ち行列に積まれないと、既に決算発表を終えている
+    # 新規追加銘柄は永久に取得されない。データが皆無の銘柄をここで積む。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"7203": "E001", "6758": "E002"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": [],
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+
+    requested = []
+
+    def fake_earnings(api_key, config, edinet_code):
+        requested.append(edinet_code)
+        return []
+
+    monkeypatch.setattr(ed, "fetch_earnings", fake_earnings)
+    # 7203はJ-Quants側に四半期データがある -> 積まない。6758は皆無 -> 積む。
+    base_store = {"7203": {"quarters": [{"fiscal_quarter": "2025Q1", "eps": 1.0}]}}
+
+    ed.update_fundamentals_auto(["7203", "6758"], _CFG, base_store=base_store)
+
+    assert requested == ["E002"]
+    state = json.loads(state_path.read_text())
+    assert state["onboard_attempts"] == {"6758": 1}
+    assert "queued for onboarding" in capsys.readouterr().out
+
+
+def test_update_onboard_stops_after_max_attempts(isolated_paths, monkeypatch):
+    # 取得できても1件も採用できない銘柄を無条件に積み直すと、成果ゼロのまま
+    # 毎日1日分の取得枠を焼き続ける。試行回数の上限で打ち切る。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"6758": "E002"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": [],
+        "onboard_attempts": {"6758": 3},  # 上限(既定3)に到達済み
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+
+    def boom(*a, **kw):
+        raise AssertionError("should not retry a code that hit the attempt cap")
+
+    monkeypatch.setattr(ed, "fetch_earnings", boom)
+
+    ed.update_fundamentals_auto(["6758"], _CFG, base_store={})
+
+    state = json.loads(state_path.read_text())
+    assert state["backlog"] == []
+    assert state["onboard_attempts"] == {"6758": 3}  # 増えない
+
+
+def test_update_onboard_attempts_cleared_once_data_arrives(isolated_paths, monkeypatch):
+    # データが入った銘柄は試行回数を消す(将来また消えたら改めて試行される)。
+    store_path, state_path = isolated_paths
+    today = date.today().isoformat()
+    state_path.write_text(json.dumps({
+        "codemap": {"6758": "E002"},
+        "codemap_date": today,
+        "last_events_date": today,
+        "backlog": [],
+        "onboard_attempts": {"6758": 2},
+    }))
+    monkeypatch.setenv(ed.API_KEY_ENV, "KEY")
+    monkeypatch.setattr(ed, "fetch_earnings", lambda api_key, config, edinet_code: [])
+    base_store = {"6758": {"quarters": [{"fiscal_quarter": "2025Q1", "eps": 1.0}]}}
+
+    ed.update_fundamentals_auto(["6758"], _CFG, base_store=base_store)
+
+    state = json.loads(state_path.read_text())
+    assert state["onboard_attempts"] == {}
 
 
 # ---------------------------------------------------------------------------

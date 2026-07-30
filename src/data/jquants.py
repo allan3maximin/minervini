@@ -7,6 +7,8 @@ Flow:
   - Backfill (``python -m src.data.jquants --backfill``): one request per
     universe code (``?code=XXXX`` returns the code's full history) to build
     the store from scratch. ~1000 codes at 60 req/min ≒ 17 min.
+    ``--missing-only`` を足すとストアにデータが無い銘柄だけに絞る
+    (ユニバース拡張分のオンボード用。``select_missing_codes``)。
 
 Values in /fins/summary are YTD cumulative (決算短信サマリーそのまま), so
 per-quarter values are derived by diffing YTD points within a fiscal year --
@@ -584,9 +586,23 @@ def backfill_all(codes: list[str], config: dict | None = None) -> dict:
     return store
 
 
+def select_missing_codes(codes: list[str], store: dict) -> list[str]:
+    """ストアに使えるデータが無い銘柄(未登録、または quarters が空)だけに絞る。
+
+    バックフィルは1銘柄1リクエスト・sleep_sec(既定1.1秒)なので、ユニバースが
+    1579銘柄まで増えると全件で約29分かかる。ユニバース拡張で追加された銘柄を
+    オンボードしたいだけなら未取得分(約584銘柄・約11分)に絞れば足りる。
+    引数の順序は保つ(取得順を安定させるため)。
+    """
+    return [c for c in codes if not (store.get(c) or {}).get("quarters")]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="J-Quants fundamentals fetcher")
     parser.add_argument("--backfill", action="store_true", help="全銘柄の全期間を取得してストアを構築")
+    parser.add_argument("--missing-only", action="store_true",
+                        help="--backfill時、ストアにデータが無い銘柄だけに絞る"
+                             "(ユニバース追加分のオンボード用。全件より大幅に速い)")
     args = parser.parse_args()
     from src.universe import load_universe
 
@@ -594,6 +610,11 @@ def main() -> None:
     universe = load_universe()
     codes = [s["code"] for s in universe["stocks"]]
     if args.backfill:
+        if args.missing_only:
+            total = len(codes)
+            codes = select_missing_codes(codes, load_auto_store())
+            print(f"J-Quants backfill: --missing-only -> {len(codes)}/{total} codes "
+                  f"have no usable data and will be fetched.")
         backfill_all(codes, config)
     else:
         update_fundamentals_auto(codes, config)

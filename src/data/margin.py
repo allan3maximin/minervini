@@ -22,8 +22,16 @@ PDF 1行(1銘柄)のテキスト形状(実測):
 
 コード表記の正規化: PDFの5桁表記は末尾が常にチェックディジット"0"(実務上の
 5桁化ルール)。data/universe.json は4桁(新英数含む)表記のため、5桁かつ末尾"0"
-なら末尾を切り落として4桁化する。正規化後に universe_codes と一致しなければ
-その行は自然に捨てられる(様式差異やETF等の非対象銘柄の安全なフォールバック)。
+なら末尾を切り落として4桁化する。
+
+【2026-07-30改定】保存範囲を「候補リストに載っている銘柄だけ」から「PDFに載って
+いる全上場銘柄」へ変更した。以前は保存時に候補リスト(data/universe.json)で絞って
+いたため、候補リストが1000→1579銘柄に増えた週(2026-07-28)に新しく入った581銘柄の
+需給が全週で空になった。しかも絞り込みは黙って行われるので警告も出なかった。
+信用残はどの銘柄も同じ1枚のPDFで一度に取れるので、絞らず全部持っておけば
+候補リストが今後どう入れ替わっても穴が空かない(ファイルは26週で数MB規模)。
+`parse_margin_pdf(content, universe_codes=None)` の第2引数は絞り込みたい場合のみ
+渡す(テスト用。空/None なら絞らない)。
 """
 from __future__ import annotations
 
@@ -113,7 +121,8 @@ def fetch_latest(config: dict | None = None) -> tuple[str, bytes] | None:
     return pdf_url, resp.content
 
 
-def fetch_all_available(config: dict | None = None) -> list[tuple[str, bytes]]:
+def fetch_all_available(config: dict | None = None,
+                        include_existing: bool = False) -> list[tuple[str, bytes]]:
     """05.html にある週末残高PDFリンクのうち、まだstoreに無い日付分をすべて
     ダウンロードして (url, bytes) のリストを日付昇順で返す。
 
@@ -121,6 +130,9 @@ def fetch_all_available(config: dict | None = None) -> list[tuple[str, bytes]]:
     直近5週分程度しかバックナンバーを保持しないため、拾えるのは常にページに
     現存する分だけ(それより古い週は元データがJPX側に無く取得不能)。
     通信失敗時は例外を投げず、取れた分だけ(0件もありうる)を返す。
+
+    include_existing=True にすると、既にstoreにある日付のPDFも再ダウンロードする
+    (保存済みの週に足りない銘柄を後から足したい場合に使う)。
     """
     config = config or load_config()
     mcfg = config.get("margin", {})
@@ -142,7 +154,9 @@ def fetch_all_available(config: dict | None = None) -> list[tuple[str, bytes]]:
     matches = sorted(set(matches), key=lambda m: m[1])  # 日付昇順・重複排除
 
     store = safe_load_json(MARGIN_STORE_PATH, {})
-    existing_dates = {h.get("date") for h in store.get("history", [])}
+    existing_dates = set() if include_existing else {
+        h.get("date") for h in store.get("history", [])
+    }
 
     results: list[tuple[str, bytes]] = []
     for href, ymd in matches:
@@ -232,8 +246,11 @@ def _extract_lines(content: bytes) -> list[str]:
     return lines
 
 
-def parse_margin_pdf(content: bytes, universe_codes: set) -> tuple[dict, list[str]]:
+def parse_margin_pdf(content: bytes, universe_codes: set | None = None) -> tuple[dict, list[str]]:
     """PDFバイト列から {code: {"buy": int, "sell": int}} を作る。
+
+    universe_codes を渡すとその集合に含まれる銘柄だけに絞る。省略/空なら
+    PDFに載っている全銘柄を返す(通常運用はこちら。モジュール冒頭の注記参照)。
 
     1件もパースできなければ空dict + warning(例外は投げない。JPXの様式変更で
     パイプライン全体を止めないため)。
@@ -278,14 +295,6 @@ def update_margin_store(config: dict | None = None) -> dict:
     warnings: list[str] = []
 
     try:
-        from src.universe import load_universe
-
-        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
-    except Exception as e:
-        universe_codes = set()
-        warnings.append(f"universe load failed: {e}")
-
-    try:
         fetched = fetch_latest(config)
     except Exception as e:
         fetched = None
@@ -306,7 +315,7 @@ def update_margin_store(config: dict | None = None) -> dict:
         return store
     date_str = _ymd_to_iso(ymd)
 
-    by_code, parse_warnings = parse_margin_pdf(content, universe_codes)
+    by_code, parse_warnings = parse_margin_pdf(content)
     warnings.extend(parse_warnings)
 
     history = list(store.get("history", []))
@@ -325,13 +334,18 @@ def update_margin_store(config: dict | None = None) -> dict:
     return store
 
 
-def backfill_margin_history(config: dict | None = None) -> dict:
+def backfill_margin_history(config: dict | None = None, widen: bool = True) -> dict:
     """05.htmlに現存する過去分PDFをまとめて取得し、historyへ一気に追加する。
 
     通常運用の update_margin_store() は日次バッチから呼ばれ1週分ずつしか
     進めない設計。こちらは初回導入時などに、ページ上にまだ残っている過去分
     (実測で直近5週分程度)を一括で埋めたい場合に使う一回限りの関数。
     日次パイプラインからは呼ばれない。
+
+    widen=True(既定)なら、既に保存済みの週も再ダウンロードして**足りない銘柄だけ**
+    を足す(既存の値は上書きしない)。以前は保存時に候補リストで絞っていたので、
+    リストが増えた後の週に古いリストぶんしか入っていない状態が残っている。
+    widen=False なら従来どおり未保存の日付だけを足す。
     """
     config = config or load_config()
     mcfg = config.get("margin", {})
@@ -343,23 +357,16 @@ def backfill_margin_history(config: dict | None = None) -> dict:
     )
     warnings: list[str] = []
 
-    try:
-        from src.universe import load_universe
-
-        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
-    except Exception as e:
-        universe_codes = set()
-        warnings.append(f"universe load failed: {e}")
-
-    fetched = fetch_all_available(config)
+    fetched = fetch_all_available(config, include_existing=widen)
     if not fetched:
         print("margin backfill: nothing new available on page")
         return store
 
     history = list(store.get("history", []))
-    existing_dates = {h.get("date") for h in history}
+    entry_by_date = {h.get("date"): h for h in history}
     last_url = store.get("last_url")
     added = 0
+    filled = 0
 
     for pdf_url, content in fetched:
         ymd = _extract_ymd(pdf_url)
@@ -367,14 +374,27 @@ def backfill_margin_history(config: dict | None = None) -> dict:
             warnings.append(f"could not extract date from url: {pdf_url}")
             continue
         date_str = _ymd_to_iso(ymd)
-        if date_str in existing_dates:
+        existing = entry_by_date.get(date_str)
+        if existing is not None and not widen:
             continue
-        by_code, parse_warnings = parse_margin_pdf(content, universe_codes)
+        by_code, parse_warnings = parse_margin_pdf(content)
         warnings.extend(parse_warnings)
-        history.append({"date": date_str, "by_code": by_code})
-        existing_dates.add(date_str)
+        if not by_code:
+            continue
+        if existing is None:
+            entry = {"date": date_str, "by_code": by_code}
+            history.append(entry)
+            entry_by_date[date_str] = entry
+            added += 1
+        else:
+            stored = existing.setdefault("by_code", {})
+            new_codes = [c for c in by_code if c not in stored]
+            for c in new_codes:
+                stored[c] = by_code[c]
+            if new_codes:
+                filled += len(new_codes)
+                print(f"margin backfill: {date_str} filled {len(new_codes)} missing code(s)")
         last_url = pdf_url
-        added += 1
 
     history.sort(key=lambda h: h["date"])
     history = history[-keep_weeks:]
@@ -385,9 +405,10 @@ def backfill_margin_history(config: dict | None = None) -> dict:
         "warnings": warnings,
         "history": history,
     }
-    if added:
+    if added or filled:
         atomic_write_json(MARGIN_STORE_PATH, store)
-        print(f"margin backfill: added {added} week(s), history now {len(history)} entries")
+        print(f"margin backfill: added {added} week(s), filled {filled} missing code(s), "
+              f"history now {len(history)} entries")
     else:
         print("margin backfill: nothing new to add (all already present)")
     return store
@@ -448,10 +469,11 @@ def fetch_weekly_margin_by_date(api_key: str, date_str: str, config: dict) -> li
         params["pagination_key"] = pk
 
 
-def _jq_records_to_by_code(records: list[dict], universe_codes: set) -> dict:
+def _jq_records_to_by_code(records: list[dict], universe_codes: set | None = None) -> dict:
     """margin-interest レコード列を {code: {"buy": int, "sell": int}} に畳む。
-    LongVol=買残, ShrtVol=売残。5桁コードを4桁へ正規化し、universe外は捨てる
-    (JPX PDF パースと同じ扱い)。
+    LongVol=買残, ShrtVol=売残。5桁コードを4桁へ正規化する。
+    universe_codes を渡した場合のみその集合外を捨てる(既定は絞らない。
+    JPX PDF パースと同じ扱い。モジュール冒頭の2026-07-30改定の注記参照)。
     """
     by_code: dict = {}
     for rec in records:
@@ -480,13 +502,17 @@ def _recent_week_end_dates(weeks: int, today: date | None = None) -> list[str]:
     return [(friday - timedelta(days=7 * i)).isoformat() for i in range(weeks)]
 
 
-def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None) -> dict:
+def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None,
+                            widen: bool = True) -> dict:
     """J-Quants /markets/margin-interest から過去 weeks 週分の週末信用残を取得し、
     store の history へ一括投入する(初回の過去半年埋め用。日次からは呼ばない)。
 
     - 週末日は「直近金曜から7日ずつ遡る」で生成。祝日でFri休みの週に備え、
       Friで空なら Thu, Wed も試す(最初に非空が取れた日を採用)。
-    - store に既にある日付(JPX PDF由来など)は上書きせずスキップ。
+    - widen=True(既定)なら、既に保存済みの週も取り直して**足りない銘柄だけ**を足す
+      (既存の値は上書きしない)。以前は保存時に候補リストで絞っていたので、
+      リストが増えた後の週に古いリストぶんしか入っていない状態が残っている。
+      widen=False なら従来どおり保存済みの日付をスキップする。
     - 取得後 keep_weeks で新しい順にトリム。API鍵が無ければ何もしない。
     """
     config = config or load_config()
@@ -499,51 +525,57 @@ def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None
         print(f"margin jquants backfill: {API_KEY_ENV} not set; skipping")
         return safe_load_json(MARGIN_STORE_PATH, {})
 
-    try:
-        from src.universe import load_universe
-
-        universe_codes = {s["code"] for s in load_universe().get("stocks", [])}
-    except Exception as e:
-        universe_codes = set()
-        print(f"WARNING: margin jquants backfill: universe load failed: {e}")
-
     store = safe_load_json(
         MARGIN_STORE_PATH,
         {"updated_at": None, "last_url": None, "warnings": [], "history": []},
     )
     history = list(store.get("history", []))
-    existing_dates = {h.get("date") for h in history}
+    entry_by_date = {h.get("date"): h for h in history}
     added = 0
+    filled = 0
 
     for friday in _recent_week_end_dates(weeks):
-        if friday in existing_dates:
+        if friday in entry_by_date and not widen:
             continue
         base = date.fromisoformat(friday)
         by_code: dict = {}
         used_date: str | None = None
         for back in (0, 1, 2):  # Fri→Thu→Wed(祝日シフト対策)
             cand = (base - timedelta(days=back)).isoformat()
-            if cand in existing_dates:
+            if cand in entry_by_date and not widen:
                 break
             records = fetch_weekly_margin_by_date(api_key, cand, config)
             if records:
-                by_code = _jq_records_to_by_code(records, universe_codes)
+                by_code = _jq_records_to_by_code(records)
                 used_date = cand
                 break
         if not used_date or not by_code:
             continue
-        history.append({"date": used_date, "by_code": by_code})
-        existing_dates.add(used_date)
-        added += 1
+        existing = entry_by_date.get(used_date)
+        if existing is None:
+            entry = {"date": used_date, "by_code": by_code}
+            history.append(entry)
+            entry_by_date[used_date] = entry
+            added += 1
+        else:
+            stored = existing.setdefault("by_code", {})
+            new_codes = [c for c in by_code if c not in stored]
+            for c in new_codes:
+                stored[c] = by_code[c]
+            if new_codes:
+                filled += len(new_codes)
+                print(f"margin jquants backfill: {used_date} filled {len(new_codes)} "
+                      f"missing code(s)")
 
     history.sort(key=lambda h: h["date"])
     history = history[-keep_weeks:]
 
     store["updated_at"] = datetime.now().astimezone().isoformat()
     store["history"] = history
-    if added:
+    if added or filled:
         atomic_write_json(MARGIN_STORE_PATH, store)
-        print(f"margin jquants backfill: added {added} week(s), history now {len(history)} entries")
+        print(f"margin jquants backfill: added {added} week(s), filled {filled} "
+              f"missing code(s), history now {len(history)} entries")
     else:
         print("margin jquants backfill: nothing added (all present or no data)")
     return store
@@ -628,9 +660,14 @@ def main() -> None:
         default=None,
         help="遡る週数(既定: config の margin.keep_weeks)",
     )
+    parser.add_argument(
+        "--no-widen",
+        action="store_true",
+        help="既に保存済みの週は取り直さない(既定は取り直して足りない銘柄だけ足す)",
+    )
     args = parser.parse_args()
     if args.backfill_jquants:
-        backfill_margin_jquants(weeks=args.weeks)
+        backfill_margin_jquants(weeks=args.weeks, widen=not args.no_widen)
     else:
         parser.print_help()
 
