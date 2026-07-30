@@ -21,6 +21,84 @@
 
 ---
 
+## 2026-07-30 (149): stage.jsonl を過去データで backfill → near を割るべきと判明
+
+> 「data/history/stage.jsonl みたいな過去データ溜める系を一気に突っ込みたい」
+
+`stage.jsonl` は前セッションで新設したばかりなので、`stage-promotion` が10営業日の
+追跡窓を満たすまで0行しか返らない(実運用の積み上がり待ちで2週間)。過去を合成した。
+
+### やったこと
+
+`scripts/backfill_stage_history.py` を追加。`data/prices_long/` の長期価格から
+**過去日を1日ずつリプレイ**して stage 行を生成する。3フェーズCLI:
+
+- `prepare --days 120` … 全銘柄の指標フレームを `compute_all()` して pickle 化(4チャンク×400銘柄、1559本、約100MB)
+- `replay --max-dates N` … 日ごとに priority→VCP→entry を回す(`state.pkl` で再開可 = 45秒制限対策)
+- `commit` … warmup日と既存日を除いて `stage.jsonl` へ追記
+- `status` … 進捗確認
+
+**1日ずつ順番に回す必要がある理由**: エントリー評価が経路依存(ピボットは WATCH_A の日に
+ロックされて翌日以降へ持ち越し、`breakout_age_days` は現ピボット期間内の初回ブレイクから数える)。
+単独日を計算しても実運用と同じ status にならない。一方で指標(ma/atr20/52w/rs_raw)は全部
+後ろ向き rolling なので、全期間 `compute_all()` → `df[df.date <= D]` は look-ahead にならない
+(`backfill_breadth_history.py` と同じ理屈)。
+
+投入結果: 120営業日リプレイ(2026-01-30〜07-28)、warmup 30日を捨てて **90営業日 / 27,899行**。
+`stage.jsonl` 425行 → 28,324行 (4.9MB)。全 backfill 行に `backfilled: true` を付けたので
+実運用行(このキーが無い)と `src` 列で分離して集計できる。
+
+### 実測: 10営業日昇格率 (→ order/watch/cooled)
+
+| grp | observations | codes | promoted | rate |
+|---|---|---|---|---|
+| `near:forming` | 2746 | 491 | 720 | **0.262** |
+| `forming` | 2928 | 474 | 461 | 0.157 |
+| `near:rejected` | 771 | 204 | 22 | **0.029** |
+| `rejected` | 7638 | 561 | 132 | 0.017 |
+| `fresh_high` | 9432 | 563 | 98 | 0.010 |
+
+**結論: `setup_stage.near` は割るべき。** near は「forming で最短日数まであと数日」と
+「rejected で未達フラグが1個」を同じフラグに畳んでいた。前者は素の forming の1.7倍
+昇格するが、**後者は 2.9% = 素の rejected (1.7%) とほぼ区別が付かない**。
+既定表示に値するのは `near:forming` だけ。フィルタの線引きに迷っていた原因はこの畳み込みだった。
+
+`stage-promotion-lag`(新規プリセット)では near:forming の到達が**1〜5営業日に集中**
+(lag 2〜5 が各120〜125件 → lag 6 で37件 → 以降1桁)。`setup_stage_near_days = 5` と一致。
+つまり昇格の主因は「ベースが機械的に `base_min_days` に達すること」なので、near:forming は
+「数日待てば待機に上がる予約席」。逆に near:rejected は待っても上がらない。
+
+### backfill と実運用を混ぜてはいけない件(検証済み)
+
+backfill の 07-28 は order 10、実運用の 07-29 は order 3 で食い違う。原因を潰した:
+
+- 価格データの差は無い(`prices_long` vs `prices` で59銘柄比較、close maxdiff 0.0077、volume 一致)
+- 空履歴で 07-28 を再実行 → order 5 / watch 4
+- **実運用 `status.jsonl` (59行/12銘柄、07-04起点) を種にして再実行 → order 6 / watch 3 / cooled 2 = 実運用と整合**
+- 120日ぶんの合成履歴を種にすると order 10 / watch 1 / cooled 7
+
+= リプレイのロジックは正しく、実運用側のピボットロック履歴が3週間ぶんしか無いので
+order/watch が構造的に少なく出ているだけ。プリセットは `src` 列で必ず分けて集計する。
+
+### 制約(HANDOFF.md にも記載)
+
+1. `total_score` は常に `None`(ファンダは現在スナップショットのみ = look-ahead 防止)
+2. ユニバースは今日の候補リスト = 生存バイアス(`src/backtest.py` と同じ)
+3. backfill 行には `backfilled: true`、実運用行には無い
+4. ベンチマーク 1306 は `data/prices/` に 2024-07 以降しか無い
+
+### その他
+
+- sandbox に pyarrow が無くて parquet が読めなかった。`pip download` → `pip install --no-index`
+  の2段で入れた(45秒制限のため)。副産物として従来 fail していた parquet 系3件も通り **473 passed**。
+- 中間物は `data/backfill_cache/`(gitignore済み、百MB級)。`commit` まで通したら消してよい。
+- `tests/test_backfill_stage_history.py` 6件。backfill 行が実運用行を汚さないこと
+  (`slice_day` が当日値の無い銘柄を落とす / マーカー必須 / commit が warmup・既存日をスキップ)を固定。
+- 次: この実測を根拠に4層アクションUI(発注/監視/熟成待ち/対象外)を組む。
+  `near:forming` = 熟成待ち、`near:rejected` = 対象外へ落とす。
+
+---
+
 ## 2026-07-30 (148): 監視バケットの日次記録 (src/report/stage_log.py)
 
 > 「正直フィルターの掛け方どうしたらいいかがわかんなくなってきてる。ドグマや昨日確立した
