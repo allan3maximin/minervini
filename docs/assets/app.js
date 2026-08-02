@@ -2205,6 +2205,22 @@ function statusBadgeHtml(s) {
   return "";
 }
 
+// 決算をまたぐエントリーは、値動きの理由がチャートの外にある別種のリスク。個別画面には
+// 「次回決算」が出ているが、一覧を眺めている段階で気付けないと意味がないのでカードにも出す。
+// 日数はバッチが生成基準日から確定させた days_to_earnings をそのまま使う。画面で日付を
+// 引き算すると、バッチを回した日と見ている日がずれたときに嘘の日数を出してしまう。
+const EARNINGS_BADGE_MAX_DAYS = 5;
+
+function earningsBadgeHtml(s) {
+  const d = s ? s.days_to_earnings : null;
+  // 予定日が取れていない銘柄 (null) と、もう過ぎた銘柄 (負) には何も出さない。
+  if (typeof d !== "number" || !isFinite(d)) return "";
+  if (d < 0 || d > EARNINGS_BADGE_MAX_DAYS) return "";
+  const text = d === 0 ? "きょう決算" : `決算まで${d}日`;
+  const title = s.next_earnings_date ? `次回決算 ${s.next_earnings_date}` : text;
+  return `<span class="sc-badge sc-badge-earnings" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+}
+
 // リスト画面: 横スクロール表を廃止し、1銘柄=薄型2〜3段カードでスマホ幅に収める。
 // 2026-07-29: ティア引数を廃止(タブ統合)。並びは呼び出し側(visibleListStocks)が
 // 確定済みなので、ここではソートせず渡された順のまま描画する。
@@ -2274,7 +2290,7 @@ function renderCardList(stocks) {
         </span>
       </div>
       <div class="sc-row sc-row-sub">
-        <span class="sc-flags">${statusBadgeHtml(s)}${fundVerdictBadgeHtml(s)}${marginBadgeHtml(s.margin)}</span>
+        <span class="sc-flags">${statusBadgeHtml(s)}${earningsBadgeHtml(s)}${fundVerdictBadgeHtml(s)}${marginBadgeHtml(s.margin)}</span>
         <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
         <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
       </div>${metaLine}`;
@@ -2835,7 +2851,12 @@ function initMarketTabs() {
     });
     // レビューは大引バッチの産物で、市況データ/市況分析とは別ファイル(review.json)。
     // 開いたときに初めて取りに行く(2回目以降はキャッシュを見るだけで何もしない)。
-    if (name === "review") ensureReviewLoaded();
+    // 「過去の成績」(stats.json)はレビュー本体とは別ファイル・別ブロックなので、
+    // 片方が欠けてももう片方が出るよう独立して取りに行く。
+    if (name === "review") {
+      ensureReviewLoaded();
+      ensureReviewStatsLoaded();
+    }
   };
 
   const initial = (tabs.querySelector(".market-tab.active") || tabs.querySelector(".market-tab"));
@@ -5488,6 +5509,60 @@ function reviewAfternoonHtml(a) {
   return reviewBlockHtml("後場はどうだったか", "前場の数字と大引の数字を比べたもの", parts);
 }
 
+// 「だましの実測率」。件数だけ並べても、きょうのだましが多いのか少ないのかを測る
+// ものさしが無い。直近の通算を横に置くことで初めて「きょうは悪い日だった」が言える。
+// 割合の計算はバックエンドで済んでいるので、ここは来た値を並べるだけ。
+function reviewBaselineHtml(b) {
+  if (!b || typeof b !== "object") return "";
+  if (b.held_rate == null && b.today_held_rate == null) return "";
+
+  // 件数が足りないのに「62%」と言い切って見せるのがこの手の数字で一番まずいので、
+  // その場合は薄字にして参考値だと明示する(消しはしない。消すと基準が無いことに
+  // 気付けないまま件数だけ眺めることになる)。
+  const weak = b.reliable === false;
+  const rows = [];
+  if (b.held_rate != null) {
+    const sub = [];
+    if (b.days != null) sub.push(`直近${reviewNum(b.days)}営業日`);
+    if (b.sample != null) sub.push(`${reviewNum(b.sample)}件のうち`);
+    const subHtml = sub.length ? `<span class="market-detail-sub">${sub.join(" / ")}</span>` : "";
+    rows.push(
+      `<div class="market-detail-row"><span>前場でブレイクした銘柄が引けまで持った割合${subHtml}</span><span>${formatPct1(b.held_rate)}</span></div>`
+    );
+  }
+  if (b.today_held_rate != null) {
+    rows.push(`<div class="market-detail-row"><span>きょうの分</span><span>${formatPct1(b.today_held_rate)}</span></div>`);
+  }
+  if (!rows.length) return "";
+
+  const note = weak ? `<p class="review-group-desc review-weak-note">参考値(件数が足りません)</p>` : "";
+  return (
+    reviewHeadingHtml("だましの実測率", "前場のブレイクがどれくらい引けまで持つか") +
+    `<div class="market-detail-indicators${weak ? " review-unreliable" : ""}">${rows.join("")}</div>` +
+    note
+  );
+}
+
+// 決算発表が近い銘柄。大引でブレイクした銘柄・発注候補のうち、発表日が目前のものを
+// バックエンドが選んで渡してくる(候補から外してはいない。跨ぐかどうかを決めるのは見る人)。
+// 日数はレコードの days_to_earnings をそのまま出す。画面で日付を数え直すと、バッチを
+// 回した日と画面を見ている日がずれたときに嘘の日数になる。
+// 銘柄カードのバッジ (earningsBadgeHtml) と同じ言い回しにして、一覧と表現を揃える。
+function reviewEarningsSoonHtml(items) {
+  const rows = Array.isArray(items) ? items.filter((x) => x && x.code) : [];
+  if (!rows.length) return "";
+  // 行そのものは既存の銘柄行を使い回す(見た目とタップ遷移を他のグループと揃えるため)。
+  // 残り日数と予定日は、その行の補足 (note) として渡す。
+  const decorated = rows.map((x) => {
+    const d = x.days_to_earnings;
+    const when = typeof d === "number" && isFinite(d) ? (d === 0 ? "きょう決算" : `決算まで${d}日`) : "";
+    const on = x.next_earnings_date ? `(${x.next_earnings_date})` : "";
+    const note = [when, on].filter(Boolean).join(" ");
+    return note ? Object.assign({}, x, { note }) : x;
+  });
+  return reviewStockGroupHtml("決算発表が近い", "発表を跨ぐかどうかを決めてから入る銘柄", decorated);
+}
+
 // ブロック3: 銘柄がどう入れ替わったか。
 function reviewStocksHtml(st) {
   if (!st || typeof st !== "object") return "";
@@ -5502,10 +5577,17 @@ function reviewStocksHtml(st) {
     if (items.length) parts.push(`<div class="review-counts">${items.join("")}</div>`);
   }
 
+  // 件数のすぐ下。履歴が溜まるまでキーごと来ないので、当分のあいだ出ないのが正常。
+  parts.push(reviewBaselineHtml(st.baseline));
+
   parts.push(reviewStockGroupHtml("だまし", "前場はブレイクしていたが、大引で押し戻された銘柄", st.fakeout));
   parts.push(reviewStockGroupHtml("引け際のブレイク", "前場は監視だったが、引けにかけてブレイクした銘柄", st.late_breakout));
   parts.push(reviewStockGroupHtml("新しく候補入り", "きょう新たに発注候補へ上がってきた銘柄", st.new_candidates));
   parts.push(reviewStockGroupHtml("候補から外れた", "きょう候補から落ちた銘柄", st.dropped));
+
+  // 上のグループを横断する注意喚起なので最後に置く。近い銘柄がいない日はキーごと
+  // 来ないので、その日は小見出しごと出ない。
+  parts.push(reviewEarningsSoonHtml(st.earnings_soon));
 
   return reviewBlockHtml("銘柄の入れ替わり", "", parts);
 }
@@ -5582,6 +5664,96 @@ function reviewFollowupHtml(f) {
     );
   }
   return reviewBlockHtml("前日の答え合わせ", "おまけ", parts);
+}
+
+// 「過去の成績」(docs/data/stats.json)。帯ごとの表を1つ組み立てる。
+// win_rate は 0〜1 の割合なので formatPct1 で100倍する。median_return は
+// バックエンドが既に%で入れてくるので、ここで100倍してはいけない。
+function reviewStatsTableHtml(section, title, desc) {
+  if (!section || typeof section !== "object") return "";
+  const rows = Array.isArray(section.rows) ? section.rows.filter((r) => r && r.label != null) : [];
+  if (!rows.length) return "";
+
+  const body = rows
+    .map((r) => {
+      // 件数が足りない帯は消さずに薄字で残す。消すと「その帯にはまだサンプルが無い」
+      // ことに気付けず、残った帯だけを見て全体を語ってしまう。
+      const weak = r.reliable === false;
+      const note = weak ? `<span class="review-weak-note">参考値</span>` : "";
+      // 薄字の行で中央値だけ緑/赤に光ると「参考値」の断りが効かなくなるので色は付けない。
+      const tone = weak ? "review-flat" : reviewTone(r.median_return);
+      return `<tr class="${weak ? "review-unreliable" : ""}">
+        <td>${escapeHtml(String(r.label))}${note}</td>
+        <td>${reviewNum(r.n, "件")}</td>
+        <td>${formatPct1(r.win_rate)}</td>
+        <td class="${tone}">${reviewSigned(r.median_return, "%")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  // min_n は「何件から言い切ってよいか」の線引き。薄字の理由が画面から読めるよう添える。
+  const minNote =
+    section.min_n != null
+      ? `<p class="review-group-desc">${escapeHtml(`${section.min_n}件に満たない帯は参考値として薄く出しています。`)}</p>`
+      : "";
+
+  return (
+    reviewHeadingHtml(title, desc) +
+    `<div class="market-detail-table-wrap"><table class="market-detail-table">
+      <thead><tr><th></th><th>件数</th><th>上がった割合</th><th>値動きの真ん中</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>` +
+    minNote
+  );
+}
+
+function reviewStatsHtml(data) {
+  if (!data || typeof data !== "object") return "";
+  const parts = [
+    reviewStatsTableHtml(data.regime, "地合いスコアの帯ごと", "候補が出た日の地合いスコア"),
+    reviewStatsTableHtml(data.volume, "ブレイク日の出来高の帯ごと", "50日平均出来高の何倍だったか"),
+  ];
+
+  const notes = Array.isArray(data.notes) ? data.notes.filter(Boolean) : [];
+  if (notes.length) {
+    parts.push(`<div class="review-notes">${notes.map((n) => `<div class="review-note">${escapeHtml(n)}</div>`).join("")}</div>`);
+  }
+
+  // 副題は「いつからいつまでの候補を何営業日追ったか」。どれか欠けても文が壊れないようにする。
+  const w = data.window || {};
+  const span = w.from && w.to ? `${w.from}〜${w.to} の候補` : "";
+  const forward = data.forward_days != null ? `${data.forward_days}営業日追跡` : "";
+  const sub = span && forward ? `${span}を${forward}` : span || forward;
+
+  return reviewBlockHtml("過去の成績", sub, parts);
+}
+
+function renderReviewStats(data) {
+  const el = document.getElementById("review-stats-body");
+  if (!el) return;
+  el.innerHTML = reviewStatsHtml(data);
+}
+
+// 過去の成績は「あれば足す」ブロック。stats.json は履歴が溜まってから初めて作られるので、
+// 無い日はレビュー本体だけ描いて黙って畳む(レビューごと落とさない)。レビューと同じく
+// 大引にしか作れない集計なので、断面(大引/前場)のサフィックスは付けない。
+let reviewStatsLoadPromise = null;
+
+function ensureReviewStatsLoaded() {
+  if (reviewStatsLoadPromise) return reviewStatsLoadPromise;
+  reviewStatsLoadPromise = window.MinerviniData
+    .fetchJson("data/stats.json", { optional: true })
+    .then((data) => {
+      renderReviewStats(data);
+      return data;
+    })
+    .catch(() => {
+      // 読めなかったときだけキャッシュを捨てて、次にタブを押したら取り直せるようにする。
+      // 画面にはエラーを出さない(このブロックが無いこと自体は普通の状態なので)。
+      reviewStatsLoadPromise = null;
+      return null;
+    });
+  return reviewStatsLoadPromise;
 }
 
 function reviewPlaceholderHtml(message) {

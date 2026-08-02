@@ -9,9 +9,11 @@ from datetime import datetime, timedelta, timezone
 
 from src.report.review import (
     build_afternoon_block,
+    build_baseline,
     build_followup,
     build_review,
     build_sector_note,
+    build_stocks_block,
     classify_shape,
 )
 
@@ -22,7 +24,8 @@ NOW = datetime(2026, 7, 30, 16, 22, tzinfo=JST)
 
 
 def _stock(code, name, status, close=1000, pivot=990, score=70, near=False,
-           high=None, low=None, dist=1.0):
+           high=None, low=None, dist=1.0, days_to_earnings=None,
+           next_earnings_date=None):
     return {
         "code": code, "name": name, "status": status, "close": close,
         "pivot": pivot, "total_score": score, "dist_to_pivot": dist,
@@ -30,6 +33,8 @@ def _stock(code, name, status, close=1000, pivot=990, score=70, near=False,
         "low": low if low is not None else close * 0.98,
         "open": close,
         "setup_stage": {"stage": "forming", "near": near},
+        "days_to_earnings": days_to_earnings,
+        "next_earnings_date": next_earnings_date,
     }
 
 
@@ -299,3 +304,154 @@ def test_followup_counts_a_breakout_as_a_hit():
 
 def test_followup_is_empty_without_yesterday():
     assert build_followup([], {"6146": _stock("6146", "ディスコ", "BREAKOUT")}) == {}
+
+
+# ---------------------------------------------------------------------------
+# 決算が近いブレイク
+# ---------------------------------------------------------------------------
+# 決算跨ぎのエントリーは別のゲームなので注意喚起だけする。候補から外しはしない。
+
+def _earnings_stocks():
+    return {
+        # 大引でブレイク中、発表まであと2日。
+        "6146": _stock("6146", "ディスコ", "BREAKOUT", pivot=1000,
+                       days_to_earnings=2, next_earnings_date="2026-08-01"),
+        # 大引でブレイク中、発表まであと0日(=今日が発表日)。
+        "4478": _stock("4478", "フリー", "BREAKOUT", pivot=1000,
+                       days_to_earnings=0, next_earnings_date=TODAY),
+        # 発注候補(ブレイク前だがピボットあり)で発表まであと5日。窓の端は含める。
+        "3697": _stock("3697", "SHIFT", "WATCH_A", pivot=1000,
+                       days_to_earnings=5, next_earnings_date="2026-08-04"),
+        # 発表まで遠いので出さない。
+        "7203": _stock("7203", "トヨタ", "BREAKOUT", pivot=1000,
+                       days_to_earnings=20, next_earnings_date="2026-08-19"),
+        # 予定日が取れていない銘柄は出さない。
+        "9984": _stock("9984", "ソフトバンクG", "BREAKOUT", pivot=1000),
+    }
+
+
+def test_earnings_soon_lists_breakouts_close_to_their_report_date():
+    block = build_stocks_block({"6146": _stock("6146", "ディスコ", "WATCH_A")}, _earnings_stocks())
+    rows = block["earnings_soon"]
+    assert [r["code"] for r in rows] == ["4478", "6146", "3697"]  # 近い順
+    assert rows[0]["days_to_earnings"] == 0
+    assert rows[1]["next_earnings_date"] == "2026-08-01"
+    # 注意喚起であって除外ではない。候補のリストからは消えていないこと。
+    assert "4478" in block["_codes"]["close_breakout"]
+
+
+def test_earnings_soon_ignores_stocks_whose_report_already_passed():
+    """発表が済んだ銘柄(日数が負)は注意喚起の対象ではない。"""
+    stocks = {"6146": _stock("6146", "ディスコ", "BREAKOUT", pivot=1000,
+                             days_to_earnings=-1, next_earnings_date=YESTERDAY)}
+    block = build_stocks_block({"6146": _stock("6146", "ディスコ", "WATCH_A")}, stocks)
+    assert "earnings_soon" not in block
+
+
+def test_earnings_soon_key_is_dropped_when_nothing_qualifies():
+    """該当0件ならキーごと出さない(素材が欠けたブロックは黙って落とす)。"""
+    stocks = {"6146": _stock("6146", "ディスコ", "BREAKOUT", pivot=1000)}
+    block = build_stocks_block({"6146": _stock("6146", "ディスコ", "WATCH_A")}, stocks)
+    assert "earnings_soon" not in block
+
+
+# ---------------------------------------------------------------------------
+# だましの実測率(基準線)
+# ---------------------------------------------------------------------------
+# 「今日だまし3件」だけでは多いのか少ないのか分からないので、同じ数え方の過去の値を
+# 横に並べる。件数が足りないのに割合を言い切らないことが肝。
+
+def _history_row(date, breakout, held, has_maezyou=True):
+    return {
+        "date": date,
+        "has_maezyou": has_maezyou,
+        "maezyou_breakout": [f"{i:04d}" for i in range(breakout)],
+        "held": [f"{i:04d}" for i in range(held)],
+    }
+
+
+def test_baseline_totals_the_period_and_marks_it_reliable():
+    rows = [_history_row(f"2026-07-{d:02d}", 10, 6) for d in range(1, 6)]
+    baseline = build_baseline(rows, _history_row(TODAY, 4, 2), TODAY)
+    assert baseline["days"] == 5
+    assert baseline["sample"] == 50
+    assert baseline["held_rate"] == 0.6      # 通算30/50。日ごとの割合の平均ではない
+    assert baseline["today_held_rate"] == 0.5
+    assert baseline["reliable"] is True
+
+
+def test_baseline_is_empty_without_history():
+    """履歴が空でも例外を出さず、キーごと出さない。運用開始直後はこれが正常。"""
+    assert build_baseline([], _history_row(TODAY, 4, 2), TODAY) == {}
+
+
+def test_baseline_skips_days_without_a_morning_session():
+    """前場バッチが落ちた日は前場ブレイクが0件で残る。維持率0%の日として数えない。"""
+    rows = [
+        _history_row("2026-07-01", 10, 6),
+        _history_row("2026-07-02", 0, 0, has_maezyou=False),
+        _history_row("2026-07-03", 10, 6),
+    ]
+    baseline = build_baseline(rows, None, TODAY)
+    assert baseline["days"] == 2
+    assert baseline["sample"] == 20
+    assert baseline["held_rate"] == 0.6
+
+
+def test_baseline_excludes_today():
+    """今日の行はこれから書くもの。自分自身と比べても基準にならない。"""
+    rows = [
+        _history_row("2026-07-01", 10, 6),
+        _history_row(TODAY, 100, 100),   # 混ざると維持率が跳ね上がる
+    ]
+    baseline = build_baseline(rows, _history_row(TODAY, 100, 100), TODAY)
+    assert baseline["days"] == 1
+    assert baseline["sample"] == 10
+    assert baseline["held_rate"] == 0.6
+
+
+def test_baseline_is_not_reliable_with_a_small_sample():
+    """件数が足りないのに「62%」と言い切らないための目印。"""
+    rows = [_history_row("2026-07-01", 4, 3), _history_row("2026-07-02", 4, 2)]
+    baseline = build_baseline(rows, None, TODAY)
+    assert baseline["sample"] == 8
+    assert baseline["reliable"] is False
+    assert baseline["held_rate"] == 0.625
+
+
+def test_baseline_today_rate_is_null_without_a_morning_breakout():
+    """今日の前場ブレイクが0件なら割合そのものが存在しない(0%ではない)。"""
+    rows = [_history_row("2026-07-01", 10, 6)]
+    baseline = build_baseline(rows, _history_row(TODAY, 0, 0), TODAY)
+    assert baseline["today_held_rate"] is None
+
+
+def test_baseline_uses_only_the_most_recent_window():
+    from src.report.review import BASELINE_WINDOW_DAYS
+
+    old = [_history_row(f"2026-06-{d:02d}", 10, 10) for d in range(1, 11)]
+    recent = [_history_row(f"2026-07-{d:02d}", 10, 5)
+              for d in range(1, BASELINE_WINDOW_DAYS + 1)]
+    baseline = build_baseline(old + recent, None, TODAY)
+    assert baseline["days"] == BASELINE_WINDOW_DAYS
+    assert baseline["held_rate"] == 0.5   # 古い10日は窓の外なので混ざらない
+
+
+def test_baseline_reaches_the_review_through_build_review():
+    review = build_review(
+        TODAY, _close_report(), _close_breadth(),
+        maezyou_report=_maezyou_report(), maezyou_breadth=_maezyou_breadth(),
+        history_rows=[_history_row(f"2026-07-{d:02d}", 10, 6) for d in range(1, 6)],
+        now=NOW,
+    )
+    assert review["stocks"]["baseline"]["held_rate"] == 0.6
+    # 今日は前場ブレイク2件のうち1件が引けまで残っている。
+    assert review["stocks"]["baseline"]["today_held_rate"] == 0.5
+
+
+def test_baseline_key_is_absent_when_history_is_empty():
+    review = build_review(
+        TODAY, _close_report(), _close_breadth(),
+        maezyou_report=_maezyou_report(), maezyou_breadth=_maezyou_breadth(), now=NOW,
+    )
+    assert "baseline" not in review["stocks"]

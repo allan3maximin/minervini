@@ -107,6 +107,96 @@ def test_assemble_stock_record_drops_nan_and_missing_price_fields():
     assert record["rvol"] is None  # 50日平均が出せない = 比較対象なし
 
 
+# ------------------------------------------------- 決算発表までの日数 (2026-07-31)
+# 日数を生成時に確定させるのが目的。画面側でブラウザの時計から引き算すると、
+# バッチが走った日と画面を見ている日がずれたとたんに嘘の日数が出る。
+
+
+def _earnings_record(next_earnings_date, row_date="2026-07-30"):
+    row = _ohlcv_row(date=row_date)
+    return assemble_stock_record(
+        "7134", "T", row, {}, _EMPTY_VCP, {"status": "BREAKOUT", "pivot": 1000},
+        _fund_info(), DRYUP_CONFIG, next_earnings_date=next_earnings_date,
+    )
+
+
+def test_days_to_earnings_is_counted_from_the_record_date():
+    """基準日はバッチの実行時刻ではなく、そのレコードの元になった足の日付。"""
+    record = _earnings_record("2026-08-07")
+    assert record["next_earnings_date"] == "2026-08-07"
+    assert record["days_to_earnings"] == 8
+
+
+def test_days_to_earnings_is_none_without_a_scheduled_date():
+    """予定日が取れない銘柄(決算カレンダーに載らない期末など)は None。0ではない。"""
+    record = _earnings_record(None)
+    assert record["next_earnings_date"] is None
+    assert record["days_to_earnings"] is None
+
+
+def test_days_to_earnings_goes_negative_once_the_date_has_passed():
+    """発表日を過ぎたら負。0で止めると「今日が発表日」と区別が付かなくなる。"""
+    assert _earnings_record("2026-07-28")["days_to_earnings"] == -2
+    assert _earnings_record("2026-07-30")["days_to_earnings"] == 0
+
+
+def test_days_to_earnings_accepts_a_timestamp_row_date():
+    """レコードの日付は pandas の Timestamp で入ってくる経路がある。"""
+    record = _earnings_record("2026-08-07", row_date=pd.Timestamp("2026-07-30"))
+    assert record["date"] == "2026-07-30"
+    assert record["days_to_earnings"] == 8
+
+
+def test_days_to_earnings_treats_nat_as_unknown():
+    """pandas の欠損値(NaT)が素通りすると日次バッチごと落ちる。
+
+    `isinstance(pd.NaT, datetime)` は True で `pd.NaT.date()` は NaT を返すので、
+    先に弾かないと report.json に文字列 "NaT" が載り、引き算が TypeError になる。
+    """
+    record = _earnings_record("2026-08-07", row_date=pd.NaT)
+    assert record["date"] is None
+    assert record["days_to_earnings"] is None
+
+    # 決算カレンダー側が欠損しているときも同じ(こちらは日付だけが不明)。
+    record = _earnings_record(pd.NaT, row_date=pd.Timestamp("2026-07-30"))
+    assert record["date"] == "2026-07-30"
+    assert record["days_to_earnings"] is None
+
+
+def test_days_to_earnings_is_none_when_the_record_has_no_date():
+    row = _ohlcv_row()  # date キーごと無い(古いデータ経路)
+    record = assemble_stock_record(
+        "7134", "T", row, {}, _EMPTY_VCP, {"status": "BREAKOUT", "pivot": 1000},
+        _fund_info(), DRYUP_CONFIG, next_earnings_date="2026-08-07",
+    )
+    assert record["date"] is None
+    assert record["days_to_earnings"] is None
+
+
+def test_build_report_fills_days_to_earnings_added_after_assembly(tmp_path, monkeypatch):
+    """予定日が組み立ての後から差し込まれた銘柄も、書き出し前に日数が埋まること。
+
+    決算カレンダーを別に引いてレコードへ載せる経路があるので、そこを通った銘柄が
+    日数だけ空のまま画面に出ると、結局ブラウザ側で引き算することになる。
+    """
+    import src.report.build_site as bs
+
+    monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(bs, "REPORT_PATH", tmp_path / "report.json")
+
+    stocks = [
+        {"code": "A", "tier": "confirmed", "status": "BREAKOUT", "total_score": 90,
+         "date": "2026-07-30", "next_earnings_date": "2026-08-03", "days_to_earnings": None},
+        # 予定日そのものが無い銘柄は None のまま(0で埋めない)。
+        {"code": "B", "tier": "confirmed", "status": "BREAKOUT", "total_score": 80,
+         "date": "2026-07-30", "next_earnings_date": None, "days_to_earnings": None},
+    ]
+    report = build_report(stocks, universe_size=1000, template_pass=87)
+    by_code = {s["code"]: s for s in report["stocks"]}
+    assert by_code["A"]["days_to_earnings"] == 4
+    assert by_code["B"]["days_to_earnings"] is None
+
+
 def _vcp_with_v5(recent10_median, vol_ma50):
     return {
         "vcp_score": 70.0,

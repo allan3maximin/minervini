@@ -35,6 +35,7 @@ from src.report import dryup_log as dryup_log_mod
 from src.report import heatmap as heatmap_mod
 from src.report import market_signal as market_signal_mod
 from src.report import positions as positions_mod
+from src.report import regime_stats as regime_stats_mod
 from src.report import stage_log as stage_log_mod
 from src.report import summary as summary_mod
 from src.report.secure_io import preflight_data_key
@@ -498,6 +499,25 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
             print(f"Stage history: appended {n_stage} rows.")
         except Exception as e:
             print(f"Stage history update failed (ignored): {e}")
+
+        # 本番で毎日出している候補の「その後」を貯めて docs/data/stats.json を書く
+        # (src/report/regime_stats.py)。stage.jsonl へ当日分を追記したあと、かつ
+        # update_breadth が breadth.json に当日の地合いスコアを載せたあとでないと
+        # 当日の候補行が作れないので、この位置より前には置けない。
+        # 前場ラン(is_snapshot)では呼ばない: 途中足の値を「その日の確定値」として
+        # 履歴に焼き込んでしまうため(dryup_log / stage_log / review と同じ理由)。
+        # 価格は既に指標まで載せた indicator_by_code を渡す(parquet を読み直さない)。
+        # 失敗してもスクリーナー本体は止めない(検証用の副次成果物)。
+        try:
+            outcome_stat = regime_stats_mod.update_candidate_outcomes(indicator_by_code)
+            print(
+                f"Candidate outcomes: new {outcome_stat['new']}, "
+                f"advanced {outcome_stat['advanced']}, "
+                f"appended {outcome_stat['appended']}, "
+                f"settled {outcome_stat['settled']}/{outcome_stat['total']}."
+            )
+        except Exception as e:
+            print(f"Candidate outcomes update failed (ignored): {e}")
     # スナップショットは indices.json を直接生成しない(intraday-indices.yml が
     # 15分間隔で更新している canonical をそのまま断面として複製する)。
     if is_snapshot:

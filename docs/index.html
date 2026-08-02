@@ -139,6 +139,10 @@
       <div id="review-body" class="review-body">
         <p class="tier-note">読み込み中...</p>
       </div>
+      <!-- 過去の成績(2026-07-31)。docs/data/stats.json は履歴が溜まってから初めて
+           作られる別ファイルなので、レビュー本体とは器を分けて独立に描く
+           (片方が無くてももう片方は出る)。中身は renderReviewStats() が入れる。 -->
+      <div id="review-stats-body"></div>
     </div>
   </div>
 

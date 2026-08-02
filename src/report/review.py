@@ -28,10 +28,13 @@ report_maezyou.json はドロップした日も前日のものが残っている
 
 ## 履歴 data/history/review.jsonl
 
-当日ぶんしか画面には出さないが、行は毎日貯める。目的は将来「前場のブレイクが引けまで
-残る実測率(=だましの実測率)」を出すこと。銘柄コードの集合だけを焼き込んでおけば、
-数週間後に振り返って割合が出せる。名前や価格は report 側にあるので入れない(1日1行が
-何百日も git 差分に積まれるため)。
+行は毎日貯める。銘柄コードの集合だけを焼き込んでおけば、後から振り返って
+「前場のブレイクが引けまで残る割合」が出せる。名前や価格は report 側にあるので
+入れない(1日1行が何百日も git 差分に積まれるため)。
+
+この履歴を読んで基準線を出すのが build_baseline。「今日だまし3件」だけでは多いのか
+少ないのか分からないので、同じ数え方の過去の値を横に並べる。運用初日から数週間は
+行が貯まっていないので基準線は出ない(それが正常)。
 """
 from __future__ import annotations
 
@@ -109,6 +112,18 @@ STOCK_EDGE_HIGH = 0.75
 # 銘柄リストが長い日に JSON が膨らむのを防ぐ上限。画面側は5件で畳むので、
 # 「もっと見る」で開いて意味がある範囲に留める。
 MAX_STOCK_ROWS = 20
+
+# 決算発表が近いブレイクを注意喚起する窓(暦日)。0 = 発表当日。5日にしたのは
+# 「今から入って発表を跨ぐか」が判断の分かれ目になる範囲だから。あくまで注意喚起で、
+# ここに載った銘柄を候補から外すことはしない(決算跨ぎは別のゲームというだけ)。
+EARNINGS_SOON_MAX_DAYS = 5
+
+# 「前場のブレイクが引けまで残る率」の基準線を出す集計窓(営業日)。短すぎると
+# 数銘柄の増減で割合が跳ね、長すぎると相場つきが変わった後も古い地合いを引きずる。
+BASELINE_WINDOW_DAYS = 20
+# 期間通算の件数がこれに届かないうちは割合を言い切らない(画面は「参考値」と出す)。
+# 20件で「60%」と書くと、実体は12/20で1件ずれるだけで5ポイント動く。
+BASELINE_MIN_SAMPLE = 30
 
 
 # ---------------------------------------------------------------------------
@@ -490,13 +505,23 @@ def build_sector_note(maezyou_heatmap, close_heatmap) -> str:
 # 4) 銘柄レベルの遷移
 # ---------------------------------------------------------------------------
 
-def build_stocks_block(maezyou_stocks: dict, close_stocks: dict) -> dict:
+def build_stocks_block(
+    maezyou_stocks: dict,
+    close_stocks: dict,
+    history_rows: list[dict] | None = None,
+    date_str: str = "",
+) -> dict:
     """前場と大引で銘柄の状態がどう変わったかを4つのリストに分ける。
 
     - だまし        前場はブレイクしていたのに大引では抜けを維持できなかった
     - 引け際のブレイク 前場は抜けていなかったのに大引でブレイクした
     - 新しく候補入り  発注できる状態(ピボットあり)に大引で新たに入った
     - 候補から外れた  前場は発注できたのに大引で外れた
+
+    あわせて「決算が近いブレイク」と、過去の履歴から出した維持率の基準線を添える。
+
+    history_rows は review.jsonl の行(当日より前)。ファイルは読まない —
+    読むのは update_review 側の仕事(_load_intraday_ticks と同じ作り)。
 
     前場断面が無い日は空の辞書を返す(比較対象が無いので何も言えない)。
     """
@@ -517,7 +542,15 @@ def build_stocks_block(maezyou_stocks: dict, close_stocks: dict) -> dict:
         picked.sort(key=_by_score)
         return [_stock_row(s) for s in picked[:MAX_STOCK_ROWS]]
 
-    return {
+    codes = {
+        "maezyou_breakout": sorted(mz_break),
+        "close_breakout": sorted(close_break),
+        "held": sorted(mz_break & close_break),
+        "fakeout": sorted(mz_break - close_break),
+        "late_breakout": sorted(close_break - mz_break),
+    }
+
+    block = {
         "counts": {
             "maezyou_breakout": len(mz_break),
             "close_breakout": len(close_break),
@@ -528,13 +561,90 @@ def build_stocks_block(maezyou_stocks: dict, close_stocks: dict) -> dict:
         "new_candidates": rows(close_order - mz_order, close_stocks),
         "dropped": rows(mz_order - close_order, close_stocks),
         # 履歴用(画面には出さない)。だましの実測率を後日出すための素の集合。
-        "_codes": {
-            "maezyou_breakout": sorted(mz_break),
-            "close_breakout": sorted(close_break),
-            "held": sorted(mz_break & close_break),
-            "fakeout": sorted(mz_break - close_break),
-            "late_breakout": sorted(close_break - mz_break),
-        },
+        "_codes": codes,
+    }
+
+    earnings_soon = _earnings_soon_rows(close_break | close_order, close_stocks)
+    if earnings_soon:
+        block["earnings_soon"] = earnings_soon
+
+    baseline = build_baseline(history_rows or [], codes, date_str)
+    if baseline:
+        block["baseline"] = baseline
+    return block
+
+
+def _earnings_soon_rows(codes: set, close_stocks: dict) -> list[dict]:
+    """大引時点でブレイクしている銘柄・発注候補のうち、決算発表が目前のもの。
+
+    銘柄レコードが持っている残り日数(build_site が生成時に確定させたもの)を
+    そのまま使う。ここで日付から引き算し直すと、レビューを作った時刻を基準に
+    数えることになってレコードの値とずれる。
+
+    注意喚起であって除外ではない。候補から外す処理はここにも他所にも入れていない。
+    """
+    picked = []
+    for code in codes:
+        stock = close_stocks.get(code) or {}
+        days = _num(stock.get("days_to_earnings"))
+        if days is None or days < 0 or days > EARNINGS_SOON_MAX_DAYS:
+            continue
+        picked.append({
+            "code": code,
+            "name": stock.get("name"),
+            "days_to_earnings": int(days),
+            "next_earnings_date": stock.get("next_earnings_date"),
+        })
+    # 近い順。同日は銘柄コード順(実行ごとに並びが変わらないように)。
+    picked.sort(key=lambda r: (r["days_to_earnings"], str(r["code"])))
+    return picked[:MAX_STOCK_ROWS]
+
+
+def build_baseline(history_rows: list[dict], today_row: dict | None, date_str: str) -> dict:
+    """前場のブレイクが引けまで残った割合を、過去の記録から出す。
+
+    「今日だまし3件」だけでは多いのか少ないのか分からない。同じ数え方の過去の値を
+    横に並べて初めて意味を持つので、review.jsonl に焼き込んである前場ブレイクと
+    引けまで維持したコードの集合を通算して基準線にする。
+
+    - **今日の行は入れない。** 今日の行はこれから書くものだし、自分自身と比べても
+      基準にならない。date が当日より前の行だけを使う。
+    - **前場が無かった日は分母から外す。** 前場バッチが落ちた日は前場ブレイクが
+      0件として残るので、そのまま数えると維持率0%の日を毎回混ぜることになる。
+    - 履歴が空なら空の辞書を返す(このファイルは素材が欠けたブロックを黙って落とす)。
+
+    reliable は「割合を言い切ってよいか」の目印。件数が足りないのに 62% と書くと、
+    1件ずれるだけで数字が動くことが読む側に伝わらない。
+    """
+    usable = []
+    for row in history_rows or []:
+        day = str(row.get("date") or "")
+        if not day or (date_str and day >= date_str):
+            continue
+        if not row.get("has_maezyou"):
+            continue
+        usable.append((day, len(row.get("maezyou_breakout") or []), len(row.get("held") or [])))
+
+    if not usable:
+        return {}
+    usable.sort(key=lambda r: r[0])
+    usable = usable[-BASELINE_WINDOW_DAYS:]
+
+    sample = sum(breakout for _, breakout, _ in usable)
+    held = sum(kept for _, _, kept in usable)
+    if sample <= 0:
+        # 前場はあったが一度もブレイクが出ていない期間。割る相手が無いので黙る。
+        return {}
+
+    today_breakout = len((today_row or {}).get("maezyou_breakout") or [])
+    today_held = len((today_row or {}).get("held") or [])
+    return {
+        "days": len(usable),
+        "sample": sample,
+        "held_rate": round(held / sample, 3),
+        # 今日の前場ブレイクが0件の日は割合そのものが存在しない(0%ではない)。
+        "today_held_rate": round(today_held / today_breakout, 3) if today_breakout else None,
+        "reliable": sample >= BASELINE_MIN_SAMPLE,
     }
 
 
@@ -646,6 +756,7 @@ def build_review(
     maezyou_heatmap: dict | None = None,
     intraday_ticks: list[dict] | None = None,
     yesterday_near_rows: list[dict] | None = None,
+    history_rows: list[dict] | None = None,
     now: datetime | None = None,
 ) -> dict:
     """当日の review.json の中身を組み立てる。ファイルは一切触らない。
@@ -696,7 +807,7 @@ def build_review(
         if afternoon:
             review["afternoon"] = afternoon
 
-    stocks = build_stocks_block(maezyou_stocks, close_stocks)
+    stocks = build_stocks_block(maezyou_stocks, close_stocks, history_rows or [], date_str)
     codes = stocks.pop("_codes", {}) if stocks else {}
     if stocks:
         review["stocks"] = stocks
@@ -746,6 +857,19 @@ def _load_intraday_ticks(date_str: str) -> list[dict]:
     from src.history_store import iter_records
 
     return [r for r in iter_records(REVIEW_INTRADAY_PATH) if r.get("date") == date_str]
+
+
+def _load_review_history(date_str: str) -> list[dict]:
+    """自分が過去に書いた review.jsonl から、当日より前の行を読む。
+
+    同じ日に再実行すると行が2本以上できるので load_deduped(後勝ち)で潰す。
+    行数で切らずに日付で切っているのは、集計窓を何日にするかを build_baseline 側の
+    定数一本で決めたいため。
+    """
+    from src.history_store import load_deduped
+
+    rows = load_deduped(REVIEW_HISTORY_JSONL, REVIEW_HISTORY_KEY)
+    return [r for r in rows if str(r.get("date") or "") < date_str]
 
 
 def _load_yesterday_near_rows(date_str: str) -> list[dict]:
@@ -802,6 +926,7 @@ def update_review(date_str: str, now: datetime | None = None) -> dict | None:
         maezyou_heatmap=load("heatmap_maezyou.json"),
         intraday_ticks=_load_intraday_ticks(date_str),
         yesterday_near_rows=_load_yesterday_near_rows(date_str),
+        history_rows=_load_review_history(date_str),
         now=now,
     )
 

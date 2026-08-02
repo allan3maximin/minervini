@@ -4,7 +4,7 @@ copying the static dashboard/detail-page assets into docs/ (design doc 7).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -72,6 +72,59 @@ SECTOR_STRENGTH_ORDER = {"強": 0, "中": 1, "弱": 2}
 
 
 # ---------------------------------------------------------------------------
+# 決算発表までの日数 (2026-07-31追加)
+# ---------------------------------------------------------------------------
+
+def _as_date(value) -> date | None:
+    """ISO文字列 / date / datetime / pandas Timestamp を date に揃える。
+
+    銘柄レコードの日付は pandas の Timestamp で入ってくるが、決算カレンダー側は
+    "2026-08-07" のような文字列で来る。どちらも受けられないと呼び出し側が
+    毎回型を気にすることになる。読めない値(NaT・空文字)は None に落とす。
+
+    **NaT は真っ先に弾く。** `isinstance(pd.NaT, datetime)` は True なので下の
+    datetime 分岐に入ってしまい、`pd.NaT.date()` は None ではなく NaT を返す。
+    そのまま通すと report.json に文字列 "NaT" が載り、days_to_earnings の引き算が
+    TypeError を投げて日次バッチごと落ちる(呼び出し側は try で囲っていない)。
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        # 「欠損かどうか」を真偽値1個で答えられない型(配列など)。日付ではないので下で落ちる。
+        pass
+    # datetime は date の派生なので先に見る(順番を逆にすると時刻が落ちない)。
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def days_to_earnings(next_earnings_date, as_of) -> int | None:
+    """基準日から次回決算発表予定日までの暦日数。過ぎていれば負、不明なら None。
+
+    値を生成時に確定させるのが目的。画面側でブラウザの時計から引き算すると、
+    バッチが走った日と画面を見ている日がずれたとたんに嘘になる(週末を挟むと
+    「あと1日」が金曜のまま月曜まで残る)。基準日はバッチの実行時刻ではなく
+    そのレコードの元になった足の日付を使う。
+
+    営業日ではなく暦日で数えているのは、注意喚起の相手が「発表を跨いでポジションを
+    持つかどうか」だから。土日を除いた日数を出しても判断は変わらない。
+    """
+    base = _as_date(as_of)
+    target = _as_date(next_earnings_date)
+    if base is None or target is None:
+        return None
+    return (target - base).days
+
+
+# ---------------------------------------------------------------------------
 # 7.2 report.json assembly
 # ---------------------------------------------------------------------------
 
@@ -86,6 +139,7 @@ def assemble_stock_record(
     config: dict | None = None,
     tier_override: str | None = None,
     margin_store: dict | None = None,
+    next_earnings_date=None,
 ) -> dict:
     """Combine the outputs of trend_template/vcp/entry/fundamentals into one
     report.json stock record.
@@ -100,6 +154,11 @@ def assemble_stock_record(
     `margin_store` is data/margin_weekly.json's dict, pre-loaded once by the
     caller (pipeline.py) so this per-stock function doesn't re-read the file
     from disk on every call.表示専用(信用残)。総合スコアには一切使わない。
+
+    `next_earnings_date` (2026-07-31追加、省略可) は次回決算発表予定日。渡されると
+    レコードの日付を基準にした残り暦日数 (`days_to_earnings`) までここで確定する。
+    決算カレンダーを別途引いてから後付けする経路もあるので省略可能にしてあり、
+    その場合の日数は build_report が書き出し直前に埋める。
     """
     config = config or load_config()
 
@@ -118,11 +177,17 @@ def assemble_stock_record(
     else:
         total_score = None
 
+    # このレコードが何日の足でできているか。決算までの日数の基準日であり、
+    # 生成時刻(バッチが走った時刻)とは別物。データ取得が失敗して前日の足のまま
+    # 走った日に、実行日を基準にして日数を数えてしまわないようにするため持つ。
+    as_of = _as_date(latest_row.get("date"))
+
     return {
         "code": code,
         "name": name,
         "tier": tier,
         "status": entry_result.get("status"),
+        "date": as_of.isoformat() if as_of else None,
         "close": latest_row.get("close"),
         # 日中レンジ(始値・高値・安値)と出来高。日次レビューが「終値が日中レンジの
         # どこで引けたか」を機械的に判定するための素材(2026-07-31追加)。終値だけでは
@@ -174,6 +239,10 @@ def assemble_stock_record(
         "dryup": _build_dryup_badge(vcp_result, config),
         # 監視タブ分類用(actionableならNone)。stage/near/missing/detail。
         "setup_stage": build_setup_stage(vcp_result, config),
+        # 次回決算発表予定日と、そこまでの残り暦日数。日数を画面で計算させないのは
+        # days_to_earnings の説明のとおり(見ている日とバッチが走った日がずれると嘘になる)。
+        "next_earnings_date": next_earnings_date,
+        "days_to_earnings": days_to_earnings(next_earnings_date, as_of),
         # 信用残(需給)。表示専用レイヤー、総合スコアには一切組み込まない
         # (「スコアは順位付け、フラグは事実」。dryupと同じ方針)。データ無しはNone。
         "margin": _build_margin_metrics(code, latest_row, margin_store, config),
@@ -427,6 +496,22 @@ def _sort_key(stock: dict) -> tuple:
     return (-score, status_rank, stock.get("code") or "")
 
 
+def _fill_days_to_earnings(stocks: list[dict]) -> None:
+    """決算までの日数が空のレコードを、書き出し直前に埋める。
+
+    次回決算発表予定日はレコードを組み立てた後から差し込まれる経路がある
+    (決算カレンダーを別に引いて record に載せる)。その経路で入った銘柄は
+    組み立て時点では予定日が分からず日数を出せないので、どちらの経路で入っても
+    report.json には日数が載っている状態にしてから書き出す。基準日はレコード自身の
+    日付なので、ここで実行日を持ち込むことはしない。
+    """
+    for stock in stocks:
+        if stock.get("days_to_earnings") is None and stock.get("next_earnings_date"):
+            stock["days_to_earnings"] = days_to_earnings(
+                stock.get("next_earnings_date"), stock.get("date")
+            )
+
+
 def build_report(
     stocks: list[dict],
     universe_size: int,
@@ -455,6 +540,7 @@ def build_report(
     EOD の report.json を上書きせず、前場断面を独立ファイルとして残すために使う。
     """
     ordered = sorted(stocks, key=_sort_key)
+    _fill_days_to_earnings(ordered)
     report = {
         "generated_at": generated_at or datetime.now().astimezone().isoformat(),
         "market_session": session or market_session(),

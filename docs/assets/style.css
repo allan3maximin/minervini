@@ -2117,6 +2117,14 @@ a.nav-btn:hover { border-color: var(--link); }
 .review-followup-table tbody tr { cursor: pointer; }
 .review-followup-table td:first-child { text-align: left; }
 
+/* 件数が足りない集計(reliable:false)。行は消さずに薄くするだけ。消すと
+   「その帯にはまだサンプルが無い」ことに気付けず、残った帯だけで全体を語ってしまう。
+   新しい色は足さず、既存の淡色(--text-dim)をそのまま使う。 */
+.review-unreliable,
+.review-unreliable td,
+.review-unreliable .market-detail-row span:last-child { color: var(--text-dim); }
+.review-weak-note { margin-left: 6px; font-size: 11px; color: var(--text-dim); }
+
 /* ------------------------------------------ リスト画面 銘柄カード(薄型2段) */
 /* 1銘柄=カード1枚。スマホ幅に収まるよう項目を7つに絞り、上段=銘柄名/コード/
    スコア/RS、下段=終値(前日比%)/セクター(強度)/枯れ度 の2行で構成する
@@ -3134,6 +3142,13 @@ a.nav-btn:hover { border-color: var(--link); }
   background: rgba(148, 163, 184, 0.14);
   color: var(--text-dim);
   border-color: rgba(148, 163, 184, 0.3);
+}
+/* 決算が近い(2026-07-31)。合否ではなく「別のリスクがある日」の注意喚起なので、
+   既存の警告色(--warn)をそのまま使い、新しい色は足していない。 */
+.sc-badge-earnings {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 .sc-badge-cooled {
   background: rgba(248, 113, 113, 0.14);
