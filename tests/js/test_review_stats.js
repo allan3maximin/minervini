@@ -150,7 +150,7 @@ const statsBody = () => document.getElementById("review-stats-body").innerHTML;
   // レビュー本体は stats.json とは独立して描ける。
   files = { "data/review.json": { date: "2026-07-31", generated_at: "2026-07-31T16:22:10+09:00", notes: [] } };
   await ctx.ensureReviewLoaded();
-  check("stats.json が無くてもレビュー本体は描ける", document.getElementById("review-body").innerHTML.includes("きょうのふりかえり"));
+  check("stats.json が無くてもレビュー本体は描ける", document.getElementById("review-body").innerHTML.includes("今日の振り返り"));
 
   // --- (3) だましの実測率 (review.json の stocks.baseline) ------------------
   const b = ctx.reviewBaselineHtml({ days: 18, sample: 145, held_rate: 0.62, today_held_rate: 0.5, reliable: true });
@@ -173,7 +173,7 @@ const statsBody = () => document.getElementById("review-stats-body").innerHTML;
   // 日数はバッチが確定させた値をそのまま使う。画面では出す/出さないの境目だけを決める。
   const badge = (d) => ctx.earningsBadgeHtml({ days_to_earnings: d, next_earnings_date: "2026-08-05" });
   check("5日先までは出す", badge(5).includes("決算まで5日") && badge(4).includes("決算まで4日"));
-  check("当日は「きょう決算」", badge(0).includes("きょう決算"));
+  check("当日は「今日決算」", badge(0).includes("今日決算"));
   check("6日以上先は出さない", badge(6) === "");
   check("過ぎた銘柄には出さない", badge(-1) === "");
   check("予定日が取れていない銘柄には出さない", badge(null) === "" && ctx.earningsBadgeHtml({}) === "");
@@ -199,7 +199,7 @@ const statsBody = () => document.getElementById("review-stats-body").innerHTML;
     es.includes("7203") && es.includes("トヨタ") && es.includes("決算まで2日") && es.includes("2026-08-05"),
     "days_to_earnings をそのまま出す"
   );
-  check("当日は銘柄カードのバッジと同じ「きょう決算」", es.includes("6758") && es.includes("きょう決算"));
+  check("当日は銘柄カードのバッジと同じ「今日決算」", es.includes("6758") && es.includes("今日決算"));
   check(
     "行は既存のレビュー銘柄行と同じ作り(タップで個別画面へ)",
     es.includes('class="review-stock-row"') && es.includes('data-review-code="7203"')

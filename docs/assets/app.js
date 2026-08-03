@@ -2216,7 +2216,7 @@ function earningsBadgeHtml(s) {
   // 予定日が取れていない銘柄 (null) と、もう過ぎた銘柄 (負) には何も出さない。
   if (typeof d !== "number" || !isFinite(d)) return "";
   if (d < 0 || d > EARNINGS_BADGE_MAX_DAYS) return "";
-  const text = d === 0 ? "きょう決算" : `決算まで${d}日`;
+  const text = d === 0 ? "今日決算" : `決算まで${d}日`;
   const title = s.next_earnings_date ? `次回決算 ${s.next_earnings_date}` : text;
   return `<span class="sc-badge sc-badge-earnings" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
@@ -5531,7 +5531,7 @@ function reviewBaselineHtml(b) {
     );
   }
   if (b.today_held_rate != null) {
-    rows.push(`<div class="market-detail-row"><span>きょうの分</span><span>${formatPct1(b.today_held_rate)}</span></div>`);
+    rows.push(`<div class="market-detail-row"><span>今日の分</span><span>${formatPct1(b.today_held_rate)}</span></div>`);
   }
   if (!rows.length) return "";
 
@@ -5555,7 +5555,7 @@ function reviewEarningsSoonHtml(items) {
   // 残り日数と予定日は、その行の補足 (note) として渡す。
   const decorated = rows.map((x) => {
     const d = x.days_to_earnings;
-    const when = typeof d === "number" && isFinite(d) ? (d === 0 ? "きょう決算" : `決算まで${d}日`) : "";
+    const when = typeof d === "number" && isFinite(d) ? (d === 0 ? "今日決算" : `決算まで${d}日`) : "";
     const on = x.next_earnings_date ? `(${x.next_earnings_date})` : "";
     const note = [when, on].filter(Boolean).join(" ");
     return note ? Object.assign({}, x, { note }) : x;
@@ -5582,8 +5582,8 @@ function reviewStocksHtml(st) {
 
   parts.push(reviewStockGroupHtml("だまし", "前場はブレイクしていたが、大引で押し戻された銘柄", st.fakeout));
   parts.push(reviewStockGroupHtml("引け際のブレイク", "前場は監視だったが、引けにかけてブレイクした銘柄", st.late_breakout));
-  parts.push(reviewStockGroupHtml("新しく候補入り", "きょう新たに発注候補へ上がってきた銘柄", st.new_candidates));
-  parts.push(reviewStockGroupHtml("候補から外れた", "きょう候補から落ちた銘柄", st.dropped));
+  parts.push(reviewStockGroupHtml("新しく候補入り", "今日新たに発注候補へ上がってきた銘柄", st.new_candidates));
+  parts.push(reviewStockGroupHtml("候補から外れた", "今日候補から落ちた銘柄", st.dropped));
 
   // 上のグループを横断する注意喚起なので最後に置く。近い銘柄がいない日はキーごと
   // 来ないので、その日は小見出しごと出ない。
@@ -5636,7 +5636,8 @@ function reviewBucketsHtml(b) {
   return reviewBlockHtml("監視している銘柄の状況", "", parts);
 }
 
-// おまけ: 前日「あと一歩」だった銘柄がきょうどうなったかの答え合わせ。
+// 前日「あと一歩」だった銘柄が今日どうなったかの答え合わせ。副題は付けない
+// (「おまけ」と書くと本気で見なくてよいブロックに見えるので外した)。
 // 履歴が浅いうちは空で来るので、その場合はブロックごと出さない。
 function reviewFollowupHtml(f) {
   if (!f || typeof f !== "object") return "";
@@ -5649,7 +5650,7 @@ function reviewFollowupHtml(f) {
     const rows = items
       .map(
         (x) => `<tr data-review-code="${escapeHtml(x.code)}" role="button" tabindex="0">
-          <td>${escapeHtml(x.name || x.code)}<span class="review-stock-code">${escapeHtml(x.code)}</span></td>
+          <td><span class="review-followup-name" title="${escapeHtml(x.name || x.code)}">${escapeHtml(x.name || x.code)}</span><span class="review-stock-code">${escapeHtml(x.code)}</span></td>
           <td>${escapeHtml(x.yesterday ?? "-")}</td>
           <td>${escapeHtml(x.today ?? "-")}</td>
           <td>${escapeHtml(x.result ?? "-")}</td>
@@ -5658,12 +5659,12 @@ function reviewFollowupHtml(f) {
       .join("");
     parts.push(
       `<div class="market-detail-table-wrap"><table class="market-detail-table review-followup-table">
-        <thead><tr><th></th><th>前日</th><th>きょう</th><th>結果</th></tr></thead>
+        <thead><tr><th></th><th>前日</th><th>今日</th><th>結果</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`
     );
   }
-  return reviewBlockHtml("前日の答え合わせ", "おまけ", parts);
+  return reviewBlockHtml("前日の答え合わせ", "", parts);
 }
 
 // 「過去の成績」(docs/data/stats.json)。帯ごとの表を1つ組み立てる。
@@ -5777,7 +5778,7 @@ function renderReview(data) {
   if (when) metaBits.push(`${escapeHtml(when)}時点`);
   const head = `
     <div class="review-head">
-      <div class="review-head-title">きょうのふりかえり${metaBits.length ? `<span class="review-head-meta">${metaBits.join(" / ")}</span>` : ""}</div>
+      <div class="review-head-title">今日の振り返り${metaBits.length ? `<span class="review-head-meta">${metaBits.join(" / ")}</span>` : ""}</div>
       <p class="tier-note review-head-note">レビューは大引時点の集計です(ヘッダで「前場」を選んでいても中身は変わりません)。</p>
     </div>`;
 

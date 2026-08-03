@@ -2115,7 +2115,18 @@ a.nav-btn:hover { border-color: var(--link); }
 .review-more[open] > summary { margin-bottom: 4px; }
 
 .review-followup-table tbody tr { cursor: pointer; }
-.review-followup-table td:first-child { text-align: left; }
+/* 社名は長いものが普通に来る。table-layout:fixed のまま折り返させると1列目だけ
+   2〜3行になって行の高さが揃わず表が崩れるので、1列目を少し広げたうえで社名は
+   1行に収めて溢れた分を…で切る(全文は title 属性で出す)。コードは次の行に置く。 */
+.review-followup-table th:first-child,
+.review-followup-table td:first-child { text-align: left; width: 40%; }
+.review-followup-table .review-followup-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-followup-table .review-stock-code { display: block; margin-left: 0; }
 
 /* 件数が足りない集計(reliable:false)。行は消さずに薄くするだけ。消すと
    「その帯にはまだサンプルが無い」ことに気付けず、残った帯だけで全体を語ってしまう。
