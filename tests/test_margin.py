@@ -659,3 +659,88 @@ def test_backfill_jquants_skips_existing_dates(monkeypatch, tmp_path):
     by = {h["date"]: h["by_code"]["1301"]["buy"] for h in store["history"]}
     assert by["2026-07-17"] == 1
     assert by["2026-07-10"] == 999
+
+
+# ---------------------------------------------------------------------------
+# 401/403 (鍵が無効 / プラン不足) の扱い
+# ---------------------------------------------------------------------------
+# /markets/margin-interest は Standard プラン以上でしか配信されない。Free の鍵で
+# 叩くと 403 が返るが、以前はこれを「その週はデータが無い」と同じ空リストにして
+# 握り潰していたため、全週が空振りしても "nothing added" と出て正常終了に見えていた。
+
+
+class _FakeResp:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_fetch_weekly_margin_raises_on_auth_or_plan_error(monkeypatch, status):
+    monkeypatch.setattr(margin_mod.requests, "get",
+                        lambda *a, **k: _FakeResp(status))
+    with pytest.raises(margin_mod.JQuantsAccessError) as excinfo:
+        margin_mod.fetch_weekly_margin_by_date("dummy", "2026-07-17", {})
+    assert str(status) in str(excinfo.value)
+
+
+def test_fetch_weekly_margin_other_http_error_still_returns_empty(monkeypatch):
+    """500 などは従来どおり空リスト。1週分の失敗で全体を止めない方針は維持する。"""
+    monkeypatch.setattr(margin_mod.requests, "get",
+                        lambda *a, **k: _FakeResp(500))
+    assert margin_mod.fetch_weekly_margin_by_date("dummy", "2026-07-17", {}) == []
+
+
+def test_backfill_jquants_aborts_immediately_on_access_error(monkeypatch, tmp_path, capsys):
+    """403 が出たら残りの週を叩かずに打ち切り、既存の store も書き換えない。"""
+    monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
+    store_path = tmp_path / "margin_weekly.json"
+    import json as _json
+    store_path.write_text(_json.dumps({
+        "updated_at": "before", "last_url": None, "warnings": [],
+        "history": [{"date": "2026-07-03", "by_code": {"1301": {"buy": 7, "sell": 3}}}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", str(store_path))
+
+    calls = []
+
+    def fake_fetch(api_key, date_str, config):
+        calls.append(date_str)
+        raise margin_mod.JQuantsAccessError("403 だよ")
+
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date", fake_fetch)
+    monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
+                        lambda weeks, today=None: ["2026-07-17", "2026-07-10"])
+
+    store = margin_mod.backfill_margin_jquants(
+        config={"margin": {"keep_weeks": 26}}, weeks=2)
+
+    assert len(calls) == 1  # 1回目で打ち切る(Thu/Wed も次の週も叩かない)
+    assert "ERROR" in capsys.readouterr().out
+    # 既存の履歴はそのまま。ファイルも書き換わっていない。
+    assert [h["date"] for h in store["history"]] == ["2026-07-03"]
+    assert _json.loads(store_path.read_text(encoding="utf-8"))["updated_at"] == "before"
+
+
+def test_backfill_jquants_warns_when_every_request_returns_nothing(monkeypatch, tmp_path, capsys):
+    """全リクエストが空だったときは「全部保存済み」と同じ文言にしない。"""
+    monkeypatch.setenv(margin_mod.API_KEY_ENV, "dummy")
+    store_path = tmp_path / "margin_weekly.json"
+    monkeypatch.setattr(margin_mod, "MARGIN_STORE_PATH", str(store_path))
+    monkeypatch.setattr(margin_mod, "fetch_weekly_margin_by_date",
+                        lambda api_key, date_str, config: [])
+    monkeypatch.setattr(margin_mod, "_recent_week_end_dates",
+                        lambda weeks, today=None: ["2026-07-17"])
+
+    margin_mod.backfill_margin_jquants(config={"margin": {"keep_weeks": 26}}, weeks=1)
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "all returned" in out

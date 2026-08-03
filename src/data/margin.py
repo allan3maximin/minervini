@@ -427,6 +427,16 @@ API_KEY_ENV = "JQUANTS_API_KEY"
 DEFAULT_JQUANTS_API_URL = "https://api.jquants.com/v2"
 
 
+class JQuantsAccessError(RuntimeError):
+    """APIキーが無効、または契約プランが足りなくて弾かれた(401/403)。
+
+    週次信用残 (/markets/margin-interest) は J-Quants の Standard プラン以上でしか
+    配信されない。Free プランの鍵で叩くと 403 が返る。これを「その週はデータが無い」
+    と同じ空リストで返してしまうと、バックフィルが全週を静かに空振りしたまま
+    「nothing added」で正常終了したように見えてしまうので、区別して投げる。
+    """
+
+
 def _jquants_api_url(config: dict) -> str:
     return (config.get("jquants", {}) or {}).get("api_url", DEFAULT_JQUANTS_API_URL)
 
@@ -435,8 +445,12 @@ def fetch_weekly_margin_by_date(api_key: str, date_str: str, config: dict) -> li
     """/markets/margin-interest?date= を叩き、その週末日の全銘柄レコードを返す。
 
     レスポンスは {"data": [...], "pagination_key": ...}。全ページ辿って結合する。
-    その日付が基準日でない(祝日でFri休みの週など)なら空リスト。通信/認証エラーは
+    その日付が基準日でない(祝日でFri休みの週など)なら空リスト。通信エラーは
     例外を投げず空リストにして、バックフィル全体を止めない。
+
+    ただし **401/403 だけは JQuantsAccessError を投げる**。鍵かプランの問題は
+    日付を変えても直らないので、残りの週を叩き続けても意味が無いうえ、空リストで
+    返すと「データが無い週」と見分けが付かなくなる。
     """
     api_url = _jquants_api_url(config)
     params: dict = {"date": date_str}
@@ -457,7 +471,15 @@ def fetch_weekly_margin_by_date(api_key: str, date_str: str, config: dict) -> li
                     headers={"x-api-key": api_key},
                     timeout=60,
                 )
+            if resp.status_code in (401, 403):
+                raise JQuantsAccessError(
+                    f"/markets/margin-interest が {resp.status_code} を返した"
+                    f"(date={date_str})。APIキーが無効か、契約プランが足りていない。"
+                    " このエンドポイントは Standard プラン以上でのみ配信される。"
+                )
             resp.raise_for_status()
+        except JQuantsAccessError:
+            raise
         except Exception as e:
             print(f"WARNING: margin.fetch_weekly_margin_by_date({date_str}): {e}")
             return []
@@ -533,6 +555,8 @@ def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None
     entry_by_date = {h.get("date"): h for h in history}
     added = 0
     filled = 0
+    requested = 0   # 実際にAPIを叩いた回数
+    got_rows = 0    # そのうち1件以上のレコードが返ってきた回数
 
     for friday in _recent_week_end_dates(weeks):
         if friday in entry_by_date and not widen:
@@ -544,8 +568,16 @@ def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None
             cand = (base - timedelta(days=back)).isoformat()
             if cand in entry_by_date and not widen:
                 break
-            records = fetch_weekly_margin_by_date(api_key, cand, config)
+            requested += 1
+            try:
+                records = fetch_weekly_margin_by_date(api_key, cand, config)
+            except JQuantsAccessError as e:
+                # 鍵かプランの問題。日付を変えても直らないので即座に打ち切る。
+                # ここで store を書かずに返すことで、既存の履歴を壊さない。
+                print(f"ERROR: margin jquants backfill aborted: {e}")
+                return store
             if records:
+                got_rows += 1
                 by_code = _jq_records_to_by_code(records)
                 used_date = cand
                 break
@@ -576,6 +608,11 @@ def backfill_margin_jquants(config: dict | None = None, weeks: int | None = None
         atomic_write_json(MARGIN_STORE_PATH, store)
         print(f"margin jquants backfill: added {added} week(s), filled {filled} "
               f"missing code(s), history now {len(history)} entries")
+    elif requested and not got_rows:
+        # 叩いたのに1件も返ってこなかった。「全部保存済みだった」とは別物なので
+        # 同じ文言にしない(そうしないと空振りが正常終了に見える)。
+        print(f"WARNING: margin jquants backfill: {requested} request(s) all returned "
+              f"no rows; nothing was stored. APIキー・契約プラン・日付範囲を確認すること")
     else:
         print("margin jquants backfill: nothing added (all present or no data)")
     return store
