@@ -46,85 +46,86 @@ const TERM_HELP = {
       "というのがミネルヴィニの基本姿勢。",
   },
   market_score: {
-    title: "市場スコア",
+    title: "地合いの点数(市場スコア)",
     body:
-      "地合いを0〜100点で数値化した参考値。ブレッドス40%・指数トレンド30%・\n" +
-      "モメンタム20%・リスク選好10%の加重平均。矢印はスコアの方向\n" +
+      "地合いを0〜100点で数値化した参考値。値上がり銘柄の広がり40%・指数の向き30%・\n" +
+      "勢い20%・リスクの取りやすさ10%の加重平均。矢印は点数の方向\n" +
       "(↗改善 / →横ばい / ↘悪化)。攻め/中立/守りの色判定とは独立した\n" +
       "表示専用の補助指標で、色と食い違うこともある(その時は色が優先)。",
   },
   breadth: {
-    title: "ブレッドス(市場の広がり)",
+    title: "値上がり銘柄の広がり(ブレッドス)",
     body:
       "上昇に参加している銘柄がどれだけ多いかを見る指標群。指数だけが一部の\n" +
       "大型株で吊り上げられ、中身(個別銘柄)が付いてきていない相場を見分ける。\n" +
       "ブレッドスが弱い上昇はブレイクアウトの成功率が落ちる。",
   },
   index_trend_score: {
-    title: "指数トレンド",
+    title: "指数の向き(指数トレンド)",
     body:
       "TOPIX・日経225・グロース250の3指数が50日線・200日線の上にあるか、\n" +
       "200日線が上向きかをスコア化したもの。主要指数が揃って上向きなら\n" +
       "追い風、割れていれば逆風。",
   },
   momentum_score: {
-    title: "モメンタム",
-    body: "騰落レシオや上昇/下落銘柄数など、市場の直近の勢いをスコア化したもの。",
+    title: "勢い(モメンタム)",
+    body: "値上がり／値下がりの比や上昇・下落銘柄数など、市場の直近の勢いをスコア化したもの。",
   },
   risk_appetite: {
-    title: "リスク選好",
+    title: "リスクの取りやすさ(リスク選好)",
     body:
       "グロース250のTOPIXに対する相対的な強さから、市場がリスクを取りに\n" +
       "行っているかを見る。小型グロースに資金が入る局面は、この手法が狙う\n" +
       "成長株ブレイクアウトの成功率が上がりやすい。",
   },
   pct_above_ma200: {
-    title: "MA200上回り率",
+    title: "200日線の上にいる銘柄(MA200上回り率)",
     body:
       "スクリーニング対象銘柄のうち、終値が200日移動平均線より上にある割合。\n" +
-      "過半数が上なら市場の長期トレンドは健全。カッコ内の20日差分は\n" +
+      "過半数が上なら市場の長期トレンドは健全。カッコ内の20日前との差は\n" +
       "20営業日前からの変化幅で、プラスなら地合いが改善方向。",
   },
   pct_above_ma50: {
-    title: "MA50上回り率",
-    body: "終値が50日移動平均線より上にある銘柄の割合。中期トレンドへの参加率で、\nMA200版より敏感に動く。",
+    title: "50日線の上にいる銘柄(MA50上回り率)",
+    body: "終値が50日移動平均線より上にある銘柄の割合。中期トレンドへの参加率で、\n200日線版より敏感に動く。",
   },
   up_down_ratio_25: {
-    title: "騰落レシオ25",
+    title: "値上がり／値下がりの比(騰落レシオ25)",
     body:
       "過去25営業日の値上がり銘柄数合計÷値下がり銘柄数合計。\n" +
       "一般に120%(1.2)超は過熱気味、70%(0.7)近辺は売られすぎの目安。\n" +
       "データが25日分貯まるまでは「蓄積中」と表示される。",
   },
   nh_nl: {
-    title: "NH-NL(新高値-新安値)",
+    title: "新高値-新安値(NH-NL)",
     body:
       "新高値を付けた銘柄数から新安値を付けた銘柄数を引いた値。当日値と、\n" +
       "それを毎日積み上げた累積値を表示。累積線が右肩上がりなら市場の中身は\n" +
       "健全、指数が高値でもこの線が下がり始めたら内部悪化のサイン。",
   },
   growth_rel_20d: {
-    title: "グロース-TOPIX 20日相対",
+    title: "グロース株の強さ(グロース-TOPIX 20日相対)",
     body:
       "グロース250指数のTOPIXに対する直近20営業日の相対リターン。\n" +
       "プラスなら小型グロース優位(リスク選好が強い)、マイナスなら大型・\n" +
       "ディフェンシブ優位。",
   },
   index_trend_table: {
-    title: "指数トレンド表の見方",
+    title: "主な指数の位置(表の見方)",
     body:
       "○=その指数が当該移動平均線(50日/200日)の上にある。×=下にある。\n" +
-      "「傾き↑」は200日線自体が上向きかどうか。3指数が揃って○なら強い地合い。",
+      "「200日線が上向き」は200日線自体が上を向いているかどうか。\n" +
+      "3指数が揃って○なら強い地合い。",
   },
   vcp_funnel: {
-    title: "VCPファネル",
+    title: "候補の段階(VCPファネル)",
     body:
-      "トレンドテンプレート合格銘柄が、VCP(ベース)判定のどの段階にいるかの内訳。\n" +
-      "・ベース到達: ベース(値固め)が検出され、VCP条件の判定まで進んだ銘柄\n" +
-      "・高値更新中: 高値圏を走っていてまだベース(調整)を作っていない銘柄\n" +
-      "・形成中: ベースを作り始めたが日数不足でまだ判定できない銘柄\n" +
-      "・ボラ過大: 値動きが荒すぎてVCPの対象外になった銘柄\n" +
-      "「高値更新中」の減少は、リーダー銘柄が調整入り=数週間後にセットアップが\n" +
+      "上昇トレンドの形が出ている銘柄が、値固め(ベース)判定のどの段階にいるかの内訳。\n" +
+      "・値固めまで進んだ: 値固めが検出され、形の良し悪しの判定まで進んだ銘柄\n" +
+      "・まだ高値を走っている: 高値圏を走っていてまだ値固め(調整)を作っていない銘柄\n" +
+      "・値固めを作り始めた: 作り始めたが日数不足でまだ判定できない銘柄\n" +
+      "・値動きが荒すぎる: 振れ幅が大きすぎて判定の対象外になった銘柄\n" +
+      "「まだ高値を走っている」の減少は、主力銘柄が調整入り=数週間後に買い場待ちが\n" +
       "増える先行サインとして折れ線で監視している。",
   },
   tech_score: {
@@ -781,7 +782,6 @@ async function initDashboard(forcedSuffix) {
   renderSnapshotWarning();
   initMarketTabs();
   renderMarketSignal(breadth);
-  renderVcpFunnel(breadth);
   renderPositionsWarningBanner(positionsData);
   renderStalenessWarning(report);
   renderMarketOverview(indices);
@@ -1148,27 +1148,71 @@ function startLiveIndices() {
   }, LIVE_INDICES_POLL_MS);
 }
 
+// 「いま候補は何銘柄か」。以前は絞り込みの件数(スクリーニング状況)とベースの段階
+// (VCPファネル)が別カードに分かれていて、同じ「銘柄が何件いるか」の話が2枚に散って
+// いた。1枚にまとめ、上から「絞り込みを何件通ったか」→「その候補がどの段階か」に並べる。
+// 引数の report は p1_count を持たない古い breadth 履歴のフォールバック用。
 function renderBreadth(breadth, report) {
   const el = document.getElementById("breadth-meter");
-  if (!breadth.history || !breadth.history.length) {
+  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
+  if (!history.length) {
     el.textContent = "地合いデータなし";
     return;
   }
-  const latest = breadth.history[breadth.history.length - 1];
+  const latest = history[history.length - 1];
   const passRate = latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-";
+  // breakout_success_rate はレビュータブの「ブレイクがそのまま伸びた割合」と同じ数字。
+  // 別名で出すと2つの指標があるように見えるので、呼び方を揃えてある。
   const successRate =
     latest.breakout_success_rate != null ? (latest.breakout_success_rate * 100).toFixed(0) + "%" : "-";
-  // 地合い指標: 8条件完全一致の件数。breadth履歴優先、なければreport.jsonから。
+  // 8条件完全一致(priority 1)の件数。breadth履歴優先、なければreport.jsonから。
   const pc = (report && report.priority_counts) || null;
   const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
-  const prioLine = p1 != null ? `<span>8条件合格: <b>${p1}件</b></span>` : "";
+  const prioLine = p1 != null ? `<span>条件を全部満たした銘柄: <b>${p1}件</b></span>` : "";
+
   el.innerHTML = `
-    <div class="breadth-meter-title">スクリーニング状況</div>
-    <div class="breadth-meter-stats">
-      <span>テンプレート通過率: <b>${passRate}</b></span>
-      <span>セットアップ数: <b>${latest.watch_count ?? "-"}</b></span>
-      <span>直近ブレイク成功率: <b>${successRate}</b></span>
-      ${prioLine}
+    <div class="breadth-meter-title">いま候補は何銘柄か</div>
+    <div class="breadth-meter-group">
+      <div class="breadth-meter-subtitle">絞り込みをどこまで通ったか</div>
+      <div class="breadth-meter-stats">
+        <span>上昇トレンドの形が出ている割合: <b>${passRate}</b></span>
+        <span>買い場を待っている銘柄: <b>${latest.watch_count ?? "-"}件</b></span>
+        ${prioLine}
+        <span>ブレイクがそのまま伸びた割合: <b>${successRate}</b></span>
+      </div>
+    </div>
+    ${vcpFunnelHtml(history)}
+  `;
+}
+
+// 候補がベース(値固め)のどの段階にいるかの内訳。breadth.json history の各エントリの
+// vcp_funnel(pipeline -> update_breadth)に依存。origin=ok は V判定に到達した銘柄
+// (WATCH_A+WATCH_B+REJECTED)。TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
+// 高値追い局面→調整入りでセットアップが増える先行指標として直近60日を折れ線表示する。
+function vcpFunnelHtml(history) {
+  const withFunnel = history.filter((h) => h && h.vcp_funnel);
+  if (!withFunnel.length) return "";
+  const latest = withFunnel[withFunnel.length - 1].vcp_funnel;
+  const originOk = (latest.WATCH_A || 0) + (latest.WATCH_B || 0) + (latest.REJECTED || 0);
+
+  // TOO_RECENT の直近60日推移。減少(高値追い→調整入り)を accent、増加を danger 表示。
+  const series = withFunnel.slice(-60).map((h) => ({ v: h.vcp_funnel.TOO_RECENT || 0 }));
+  const declining = series.length >= 2 && series[series.length - 1].v <= series[0].v;
+  const spark = sparklineSvg(series, declining, { format: (v) => String(Math.round(v)) + "件" });
+
+  return `
+    <div class="breadth-meter-group">
+      <div class="breadth-meter-subtitle">その候補が今どの段階か${helpBtnHtml("vcp_funnel")}</div>
+      <div class="breadth-meter-stats">
+        <span>値固めまで進んだ: <b>${originOk}件</b></span>
+        <span>まだ高値を走っている: <b>${latest.TOO_RECENT || 0}件</b></span>
+        <span>値固めを作り始めた: <b>${latest.IMMATURE || 0}件</b></span>
+        <span>値動きが荒すぎる: <b>${latest.TOO_VOLATILE || 0}件</b></span>
+      </div>
+      <div class="vcp-funnel-spark">
+        <span class="vcp-funnel-spark-label">「まだ高値を走っている」の直近60日(減ると数週間後に候補が増えやすい)</span>
+        ${spark}
+      </div>
     </div>
   `;
 }
@@ -1177,10 +1221,12 @@ function renderBreadth(breadth, report) {
 // breadth.json の history最新エントリに signal/reasons/pct_above_ma200等が
 // 載っている前提(src/report/market_signal.py -> update_breadth)。旧データで
 // signalが無い場合はカード自体を隠す。
+// note は「で、どうすればいいのか」を1行で言い切るための文言。以前は守りのときだけ
+// 注意書きを出していたが、攻め・中立のときに何も出ないと結論が伝わらないので3段階すべてに置く。
 const MARKET_SIGNAL_META = {
-  green: { label: "攻め", className: "signal-green" },
-  yellow: { label: "中立", className: "signal-yellow" },
-  red: { label: "守り", className: "signal-red" },
+  green: { label: "攻め", className: "signal-green", note: "新しく買いを入れてよい局面。候補が出たら通常の枚数で取る。" },
+  yellow: { label: "中立", className: "signal-yellow", note: "買ってもよいが、枚数を落として厳選する。" },
+  red: { label: "守り", className: "signal-red", note: "⚠ 新規の買いは原則見送り。持っている分の管理に徹する。" },
 };
 
 // 地合い詳細パネル(2026-07-18 タスク4)。以下はすべて表示専用の補助指標
@@ -1198,11 +1244,13 @@ const MARKET_SCORE_TREND_ARROW = {
 // 表示は「寄与度方式」: 各項目の生スコア(0-100)×配点で寄与ptを出し、
 // 「16.0/40pt」のように配点満点に対する寄与で見せる。4項目の寄与合計が
 // 総合スコア(market_score)と一致するので、%表記(40%等)の混在より辻褄が追いやすい。
+// ラベルはレビュータブの REVIEW_BREAKDOWN_LABEL と同じ日本語に揃えてある。
+// 同じ数字がタブごとに「モメンタム」「勢い」と別名で出ていて混乱の元だったため。
 const MARKET_DETAIL_SCORE_ITEMS = [
-  { key: "breadth", label: "ブレッドス", weight: 40, helpKey: "breadth" },
-  { key: "index_trend", label: "指数トレンド", weight: 30, helpKey: "index_trend_score" },
-  { key: "momentum", label: "モメンタム", weight: 20, helpKey: "momentum_score" },
-  { key: "risk_appetite", label: "リスク選好", weight: 10, helpKey: "risk_appetite" },
+  { key: "breadth", label: "値上がり銘柄の広がり", weight: 40, helpKey: "breadth" },
+  { key: "index_trend", label: "指数の向き", weight: 30, helpKey: "index_trend_score" },
+  { key: "momentum", label: "勢い", weight: 20, helpKey: "momentum_score" },
+  { key: "risk_appetite", label: "リスクの取りやすさ", weight: 10, helpKey: "risk_appetite" },
 ];
 
 // 寄与pt(生スコア×配点/100)。丸めは0.1pt単位で行い、合計行との誤差を抑える。
@@ -1288,12 +1336,12 @@ function renderMarketDetailHtml(latest, history) {
   // %表記にしないと縦軸が "0.550" のようになって読み取りづらい。
   const pctFmt = (v) => (v * 100).toFixed(0) + "%";
   const MARKET_SPARK_ITEMS = [
-    { key: "market_score", label: "地合いスコア" },
-    { key: "pct_above_ma200", label: "MA200上回り率", format: pctFmt },
-    { key: "pct_above_ma50", label: "MA50上回り率", format: pctFmt },
-    { key: "up_down_ratio_25", label: "騰落レシオ25" },
-    { key: "nh_nl_cumulative", label: "NH-NL累積" },
-    { key: "growth_rel_20d", label: "グロース-TOPIX相対", format: pctFmt },
+    { key: "market_score", label: "地合いの点数" },
+    { key: "pct_above_ma200", label: "200日線の上にいる銘柄", format: pctFmt },
+    { key: "pct_above_ma50", label: "50日線の上にいる銘柄", format: pctFmt },
+    { key: "up_down_ratio_25", label: "値上がり／値下がりの比" },
+    { key: "nh_nl_cumulative", label: "新高値-新安値の積み上げ" },
+    { key: "growth_rel_20d", label: "グロース株の強さ", format: pctFmt },
   ];
   const sparklinesHtml = MARKET_SPARK_ITEMS.map((item) => {
     const series = history.filter((h) => h && h[item.key] != null).slice(-60).map((h) => ({ v: h[item.key] }));
@@ -1302,29 +1350,30 @@ function renderMarketDetailHtml(latest, history) {
     return `<div class="market-detail-spark"><div class="market-detail-spark-label">${item.label}</div>${spark}</div>`;
   }).join("");
 
-  // 4セクション構成: スコア内訳 → 主要指標 → 指数トレンド → 推移。
+  // 4セクション構成: 点数の内訳 → 主な指標 → 主な指数の位置 → 推移。
   // 見出しを付けて役割の切れ目を明示する(2026-07-20 UI再構成)。
+  // 2026-08-03: 中身は変えず、見出しとラベルだけ日本語の言い回しに直した。
   return `
     <div class="market-detail-body">
       <section class="market-detail-section">
-        <h4 class="market-detail-heading">スコア内訳<span class="market-detail-heading-sub">寄与pt/配点pt</span></h4>
+        <h4 class="market-detail-heading">点数の内訳<span class="market-detail-heading-sub">4つを足すと地合いの点数</span></h4>
         <div class="market-detail-scores">${scoreBarsHtml}${scoreTotalHtml}</div>
       </section>
       <section class="market-detail-section">
-        <h4 class="market-detail-heading">主要指標<span class="market-detail-heading-sub">当日値</span></h4>
+        <h4 class="market-detail-heading">主な指標<span class="market-detail-heading-sub">今日の値</span></h4>
         <div class="market-detail-indicators">
-          <div class="market-detail-row"><span>MA200上回り率${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日差分 ${btText})</span></span></div>
-          <div class="market-detail-row"><span>MA50上回り率${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
-          <div class="market-detail-row"><span>騰落レシオ25${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
-          <div class="market-detail-row"><span>NH-NL(当日/累積)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
-          <div class="market-detail-row"><span>グロース-TOPIX 20日相対${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
+          <div class="market-detail-row"><span>200日線の上にいる銘柄${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日前との差 ${btText})</span></span></div>
+          <div class="market-detail-row"><span>50日線の上にいる銘柄${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
+          <div class="market-detail-row"><span>値上がり／値下がりの比(25日)${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
+          <div class="market-detail-row"><span>新高値-新安値(今日/積み上げ)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
+          <div class="market-detail-row"><span>グロース株の強さ(TOPIX比・20日)${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
         </div>
       </section>
       <section class="market-detail-section">
-        <h4 class="market-detail-heading">指数トレンド${helpBtnHtml("index_trend_table")}</h4>
+        <h4 class="market-detail-heading">主な指数の位置${helpBtnHtml("index_trend_table")}</h4>
         <div class="market-detail-table-wrap">
           <table class="market-detail-table">
-            <thead><tr><th></th><th>50日線</th><th>200日線</th><th>傾き↑</th></tr></thead>
+            <thead><tr><th></th><th>50日線の上</th><th>200日線の上</th><th>200日線が上向き</th></tr></thead>
             <tbody>
               ${indexTrendRowHtml("TOPIX", trends.topix)}
               ${indexTrendRowHtml("日経225", trends.nikkei225)}
@@ -1359,14 +1408,15 @@ function renderMarketSignal(breadth) {
   const newHigh = latest.new_high_count ?? "-";
   const newLow = latest.new_low_count ?? "-";
   const reasons = (latest.reasons || []).map((r) => `<li>${escapeHtml(r)}</li>`).join("");
-  const caution = latest.signal === "red"
-    ? '<p class="market-signal-caution">⚠ 新規エントリーは控えるのが原則です。</p>'
+  // 3段階すべてで「で、どうするか」を1行出す。色分けは card の signal-* クラス側に任せる。
+  const caution = meta.note
+    ? `<p class="market-signal-caution">${escapeHtml(meta.note)}</p>`
     : "";
 
   // market_score/score_trendはタスク3で追加された表示専用の補助指標。旧history
   // (これらが無いエントリ)ではバッジ自体を出さない。
   const scoreBadge = latest.market_score != null
-    ? `<span class="market-score-badge">スコア ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}${helpBtnHtml("market_score")}</span>`
+    ? `<span class="market-score-badge">地合いの点数 ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}${helpBtnHtml("market_score")}</span>`
     : "";
 
   // 地合い(攻め/中立/守り)の過去推移。signalを持つ履歴を色付きティックで並べ、
@@ -1383,57 +1433,21 @@ function renderMarketSignal(breadth) {
       </div>`
     : "";
 
+  // 並びは「結論 → 根拠」。攻め/中立/守り → どうするかの一言 → そう出た理由 →
+  // 数字 → 過去の推移、最後に細かい数字を畳んだブロック。レビュータブと同じ考え方。
   el.innerHTML = `
     <div class="market-signal-top">
       <div class="market-signal-label">${meta.label}${helpBtnHtml("market_signal")}</div>
       ${scoreBadge}
     </div>
-    <ul class="market-signal-reasons">${reasons}</ul>
-    <div class="market-signal-stats">MA200上回り率 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
-    ${signalStripHtml}
     ${caution}
+    <ul class="market-signal-reasons">${reasons}</ul>
+    <div class="market-signal-stats">200日線の上にいる銘柄 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
+    ${signalStripHtml}
     <details class="market-detail">
-      <summary>地合い詳細</summary>
+      <summary>地合いの中身(点数の内訳と指標)</summary>
       ${renderMarketDetailHtml(latest, history)}
     </details>
-  `;
-}
-
-// VCPファネル(P1銘柄の origin/status 内訳)。breadth.json history の各エントリの
-// vcp_funnel(pipeline -> update_breadth)に依存。origin=ok は V判定に到達した銘柄
-// (WATCH_A+WATCH_B+REJECTED)。TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
-// 高値追い局面→調整入りでセットアップが増える先行指標として直近60日を折れ線表示する。
-function renderVcpFunnel(breadth) {
-  const el = document.getElementById("vcp-funnel-card");
-  if (!el) return;
-  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
-  const withFunnel = history.filter((h) => h && h.vcp_funnel);
-  if (!withFunnel.length) {
-    el.hidden = true;
-    return;
-  }
-  const originOk = (f) =>
-    (f.WATCH_A || 0) + (f.WATCH_B || 0) + (f.REJECTED || 0);
-  const latest = withFunnel[withFunnel.length - 1].vcp_funnel;
-
-  // TOO_RECENT の直近60日推移。減少(高値追い→調整入り)を accent、増加を danger 表示。
-  const series = withFunnel.slice(-60).map((h) => ({ v: h.vcp_funnel.TOO_RECENT || 0 }));
-  const declining = series.length >= 2 && series[series.length - 1].v <= series[0].v;
-  const spark = sparklineSvg(series, declining, { format: (v) => String(Math.round(v)) + "件" });
-
-  el.hidden = false;
-  el.innerHTML = `
-    <div class="vcp-funnel-title">VCPファネル(スクリーニング通過銘柄の内訳)${helpBtnHtml("vcp_funnel")}</div>
-    <div class="vcp-funnel-stats">
-      <span>ベース到達: <b>${originOk(latest)}件</b></span>
-      <span>高値更新中: <b>${latest.TOO_RECENT || 0}件</b></span>
-      <span>形成中: <b>${latest.IMMATURE || 0}件</b></span>
-      <span>ボラ過大: <b>${latest.TOO_VOLATILE || 0}件</b></span>
-    </div>
-    <div class="vcp-funnel-spark">
-      <span class="vcp-funnel-spark-label">高値更新中 直近60日(減少=セットアップ増の先行シグナル)</span>
-      ${spark}
-    </div>
   `;
 }
 

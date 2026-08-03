@@ -133,7 +133,7 @@ a { color: var(--link); }
   white-space: nowrap;
 }
 .page-header-count[hidden] { display: none; }
-/* 市況分析タブのカード(シグナル/スクリーニング状況/VCPファネル)と
+/* 市況分析タブの2枚目「いま候補は何銘柄か」。1枚目(.market-signal-card)と
    見た目を揃える: padding 12px 16px / margin-bottom 14px / タイトル13px 700 */
 .breadth-meter {
   background: var(--panel);
@@ -156,11 +156,23 @@ a { color: var(--link); }
   flex-wrap: wrap;
 }
 /* 数値だけ強調して視線が値に落ちるようにする(ラベルはdimのまま) */
-.breadth-meter-stats b,
-.vcp-funnel-stats b {
+.breadth-meter-stats b {
   color: var(--text);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+/* カード内の小見出し。「絞り込みをどこまで通ったか」/「その候補が今どの段階か」の
+   2グループを1枚のカードに並べるために使う(旧VCPファネルカードの統合先)。 */
+.breadth-meter-group + .breadth-meter-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.breadth-meter-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
 }
 
 /* --------------------------------------------------------------- buttons */
@@ -908,10 +920,13 @@ a.nav-btn:hover { border-color: var(--link); }
   font-size: 13px;
   color: var(--text-dim);
 }
+/* 「で、どうするか」の一言。3段階すべてで出すようになったので、ラベル直下に置いて
+   理由リストより先に目に入るようにする。色は守りのときだけ下で danger に上書きする。 */
 .market-signal-caution {
-  margin: 8px 0 0;
+  margin: 0 0 6px;
   font-weight: 600;
   font-size: 13px;
+  color: var(--text);
 }
 /* 地合い(攻め/中立/守り)の過去推移ストリップ。1ティック=1営業日、色は現行
    シグナルカードと同じ緑/黄/赤。データ欠損日は出さない(filter済み)ため
@@ -1104,26 +1119,8 @@ a.nav-btn:hover { border-color: var(--link); }
 .market-detail-spark { min-width: 0; }
 .market-detail-spark-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
 
-/* VCPファネル(P1銘柄の origin/status 内訳 + TOO_RECENT推移) */
-.vcp-funnel-card {
-  margin-bottom: 14px;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--panel);
-}
-.vcp-funnel-title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-.vcp-funnel-stats {
-  display: flex;
-  gap: 8px 20px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--text-dim);
-}
+/* ベースの段階(旧VCPファネル)の TOO_RECENT 推移。カード自体は
+   「いま候補は何銘柄か」(.breadth-meter)に統合したので、残っているのは折れ線部分だけ。 */
 .vcp-funnel-spark {
   display: flex;
   align-items: center;
@@ -1933,7 +1930,7 @@ a.nav-btn:hover { border-color: var(--link); }
 
 /* ------------------------------------------ 市況「レビュー」タブ (2026-07-31) */
 /* 大引バッチの review.json を並べるだけのタブ。面の階調・角丸・文字サイズは
-   市況分析タブのカード(.market-signal-card / .breadth-meter / 地合い詳細)に
+   市況分析タブのカード(.market-signal-card / .breadth-meter / 地合いの中身)に
    合わせてある。色は既存変数だけを使い、新しい色は足していない
    (増えた=--accent / 減った=--danger / 変わらず=--text-dim)。 */
 .review-head { margin-bottom: 12px; }
