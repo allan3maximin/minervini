@@ -98,6 +98,10 @@ AFTERNOON_VERDICT_THRESHOLD = 2
 # 指数の日中ティック(data/history/indices_intraday.jsonl)から形を分類する。
 SHAPE_INDEX_KEY = "topix"          # 東証全体の地合いなので TOPIX を基準にする
 SHAPE_MIN_TICKS = 6                # 15分間隔なので6本 = 1時間半。これ未満は形を語らない
+# 大引後に5分足からまとめて入れた行の印(src/data/indices.py の INTRADAY_BARS_SOURCE)。
+# 15分間隔のワークフローが残す1点ものとは取得元の銘柄が違うことがあり、水準が合わない
+# ので混ぜない。5分足の行が1本でもあればそちらだけを使う。
+SHAPE_BARS_SOURCE = "bars"
 SHAPE_SESSION_START = time(9, 0)   # 東証のザラ場だけを見る(この cron は米国時間にも走る)
 SHAPE_SESSION_END = time(15, 30)
 SHAPE_MORNING_END = time(11, 30)   # 前場の終わり
@@ -350,7 +354,7 @@ def classify_shape(ticks: list[dict], date_str: str, index_key: str = SHAPE_INDE
     テクニカル分析ではない。運用初日は行が貯まっていないので available=false で
     返る(それが正常)。
     """
-    points = []
+    points, bar_points = [], []
     for row in ticks or []:
         if row.get("date") != date_str:
             continue
@@ -366,8 +370,14 @@ def classify_shape(ticks: list[dict], date_str: str, index_key: str = SHAPE_INDE
         local = stamp.astimezone(JST).time()
         if local < SHAPE_SESSION_START or local > SHAPE_SESSION_END:
             continue
-        points.append((local, value))
+        point = (local, value)
+        points.append(point)
+        if row.get("src") == SHAPE_BARS_SOURCE:
+            bar_points.append(point)
 
+    # 5分足から入れた行があるならそれだけで判定する(取得元が違う点と混ぜない)。
+    if bar_points:
+        points = bar_points
     if len(points) < SHAPE_MIN_TICKS:
         return {"available": False}
 

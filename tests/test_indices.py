@@ -176,3 +176,80 @@ def test_append_intraday_tick_ignores_entries_without_value(tmp_path, monkeypatc
 
     assert append_intraday_tick([{"key": "topix", "last": None}]) is False
     assert not path.exists()
+
+
+# --------------------------------------------------- backfill_intraday_bars
+# 15分間隔のワークフローだけでは点が足りない(GitHub Actions が cron どおりに
+# 起動しない)ので、大引後に5分足でまとめて埋める経路のテスト。
+
+
+def _bars(day: str, times: list[str], closes: list[float]) -> pd.DataFrame:
+    stamps = pd.to_datetime([f"{day} {t}" for t in times]).tz_localize(indices_mod.JST)
+    return pd.DataFrame({"ts": stamps, "close": closes})
+
+
+def test_backfill_intraday_bars_appends_marked_rows(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+    monkeypatch.setattr(
+        indices_mod, "_fetch_yahoo_intraday",
+        lambda symbol, interval=indices_mod.INTRADAY_BARS_INTERVAL: _bars(
+            "2026-08-03", ["09:00", "09:05", "09:10"], [2850.0, 2852.5, 2849.0]
+        ),
+    )
+
+    assert indices_mod.backfill_intraday_bars("2026-08-03") == 3
+    rows = list(iter_records(path))
+    assert [r["ts"] for r in rows] == [
+        "2026-08-03T09:00:00+09:00",
+        "2026-08-03T09:05:00+09:00",
+        "2026-08-03T09:10:00+09:00",
+    ]
+    # 後段(review.classify_shape)が cron の1点ものと選り分けられるよう印が要る。
+    assert all(r["src"] == indices_mod.INTRADAY_BARS_SOURCE for r in rows)
+    assert all(r["date"] == "2026-08-03" for r in rows)
+    assert rows[1]["values"] == {"topix": 2852.5}
+
+
+def test_backfill_intraday_bars_is_idempotent(tmp_path, monkeypatch):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+    monkeypatch.setattr(
+        indices_mod, "_fetch_yahoo_intraday",
+        lambda symbol, interval=indices_mod.INTRADAY_BARS_INTERVAL: _bars(
+            "2026-08-03", ["09:00", "09:05"], [2850.0, 2852.5]
+        ),
+    )
+
+    assert indices_mod.backfill_intraday_bars("2026-08-03") == 2
+    # 同じ日に回し直しても同じ時刻の点は積まない(日次バッチの再実行対策)。
+    assert indices_mod.backfill_intraday_bars("2026-08-03") == 0
+    assert len(list(iter_records(path))) == 2
+
+
+def test_backfill_intraday_bars_skips_other_days(tmp_path, monkeypatch):
+    """休場日に回すと直近営業日の足が返ってくるので、当日ぶん以外は捨てる。"""
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+    monkeypatch.setattr(
+        indices_mod, "_fetch_yahoo_intraday",
+        lambda symbol, interval=indices_mod.INTRADAY_BARS_INTERVAL: _bars(
+            "2026-07-31", ["09:00", "09:05"], [2850.0, 2852.5]
+        ),
+    )
+
+    assert indices_mod.backfill_intraday_bars("2026-08-03") == 0
+    assert not path.exists()
+
+
+def test_backfill_intraday_bars_survives_fetch_failure(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "indices_intraday.jsonl"
+    monkeypatch.setattr(indices_mod, "INTRADAY_TICKS_PATH", path)
+    monkeypatch.setattr(
+        indices_mod, "_fetch_yahoo_intraday",
+        lambda symbol, interval=indices_mod.INTRADAY_BARS_INTERVAL: None,
+    )
+
+    # 取れない日があってもレビュー本体は出したいので、例外にはしない。
+    assert indices_mod.backfill_intraday_bars("2026-08-03") == 0
+    assert "日中足が取れませんでした" in capsys.readouterr().out

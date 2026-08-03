@@ -240,6 +240,34 @@ def test_shape_needs_a_different_day_to_be_ignored():
     assert classify_shape(_ticks([("09:00", 2850)]), "2026-07-29") == {"available": False}
 
 
+def _bar_ticks(values):
+    """大引後に5分足からまとめて入れた行(src=bars)。"""
+    return [dict(row, src="bars") for row in _ticks(values)]
+
+
+def test_shape_prefers_bar_rows_over_workflow_ticks():
+    """5分足の行があるときは、15分間隔のワークフローが残した点と混ぜない。
+
+    ワークフロー側は指数そのもの、5分足側は ETF 代用と、取得元の銘柄が違って
+    水準が合わないことがある。混ぜると高安の幅が実際の何倍にもなり、形の判定が
+    まるごと嘘になる。
+    """
+    # 水準が10倍ずれた1点もの。混ざれば必ず最高値/最安値を持っていってしまう。
+    noise = _ticks([("09:30", 28500), ("13:00", 28400)])
+    bars = _bar_ticks([("09:00", 2880), ("09:30", 2850), ("10:00", 2845),
+                       ("12:30", 2870), ("14:00", 2890), ("15:15", 2895)])
+    shape = classify_shape(noise + bars, TODAY)
+    assert shape["available"] is True
+    assert shape["label"] == "後場に切り返し"
+
+
+def test_shape_still_needs_enough_bar_rows():
+    """5分足が数本しか取れなかった日は、それだけで形を語らない。"""
+    assert classify_shape(_bar_ticks([("09:00", 2850), ("10:00", 2880)]), TODAY) == {
+        "available": False
+    }
+
+
 # ---------------------------------------------------------------------------
 # 後場判定・セクター・答え合わせの細部
 # ---------------------------------------------------------------------------

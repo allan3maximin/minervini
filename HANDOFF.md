@@ -1041,13 +1041,23 @@ composite action 2種で実現している:
 | `data/history/status.jsonl` | `{code, date, status, pivot, stop_ref_low}` | `(code, date)` | `data/status_history.json` |
 | `data/history/sector.jsonl` | `{date, topix_d1, sectors: {業種名: {...}}}` | `(date)` | `data/sector_history.json` |
 | `data/history/stage.jsonl` | `{code, date, bucket, status, stage, near, total_score, has_pivot}` + backfill行のみ `backfilled: true` | `(code, date)` | なし (2026-07-29新設) |
-| `data/history/indices_intraday.jsonl` | `{ts, date, values: {指数キー: 値}}` | `(ts)` | なし (2026-07-31新設) |
+| `data/history/indices_intraday.jsonl` | `{ts, date, values: {指数キー: 値}}` + 5分足由来の行のみ `src: "bars"` | `(ts)` | なし (2026-07-31新設) |
 
 `indices_intraday.jsonl` だけは日次でなく**1実行1行**(15分間隔の intraday-indices.yml)。
 `indices.json` は毎回上書きされるためザラ場中の値動きの形(寄り天/後場V字/だらだら安)が
 翌日には残らない、という穴を埋めるためのもの。`ts` / `date` はどちらもJST基準
 (cronは米国市場の時間帯にも走るので、読む側が東証ザラ場=9:00〜15:30の行だけを選べるように)。
 直前の行と全指数の値が一致する実行は追記しない。保持は7日(`INTRADAY_TICKS_KEEP_DAYS`)。
+
+**2026-08-03 追記**: 上の「1実行1行」だけでは点が足りなかった。GitHub Actions の schedule は
+`*/15` と書いてもそのとおりには起動せず、実測で東証ザラ場に残る行は1日0〜4個。
+`review.py` の形の判定に要る6点に一度も届かず「日中の記録が足りない」が毎日出ていた。
+そこで大引バッチが `indices.backfill_intraday_bars()` を呼び、**その日の5分足(yfinance
+`period=1d, interval=5m`)をまとめて同じファイルへ流し込む**(1回で60点前後)。
+この経路の行には `src: "bars"` が付く。ワークフローの1点ものとは取得元の銘柄
+(指数そのものか ETF 代用か)が違って水準が合わないことがあるため、`classify_shape` は
+**`src: "bars"` の行が1本でもあればそれだけを使い、混ぜない**。5分足が取れなかった日は
+従来どおり1点ものへフォールバックする。
 
 **なぜ変えたか**: 旧方式は `{code: [エントリ...]}` の全量を毎回書き戻すので、1日ぶんの追記でも
 ファイル全行が書き換わり、日次コミットの差分が毎回数千行に膨れていた。追記だけなら差分は

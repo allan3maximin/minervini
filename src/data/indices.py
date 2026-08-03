@@ -41,9 +41,10 @@ INTRADAY_TICKS_KEY = ("ts",)
 # 保持は当日+数日。「その日の地合いの形」を読むための素材なので、日足系列と違って
 # 長期保存する意味がない(長期の形は indices.json の series 側にある)。
 INTRADAY_TICKS_KEEP_DAYS = 7
-# 15分間隔 × 平日ほぼ終日で1日80行前後。間引き(compaction)は毎回やると
-# 全行書き戻しになって git 差分が膨らむので、行数が保持想定を大きく超えた時だけ。
-INTRADAY_TICKS_MAX_LINES = 1200
+# 15分間隔 × 平日ほぼ終日で1日80行前後、これに大引後の5分足補完(1日60行前後)が
+# 乗るので7日ぶんで1000行前後になる。間引き(compaction)は毎回やると全行書き戻しに
+# なって git 差分が膨らむので、行数が保持想定を大きく超えた時だけ。
+INTRADAY_TICKS_MAX_LINES = 2000
 
 STOOQ_URL = "https://stooq.com/q/d/l/?s={symbol}&i=d"
 STOOQ_USER_AGENT = "Mozilla/5.0 (compatible; minervini-screener/1.0)"
@@ -265,6 +266,123 @@ def append_intraday_tick(entries: list[dict], now: datetime | None = None) -> bo
         )
         print(f"indices_intraday: compaction で {removed} 行を削減")
     return True
+
+
+# ---------------------------------------------------------------------------
+# ザラ場の5分足からの補完 (2026-08-03)
+# ---------------------------------------------------------------------------
+# append_intraday_tick は「ワークフローが走った回数だけ点が増える」作りになっている。
+# intraday-indices.yml は cron に */15 と書いてあるが、GitHub Actions の schedule は
+# 書いたとおりには起動しない(混雑時は黙って間引かれる)。実測では東証のザラ場
+# (9:00〜15:30)に残る点が1日3〜4個しかなく、review.py が形を判定するのに要る6点に
+# 一度も届いていなかった。これが「指数の日中の記録が足りないため、値動きの形は
+# 判定していません」が毎日出ていた原因。
+#
+# そこで大引後に「その日の5分足」をまとめて取りに行き、同じファイルへ流し込む。
+# 1回の取得で1日ぶん(60点前後)入るので、cron が何回起動したかに依存しなくなる。
+INTRADAY_BARS_KEY = "topix"      # review.py の SHAPE_INDEX_KEY と合わせる
+INTRADAY_BARS_INTERVAL = "5m"
+# cron が残した1点ものと取得元の銘柄が違うこと(指数そのものか ETF 代用か)があり、
+# 混ぜると水準がずれる。読み手が選り分けられるよう、この経路の行には印を付ける。
+INTRADAY_BARS_SOURCE = "bars"
+
+
+def _fetch_yahoo_intraday(symbol: str, interval: str = INTRADAY_BARS_INTERVAL) -> pd.DataFrame | None:
+    """当日の日中足を (ts, close) で返す。取れなければ None。
+
+    ts は JST の tz 付き。yfinance は取引所のタイムゾーンを付けて返すが、
+    付いていない場合だけ JST とみなす(このデータ源は東証銘柄だけに使う)。
+    """
+    import yfinance as yf
+
+    try:
+        raw = yf.download(
+            symbol, period="1d", interval=interval,
+            progress=False, auto_adjust=False, threads=False,
+        )
+    except Exception:
+        return None
+    if raw is None or raw.empty:
+        return None
+
+    df = raw.reset_index()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [str(c[0]).lower() for c in df.columns]
+    else:
+        df.columns = [str(c).lower() for c in df.columns]
+
+    ts_col = next((c for c in ("datetime", "date", "index") if c in df.columns), None)
+    if ts_col is None or "close" not in df.columns:
+        return None
+    df = df[[ts_col, "close"]].dropna(subset=["close"]).rename(columns={ts_col: "ts"})
+    if df.empty:
+        return None
+
+    stamps = pd.to_datetime(df["ts"])
+    stamps = stamps.dt.tz_localize(JST) if stamps.dt.tz is None else stamps.dt.tz_convert(JST)
+    df["ts"] = stamps
+    return df.reset_index(drop=True)
+
+
+def backfill_intraday_bars(date_str: str | None = None, key: str = INTRADAY_BARS_KEY) -> int:
+    """当日の日中足を indices_intraday.jsonl へ流し込む。追記した点の数を返す。
+
+    大引バッチから1日1回呼ぶ想定。取得に失敗しても例外は投げない(形の判定が
+    できないだけで、レビュー本体は出せるため)。既に同じ時刻の行がある点は
+    飛ばすので、同じ日に何度回しても行は増えない。
+    """
+    from src.history_store import compact, count_lines, iter_records
+
+    spec = next((s for s in INDEX_SPECS if s.key == key), None)
+    if spec is None:
+        return 0
+    date_str = date_str or datetime.now(JST).date().isoformat()
+
+    df = None
+    for source, symbol in spec.candidates:
+        if source != "yahoo":
+            continue  # stooq は日足しか配信していない
+        df = _fetch_yahoo_intraday(symbol)
+        if df is not None and len(df) >= 2:
+            break
+        df = None
+    if df is None:
+        print(f"indices_intraday: {key} の日中足が取れませんでした(値動きの形は判定されません)")
+        return 0
+
+    # 同じ時刻の点を二重に積まない。ts の文字列そのもので突き合わせる。
+    existing = {
+        r.get("ts") for r in iter_records(INTRADAY_TICKS_PATH)
+        if r.get("date") == date_str
+    }
+    rows = []
+    for stamp, close in zip(df["ts"], df["close"]):
+        if stamp.date().isoformat() != date_str:
+            continue  # 休場日に回すと直近営業日の足が返るので、当日ぶんだけ拾う
+        ts = stamp.to_pydatetime().replace(microsecond=0).isoformat()
+        if ts in existing:
+            continue
+        rows.append({
+            "ts": ts,
+            "date": date_str,
+            "src": INTRADAY_BARS_SOURCE,
+            "values": {key: round(float(close), spec.decimals)},
+        })
+    if not rows:
+        return 0
+
+    from src.history_store import append_records
+
+    append_records(INTRADAY_TICKS_PATH, rows)
+    if count_lines(INTRADAY_TICKS_PATH) > INTRADAY_TICKS_MAX_LINES:
+        removed = compact(
+            INTRADAY_TICKS_PATH,
+            INTRADAY_TICKS_KEY,
+            keep_days=INTRADAY_TICKS_KEEP_DAYS,
+            today=date_str,
+        )
+        print(f"indices_intraday: compaction で {removed} 行を削減")
+    return len(rows)
 
 
 def update_indices(config: dict | None = None) -> dict:

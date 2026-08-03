@@ -529,6 +529,16 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
     # 公開されてしまう。読むファイルは docs/data 配下なので、report/breadth を
     # 書き終えたこの位置より前には置けない。失敗しても本体は止めない。
     if not is_snapshot:
+        # レビューの「一日の値動きの形」は指数の日中の点から出す。15分間隔の
+        # ワークフローだけに任せると点が3〜4個しか残らず一度も判定できていなかったので、
+        # 大引後にその日の5分足をまとめて取りに行って埋める(indices.py 側に理由あり)。
+        try:
+            added = indices_mod.backfill_intraday_bars(today_str)
+            if added:
+                print(f"Intraday bars: {today_str} 分を {added} 点補完しました。")
+        except Exception as e:
+            print(f"Intraday bars backfill failed (ignored): {e}")
+
         try:
             from src.report import review as review_mod
             result = review_mod.update_review(today_str)
