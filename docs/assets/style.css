@@ -1984,6 +1984,24 @@ a.nav-btn:hover { border-color: var(--link); }
 .review-block .market-detail-heading { margin-top: 14px; }
 .review-block .market-detail-heading:first-of-type { margin-top: 0; }
 
+/* 既定で畳んでおくブロック(「なぜそうなったか」)。開閉はブラウザの <details> に
+   任せているので JS を持たせない。見出し行の右端に開閉の向きを出す。 */
+.review-block-fold > summary {
+  cursor: pointer;
+  margin: 0;
+  list-style: none;
+}
+.review-block-fold > summary::-webkit-details-marker { display: none; }
+.review-block-fold > summary::after {
+  content: "▾";
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.review-block-fold[open] > summary::after { content: "▴"; }
+.review-block-fold[open] > summary { margin-bottom: 10px; }
+
 /* 前日終値 → 前場 → 大引 の3点。前場が来ていない日は2点になる。 */
 .review-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .review-step {
