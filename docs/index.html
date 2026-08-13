@@ -286,8 +286,10 @@
     <div class="sheet-body">
       <p class="sheet-hint" id="sort-sheet-hint">一覧のカードを並び替えます。</p>
       <!-- 枯れ度は「小さいほど枯れている=良い」ので、他と違い昇順で並ぶ
-           (符号反転は app.js CARD_SORTS.dryup 側で行う)。 -->
+           (符号反転は app.js CARD_SORTS.dryup 側で行う)。
+           ピボットも同じく昇順(近い順)で、抜けた銘柄は同着扱い。既定はこれ。 -->
       <div class="segmented sort-options" id="list-sort-options" role="group" aria-label="並び替え">
+        <button type="button" data-sort="pivot_distance">ピボット</button>
         <button type="button" data-sort="total_score">スコア</button>
         <button type="button" data-sort="rs">RS</button>
         <button type="button" data-sort="change_pct">前日比</button>

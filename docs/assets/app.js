@@ -503,6 +503,18 @@ function fundVerdictBadgeHtml(s, { detail = false } = {}) {
 // (tech_score内の dryup 成分は score_variables の時点で反転済みだが、
 //  report.json の dryup.value は生値なのでフロント側で反転が要る)。
 const CARD_SORTS = {
+  // 2026-08-13(A-1): ピボットまでの距離が近い順。既定。
+  // dist_to_pivot は (ピボット − 終値)/ピボット×100 なので、**すでに抜けた銘柄は
+  // マイナス**。素直に並べると一番伸びきった追いかけ禁止(EXTENDED)が先頭に来る
+  // ので 0 で止めて同着にし、その中は下の同点処理(ブレイク > 待機 > 形成中)に任せる。
+  // ここは共通で降順に並ぶ枠なので、符号を反転して「小さい距離ほど上」にしている。
+  // ピボットが立っていない銘柄は距離が無いので必ず最後尾へ回し、その中だけは
+  // 従来どおり総合スコア降順にする(build_site._sort_key と同じ扱い)。
+  pivot_distance: (s) => {
+    const d = Number(s.dist_to_pivot);
+    if (s.dist_to_pivot == null || !Number.isFinite(d)) return -1e9 + (s.total_score ?? 0);
+    return -Math.max(d, 0);
+  },
   total_score: (s) => s.total_score ?? -Infinity,
   rs: (s) => s.rs ?? -Infinity,
   change_pct: (s) => s.change_pct ?? -Infinity,
@@ -514,10 +526,23 @@ const CARD_SORTS = {
 // 選択も廃止し1つのキー("list")に集約した。既定は総合スコア。
 // 旧既定は監視タブだけ "rs" だったが、RSはスコア寄与ゼロ(MUSTフィルタ専用)に
 // 作り替えたので既定ソートに残す理由がない。log.md (143)。
+//
+// 2026-08-13(A-1): 既定を総合スコア降順から「ピボットに近い順」へ変更。
+// 枠8本で回した25年の実測で、並べ方だけを取り替えたときの期待Rが
+// 傾き順0.105 / RS順0.106 / ランダム0.095 に対しピボット近い順0.119
+// (2015年以降だけなら 0.083 / 0.074 / 0.081 に対し 0.145)。log.md (174)(176)。
+// なお report.json 側も build_site.rank_key() で同じ順に並べてあるが、この画面は
+// 読み込み後にフロントで並べ直すので、**両方直さないと画面には出ない**。
 const CARD_SORT_STORAGE_KEY = "minervini-card-sort";
 const CARD_SORT_PREF_KEY = "list";
-const CARD_SORT_DEFAULT = "total_score";
-const CARD_SORT_LABELS = { total_score: "スコア", rs: "RS", change_pct: "前日比", dryup: "枯れ度" };
+const CARD_SORT_DEFAULT = "pivot_distance";
+const CARD_SORT_LABELS = {
+  pivot_distance: "ピボット",
+  total_score: "スコア",
+  rs: "RS",
+  change_pct: "前日比",
+  dryup: "枯れ度",
+};
 
 function getCardSortKey() {
   try {
