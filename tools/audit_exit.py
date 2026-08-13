@@ -37,10 +37,26 @@ data/audit_cache/ の close/high/low の行列から自分で拾い直す。
     python tools/audit_exit.py --part trail     # トレーリング
     python tools/audit_exit.py --part cap       # 枠数
     python tools/audit_exit.py --part rank      # 並び順(176で追加)
+    python tools/audit_exit.py --part rank --vcp-only   # VCP成立分だけで並び順
+    python tools/audit_exit.py --part gate      # VCPを足切りに使う(178で追加)
     python tools/audit_exit.py                  # 全部
 
 【8】並び順(2026-08-13追加)は売り方の話ではない。174 の並び順の比較に
 **現行の総合スコア順が入っていなかった**ので、そこだけ埋めるために足した。
+
+★2026-08-13追記 — 176 の「総合スコア順(現行)」というラベルは言い過ぎだった★
+画面の総合スコアは テクニカル半分 + VCP半分 の平均だが、setups.parquet には
+VCPの列が無い。176 で測ったのは**テクニカル半分だけ**で、VCP半分は一度も
+測っていなかった。そこで `audit_thresholds_long.py --stage vcp / vcpjoin` で
+各セットアップ日に本番の evaluate_vcp を当てた `setups_vcp.parquet` を作り、
+それがあれば自動で読む。読めたときだけ以下が増える:
+
+  * VCPスコア順 … 本番と同じく VCP未成立は0点として扱う(2026-07-29の仕様)
+  * 総合スコア順(テク+VCP) … 本番の combined_score と同じ 50:50
+  * `--vcp-only` … VCP成立(WATCH_A)の行だけに母集団を絞って測り直す。
+
+`--vcp-only` を別立てにしたのは、VCPを通すと母集団が変わるからで、
+ランダム基準も他の並び順も**同じ部分集合で取り直さないと比較にならない**。
 """
 
 from __future__ import annotations
@@ -87,6 +103,36 @@ def rule_mask(d: pd.DataFrame, slope_min: float = SLOPE) -> np.ndarray:
     )
 
 
+def attach_vcp(df: pd.DataFrame, only_watch_a: bool = False) -> pd.DataFrame:
+    """setups_vcp.parquet があれば VCP の列を貼る(無ければ素通り)。
+
+    無いときに 0 埋めや例外にしないのは、データが無いことと「VCPが0点」を
+    混同させないため。前者は測っていない、後者は測った結果で、意味が真逆。
+    """
+    p = WORK / "setups_vcp.parquet"
+    if not p.exists():
+        if only_watch_a:
+            sys.exit(
+                f"{p} が無い。--vcp-only を使うには先に\n"
+                "  python tools/audit_thresholds_long.py --stage vcp\n"
+                "  python tools/audit_thresholds_long.py --stage vcpjoin\n"
+                "を流すこと。"
+            )
+        print("※ setups_vcp.parquet が無いので VCP系の並び順は出ない")
+        return df
+    v = pd.read_parquet(p, columns=["ci", "t", "vcp_status", "vcp_score"])
+    df = df.merge(v, on=["ci", "t"], how="left")
+    n = len(df)
+    if only_watch_a:
+        df = df[df["vcp_status"] == "WATCH_A"].reset_index(drop=True)
+        print(f"※ VCP成立(WATCH_A)だけに限定: {n:,} → {len(df):,} 行")
+    else:
+        ok = int((df["vcp_status"] == "WATCH_A").sum())
+        print(f"※ VCPスコアを併合: 全{n:,}行のうち VCP成立 {ok:,}行 "
+              f"({ok/max(n,1):.1%})。残りは本番同様 0点として扱う")
+    return df
+
+
 class Book:
     """条件を通ったブレイクだけを持ち、その先20日ぶんの値動きを取り直す。"""
 
@@ -112,6 +158,18 @@ class Book:
         self.ma200sl = B["ma200sl"].to_numpy(dtype=np.float64)
         self.dryup = B["dryup"].to_numpy(dtype=np.float64)   # 直近10日出来高中央値/50日平均
         self.bo_gap = B["bo_gap"].to_numpy(dtype=np.float64) # ブレイク日のピボット超過
+
+        # VCPスコア。setups_vcp.parquet が無ければ None のまま(その場合は
+        # 【8】のVCP系の行がまるごと出ない。黙って0で埋めると「VCPは効かない」
+        # という結論をデータ欠損から作ってしまう)。
+        self.vcp_score = None
+        self.vcp_status = (B["vcp_status"].to_numpy(dtype=object)
+                           if "vcp_status" in B.columns else None)
+        if "vcp_score" in B.columns:
+            # 本番の combined_score と同じ扱い。VCP未成立は0点であって欠損ではない
+            # (2026-07-29の仕様変更。未成立銘柄は総合スコアが50で頭打ちになる)。
+            self.vcp_score = np.nan_to_num(
+                B["vcp_score"].to_numpy(dtype=np.float64), nan=0.0)
 
         # parquet 側の数字(自己検算用)
         self.mae_pq = B["mae"].to_numpy(dtype=np.float64)
@@ -219,7 +277,18 @@ def stats(bk: Book, sd: np.ndarray, days: np.ndarray, ret: np.ndarray,
         win=float((ret[m] > 0).mean()) if m.any() else float("nan"),
         avgday=_mn(days[m].astype(float)),
         totR=float(np.nansum(R[m])),
+        # 期待Rのばらつき(標準誤差)。2026-08-13追加。
+        # 5本のストップ定義で符号が揃うことは「1つの定義を掴んでいない」証拠には
+        # なるが、**同じ取引を5通りに見ているだけ**なので件数不足の証拠にはならない。
+        # 件数が少ない群で符号の一致だけを見て採用すると必ず事故る。
+        seR=_se(R[m]),
     )
+
+
+def _se(a: np.ndarray) -> float:
+    a = np.asarray(a, dtype=float)
+    a = a[np.isfinite(a)]
+    return float(a.std(ddof=1) / np.sqrt(a.size)) if a.size > 1 else float("nan")
 
 
 def _mn(a: np.ndarray) -> float:
@@ -692,9 +761,25 @@ def _avg_stats(rows: list[dict]) -> dict:
 
 def rankers(bk: Book) -> list[tuple[str, np.ndarray]]:
     """並び順の候補。どれも「小さいほど先に取る」向きに揃えて返す。"""
+    extra: list[tuple[str, np.ndarray]] = []
+    if bk.vcp_score is not None:
+        # 本番の combined_score(scoring.py)と同じ 50:50。テクニカル側は当日順位
+        # (0〜1)なので100倍して VCPスコア(0〜100)と桁を揃える。
+        tech = _tech_score(bk)
+        # 同点崩し。VCP未成立が0点で大量に並ぶので、素のまま lexsort に渡すと
+        # 同点は行の並び順(=証券コード順)で決まってしまい、「若い番号から取る」
+        # という無関係な癖が結果に混ざる。固定シードの微小ノイズで無作為に崩す
+        # (VCPスコアは0.1刻みなので0.05未満のノイズは順位を歪めない)。
+        jit = np.random.default_rng(20260813).random(bk.vcp_score.size) * 0.04
+        vcp = bk.vcp_score + jit
+        extra = [
+            ("VCPスコア順", -vcp),
+            ("総合順(テク+VCP)", -(tech * 100.0 * 0.5 + vcp * 0.5)),
+        ]
     return [
         ("ピボットに近い順", bk.dist),
-        ("総合スコア順(現行)", -_tech_score(bk)),
+        ("テクニカル半分の順", -_tech_score(bk)),
+        *extra,
         ("枯れている順", bk.dryup),
         ("200日線の傾き順", -bk.ma200sl),
         ("RSが高い順", -bk.rs),
@@ -723,6 +808,13 @@ def part_rank(bk: Book) -> None:
     print("  report.json の並び(priority.rank_by)を確定させる。\n")
     print("  ※ 枠を決めなければ全部取れるので、並び順は成績に一切効かない。")
     print("     枠がある場合だけの話なので、以下は全部 枠あり の表。\n")
+    if bk.vcp_score is None:
+        print("  ※ VCPスコアが無い。テクニカル半分だけの表になる。")
+        print("     --stage vcp / vcpjoin を流すと VCP半分と総合が増える。\n")
+    else:
+        print("  ※ 「VCPスコア順」はVCP未成立を0点として扱う(本番と同じ)。")
+        print("     0点が大半なら同点だらけで実質ランダムになる。それも結果の一部。")
+        print("     --vcp-only を付けるとVCP成立分だけで測り直せる。\n")
 
     sd = bk.defs[PRIM]
     cand = rankers(bk)
@@ -786,6 +878,113 @@ def part_rank(bk: Book) -> None:
     print("     差が出ているのは取得率が低い列だけ、という点は毎回確認すること。")
 
 
+# ===========================================================================
+# 【9】足切りとしてのVCP(2026-08-13追加)
+# ===========================================================================
+
+def part_gate(bk: Book) -> None:
+    """VCPを「並び順」ではなく「買う/買わない」の線として測る。
+
+    【8】と決定的に違うのは**枠を掛けない**こと。枠を掛けると取りこぼしが
+    混ざり、「VCPが良い」のか「VCPを通ると数が減って良い枠に収まる」のかが
+    分離できない。ここでは全部取れる前提で、通った群と落ちた群の期待Rを
+    そのまま比べる。
+    """
+    print("\n" + "=" * 108)
+    print("【9】VCPを足切りに使うと期待Rは上がるか")
+    print("=" * 108)
+    if bk.vcp_status is None:
+        print("  setups_vcp.parquet が無い。--stage vcp / vcpjoin を先に流すこと。")
+        return
+    print("  178 で、VCPスコアは**並び順としては**ランダムと区別がつかないと出た。")
+    print("  だが VCP成立分だけの n=154 は期待R 0.333 と全体より高かった。")
+    print("  あれは取得率100%の数字なので枠ありの表とは比べられない。ここで枠を")
+    print("  外して、通った群と落ちた群を同じ土俵で直接比べる。\n")
+    print("  ※ 前半(〜2014)と後半(2015〜)の両方で通った群が上でなければ採らない。")
+    print("     片方だけなら「その時代を掴んだだけ」。174 で決めた作法。\n")
+
+    st = bk.vcp_status
+    ok = st == "WATCH_A"
+    groups = [
+        ("VCP成立(WATCH_A)", ok),
+        ("VCP不成立(全部)", ~ok),
+        ("  うちベース不合格", st == "REJECTED"),
+        ("  うち高値更新中", st == "TOO_RECENT"),
+        ("  うちベース形成中", st == "IMMATURE"),
+        ("  うちボラ過大", st == "TOO_VOLATILE"),
+        ("全部(足切りなし)", np.ones(st.size, dtype=bool)),
+    ]
+
+    # 前半/後半の件数。ここが偏っていると「時代で符号が割れた」のか
+    # 「片方の時代に数件しか無い」のかが区別できない。表より先に出す。
+    print("  ── 群ごとの件数(前半=〜2014 / 後半=2015〜)")
+    print(f"    {'群':<22s}{'前半':>8s}{'後半':>8s}{'後半の割合':>12s}")
+    print("    " + "-" * 48)
+    for label, who in groups:
+        ne, nl = int((who & bk.early).sum()), int((who & ~bk.early).sum())
+        if ne + nl == 0:
+            continue
+        print(f"    {label:<22s}{ne:>8,}{nl:>8,}{nl/(ne+nl):>12.1%}")
+    print()
+
+    for name, sd in bk.defs.items():
+        days, ret = run_exit(bk, sd, hold=BASE_HOLD)
+        print(f"  ── ストップ定義 {name}(保有{BASE_HOLD}日・枠なし)")
+        print(HD_FREE)
+        print("  " + "-" * (len(HD_FREE) - 2))
+        for label, who in groups:
+            s = stats(bk, sd, days, ret, who=who)
+            if s["n"] == 0:
+                continue
+            line_free(label, s)
+        print()
+
+    # 件数不足の確認。5本のストップ定義で符号が揃っても、それは同じ取引を
+    # 5通りに見ているだけなので「偶然ではない」証拠にはならない。ここだけは
+    # ばらつきを見る必要がある。
+    sd = bk.defs[PRIM]
+    days, ret = run_exit(bk, sd, hold=BASE_HOLD)
+    print(f"  ── その差は件数の割に大きいか({PRIM}・保有{BASE_HOLD}日)")
+    print("     ±は期待Rのばらつき2つぶん。足切りなしの期待Rがこの幅に入るなら、")
+    print("     差があるように見えても件数不足で何も言えない。")
+    print(f"    {'群':<22s}{'件数':>7s}{'期待R':>9s}{'±2':>9s}"
+          f"{'前半R':>9s}{'±2':>9s}{'後半R':>9s}{'±2':>9s}")
+    print("    " + "-" * 74)
+    for label, who in groups:
+        s = stats(bk, sd, days, ret, who=who)
+        if s["n"] == 0:
+            continue
+        e = stats(bk, sd, days, ret, who=who & bk.early)
+        l = stats(bk, sd, days, ret, who=who & ~bk.early)
+        print(f"    {label:<22s}{s['n']:>7,}{s['meanR']:>9.3f}{2*s['seR']:>9.3f}"
+              f"{e['meanR']:>9.3f}{2*e['seR']:>9.3f}"
+              f"{l['meanR']:>9.3f}{2*l['seR']:>9.3f}")
+    print()
+
+    print("  ── VCPスコアの目盛りに意味があるか(VCP成立分だけを4等分)")
+    print("     並び順としては出番が無かった(同じ日に2つ出ない)が、足切りの線を")
+    print("     「70点以上」のように引けるなら別の使い道になる。単調なら使える。")
+    v = np.where(ok, bk.vcp_score, np.nan)
+    fin = np.isfinite(v) & ok
+    if int(fin.sum()) >= 40:
+        qs = np.nanquantile(v[fin], [0.25, 0.5, 0.75])
+        print(f"     四分位点: {qs[0]:.1f} / {qs[1]:.1f} / {qs[2]:.1f}")
+        print(HD_FREE)
+        print("  " + "-" * (len(HD_FREE) - 2))
+        edges = [-np.inf, *qs, np.inf]
+        for i in range(4):
+            who = fin & (v > edges[i]) & (v <= edges[i + 1])
+            line_free(f"VCP {edges[i]:.0f}〜{edges[i+1]:.0f}点",
+                      stats(bk, sd, days, ret, who=who))
+    else:
+        print(f"     VCP成立が {int(fin.sum())} 件しかない。4等分しても何も言えないので出さない。")
+
+    print("\n  読み方:")
+    print("   * 通った群と落ちた群の差が、前半・後半のどちらかで消えるなら採らない。")
+    print("   * 5本のストップ定義で符号が割れるなら、1本の定義を掴んだだけ。")
+    print("   * 件数が少ない行(数十件)は、差が出ていても偶然の範囲を疑うこと。")
+
+
 def part_notes() -> None:
     print("\n" + "=" * 108)
     print("【6】読むときの注意")
@@ -813,6 +1012,7 @@ PARTS = {
     "grid": part_grid,
     "regime": part_regime,
     "rank": part_rank,
+    "gate": part_gate,
 }
 
 
@@ -827,11 +1027,15 @@ def main() -> None:
                     help="値動きを何日ぶん取り直すか")
     ap.add_argument("--part", default="all",
                     choices=["all", *PARTS.keys()])
+    ap.add_argument("--vcp-only", action="store_true",
+                    help="VCP成立(WATCH_A)の行だけに絞る。母集団が変わるので"
+                         "ランダム基準も他の並び順もこの部分集合で取り直される")
     a = ap.parse_args()
     BASE_CAP = a.cap
     HMAX = a.hmax
 
     df = dd.load_setups(a.since, a.until)
+    df = attach_vcp(df, only_watch_a=a.vcp_only)
     bk = Book(df, a.slope)
     print(f"\n全セットアップ n={len(df):,}  "
           f"条件を通ったブレイク n={bk.n_signal:,}  "

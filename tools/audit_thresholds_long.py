@@ -391,6 +391,130 @@ def stage_setups() -> None:
 
 
 # ---------------------------------------------------------------------------
+# stage vcp: 各セットアップ日に本番のVCP判定を当てる (2026-08-13追加)
+# ---------------------------------------------------------------------------
+#
+# なぜ要るか。setups.parquet は VCP を**一切掛けずに**抽出している(MA200上・
+# ユニバース内・ピボット手前15%以内、だけ)。そのため画面に出ている総合スコアの
+# うち VCP 半分は、この検証データの上では一度も測れていない。log.md 176 で
+# 「総合スコア順」として測ったのはテクニカル半分だけで、あれは言い過ぎだった。
+#
+# ここでは各セットアップ日 t で終わる200日分の切り出しを作り、本番と同じ
+# src.screener.vcp.evaluate_vcp を通す。evaluate_vcp が読むのは df.iloc[-1] と
+# df.tail(window) だけ(window は scan_days_extended=200 が上限)なので、
+# 200行の尻尾があれば本番と同じ結論になる。
+#
+# 出力は setups.parquet とは別ファイルにする。壊しても --stage setups を
+# やり直さずに済むし、片方だけ作り直せる。
+
+
+def _vcp_window(cfg: dict) -> int:
+    v = cfg["vcp"]
+    return max(v.get("scan_days_extended", 200), v.get("scan_days", 130)) + 5
+
+
+def stage_vcp(part: str | None = None, limit: int | None = None) -> None:
+    sys.path.insert(0, str(ROOT))
+    from src.config import load_config
+    from src.screener.vcp import evaluate_vcp
+
+    cfg = load_config()
+    win = _vcp_window(cfg)
+
+    def L(name: str) -> np.ndarray:
+        return np.load(npy(name), mmap_mode="r")
+
+    close, high, low = L("close"), L("high"), L("low")
+    vol, atr, vma50 = L("volume"), L("atr"), L("vma50")
+    dates = pd.to_datetime(np.load(npy("dates")))
+
+    su = pd.read_parquet(WORK / "setups.parquet", columns=["ci", "t"])
+    # 銘柄順に舐める。mmap のページキャッシュが効くので実測で2割ほど速い。
+    su = su.sort_values(["ci", "t"]).reset_index(drop=True)
+
+    pi, pn = 1, 1
+    if part:
+        pi, pn = (int(x) for x in part.split("/"))
+        su = np.array_split(su, pn)[pi - 1].reset_index(drop=True)
+    if limit:
+        su = su.head(limit)
+
+    out, t0 = [], time.time()
+    for k, (ci, t) in enumerate(zip(su["ci"].to_numpy(), su["t"].to_numpy())):
+        s = slice(max(0, t - win + 1), t + 1)
+        df = pd.DataFrame({
+            "date": dates[s],
+            "close": close[s, ci].astype(np.float64),
+            "high": high[s, ci].astype(np.float64),
+            "low": low[s, ci].astype(np.float64),
+            "volume": vol[s, ci].astype(np.float64),
+            "atr20": atr[s, ci].astype(np.float64),
+            "vol_ma50": vma50[s, ci].astype(np.float64),
+        })
+        try:
+            r = evaluate_vcp(df, cfg)
+        except Exception as e:  # 1銘柄の異常で7分の実行を落とさない
+            out.append((int(ci), int(t), f"ERROR:{type(e).__name__}", np.nan,
+                        np.nan, np.nan, np.nan, np.nan, np.nan, np.nan))
+            continue
+        comp = r.get("components") or {}
+        out.append((
+            int(ci), int(t), r["status"],
+            np.nan if r.get("vcp_score") is None else float(r["vcp_score"]),
+            float(comp.get("tightness", np.nan)),
+            float(comp.get("halving", np.nan)),
+            float(comp.get("vol_trend", np.nan)),
+            float(comp.get("first_depth", np.nan)),
+            float(comp.get("duration", np.nan)),
+            float(comp.get("shakeout_bonus", np.nan)),
+        ))
+        if (k + 1) % 2000 == 0:
+            el = time.time() - t0
+            print(f"  {k+1}/{len(su)}  {el:.0f}秒  残り約{el/(k+1)*(len(su)-k-1):.0f}秒",
+                  flush=True)
+
+    cols = ["ci", "t", "vcp_status", "vcp_score", "sc_tightness", "sc_halving",
+            "sc_vol_trend", "sc_first_depth", "sc_duration", "sc_shakeout"]
+    res = pd.DataFrame(out, columns=cols)
+    d = WORK / "vcp_parts"
+    d.mkdir(parents=True, exist_ok=True)
+    # --limit は動作確認用なので part_ を名乗らせない。vcpjoin が拾って
+    # 「300行しか無いVCP列」を本番の結果として併合してしまうのを防ぐ。
+    name = f"smoke_{limit}.parquet" if limit else f"part_{pi}of{pn}.parquet"
+    res.to_parquet(d / name, index=False)
+    print(f"vcp {name}: n={len(res)}  {time.time()-t0:.0f}秒 → {d}")
+    print(res["vcp_status"].value_counts().to_string())
+
+
+def stage_vcpjoin() -> None:
+    d = WORK / "vcp_parts"
+    parts = sorted(d.glob("part_*.parquet"))
+    if not parts:
+        sys.exit(f"{d} に part が無い。先に --stage vcp を回すこと")
+    # 分割数の違う実行が混ざると、行が重複したり歯抜けになったりする。
+    # どちらも「VCP未計算」の数字を見ても気付けないので、ここで止める。
+    ns = {p.stem.split("of")[1] for p in parts}
+    if len(ns) > 1:
+        sys.exit(f"分割数の違う part が混ざっている: {sorted(ns)}。{d} を消してやり直すこと")
+    res = pd.concat([pd.read_parquet(p) for p in parts], ignore_index=True)
+    res = res.drop_duplicates(["ci", "t"], keep="last")
+    su = pd.read_parquet(WORK / "setups.parquet")
+    merged = su.merge(res, on=["ci", "t"], how="left")
+    merged.to_parquet(WORK / "setups_vcp.parquet", index=False)
+
+    n = len(merged)
+    miss = int(merged["vcp_status"].isna().sum())
+    print(f"setups_vcp n={n}  VCP未計算={miss}  → {WORK/'setups_vcp.parquet'}")
+    print(merged["vcp_status"].value_counts(dropna=False).to_string())
+    wa = merged[merged["vcp_status"] == "WATCH_A"]
+    print(f"\nWATCH_A n={len(wa)} ({len(wa)/max(n,1):.1%})  "
+          f"うちブレイク到達={int((wa['bo']==1).sum())}")
+    if len(wa):
+        print("VCPスコア分布:", wa["vcp_score"].describe()[["min", "25%", "50%", "75%", "max"]]
+              .round(1).to_dict())
+
+
+# ---------------------------------------------------------------------------
 # stage report: 診断
 # ---------------------------------------------------------------------------
 
@@ -573,10 +697,17 @@ def stage_report() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", required=True,
-                    choices=["build", "feat", "rs", "setups", "report"])
+                    choices=["build", "feat", "rs", "setups", "vcp", "vcpjoin",
+                             "report"])
+    ap.add_argument("--part", help="vcp を分割実行する (例: 3/8)")
+    ap.add_argument("--limit", type=int, help="vcp の先頭N件だけ回す(動作確認用)")
     args = ap.parse_args()
+    if args.stage == "vcp":
+        stage_vcp(part=args.part, limit=args.limit)
+        return
     {"build": stage_build, "feat": stage_feat, "rs": stage_rs,
-     "setups": stage_setups, "report": stage_report}[args.stage]()
+     "setups": stage_setups, "vcpjoin": stage_vcpjoin,
+     "report": stage_report}[args.stage]()
 
 
 if __name__ == "__main__":
