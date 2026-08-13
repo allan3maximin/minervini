@@ -36,7 +36,11 @@ data/audit_cache/ の close/high/low の行列から自分で拾い直す。
     python tools/audit_exit.py --part take      # 利確
     python tools/audit_exit.py --part trail     # トレーリング
     python tools/audit_exit.py --part cap       # 枠数
+    python tools/audit_exit.py --part rank      # 並び順(176で追加)
     python tools/audit_exit.py                  # 全部
+
+【8】並び順(2026-08-13追加)は売り方の話ではない。174 の並び順の比較に
+**現行の総合スコア順が入っていなかった**ので、そこだけ埋めるために足した。
 """
 
 from __future__ import annotations
@@ -101,6 +105,12 @@ class Book:
         self.dist = B["dist"].to_numpy(dtype=np.float64)
         self.bo_date = pd.to_datetime(B["bo_date"])
         self.early = (self.bo_date < ERA_SPLIT).to_numpy()
+
+        # 【8】並び順の検証で使う生値。母集団の絞り込みには一切使わない。
+        self.rs = B["rs"].to_numpy(dtype=np.float64)
+        self.lr = B["lr"].to_numpy(dtype=np.float64)         # 終値/52週安値
+        self.ma200sl = B["ma200sl"].to_numpy(dtype=np.float64)
+        self.dryup = B["dryup"].to_numpy(dtype=np.float64)   # 直近10日出来高中央値/50日平均
 
         # parquet 側の数字(自己検算用)
         self.mae_pq = B["mae"].to_numpy(dtype=np.float64)
@@ -222,13 +232,16 @@ def _mn(a: np.ndarray) -> float:
 # ===========================================================================
 
 def simulate(bk: Book, days: np.ndarray, ret: np.ndarray, sd: np.ndarray,
-             cap: int) -> dict:
+             cap: int, rank: np.ndarray | None = None) -> dict:
     """同時に cap 本までしか持てないとして、取れた取引だけ集計する。
 
     枠が空くのは**実際に手仕舞った日**。傾きの検証(audit_proposal_slope.py)では
     一律10日ぶん占有させていたが、今回は「早く手仕舞えば次が取れる」こと自体が
     検証の対象なので、実際の保有日数で返す。
-    優先順は A-4(ピボットに近い順)で固定。
+
+    rank は「同じ日に複数出たとき、どれから枠に入れるか」の優先順。**小さいほど
+    先に取る**向きで渡す(欠けている銘柄は最後尾)。省略するとピボットに近い順
+    (A-4)。【8】でここを差し替えて並び順そのものを比べる。
     """
     ok = np.isfinite(ret) & np.isfinite(bk.bo_t) & np.isfinite(sd)
     idx = np.flatnonzero(ok)
@@ -236,7 +249,8 @@ def simulate(bk: Book, days: np.ndarray, ret: np.ndarray, sd: np.ndarray,
         return dict(n=0)
 
     d0 = bk.bo_t[idx]
-    score = bk.dist[idx].astype(np.float64)
+    src = bk.dist if rank is None else np.asarray(rank, dtype=np.float64)
+    score = src[idx].astype(np.float64)
     score = np.where(np.isfinite(score), score, np.inf)   # 欠けは最後尾
     order = np.lexsort((score, d0))
     idx, d0 = idx[order], d0[order]
@@ -637,6 +651,135 @@ def part_regime(bk: Book) -> None:
     print("     勝敗の数を数えるのは【1】の表。ここは『どこで負けたか』の中身を見る用。")
 
 
+# ===========================================================================
+# 【8】並び順(同じ日に複数出たとき、どれから枠に入れるか)
+# ===========================================================================
+
+def _pct_by_day(x: np.ndarray, day: np.ndarray) -> np.ndarray:
+    """その日に出た銘柄の中での順位を 0〜1 に直す(大きいほど上位)。
+
+    本番の technical_score と同じ作法。閾値を置かず、当日の顔ぶれの中で
+    何番目かだけを見るので、時代によって水準がズレても効き方が変わらない。
+    """
+    s = pd.Series(np.asarray(x, dtype=np.float64))
+    return s.groupby(pd.Series(day)).rank(pct=True, na_option="keep").to_numpy()
+
+
+def _tech_score(bk: Book) -> np.ndarray:
+    """本番の総合スコア相当。3変数の当日順位を等ウェイトで平均する。
+
+    src/screener/trend_template.py の score_variables と同じ3本
+    (200日線の21日傾き / 終値÷52週安値 / 枯れ度)。枯れ度だけは**小さいほど
+    良い**ので符号を反転してから順位を取る。重み探索はしない(過剰適合回避)。
+    """
+    d = bk.bo_t
+    p = np.nanmean(np.vstack([
+        _pct_by_day(bk.ma200sl, d),
+        _pct_by_day(bk.lr, d),
+        _pct_by_day(-bk.dryup, d),
+    ]), axis=0)
+    return p
+
+
+def _avg_stats(rows: list[dict]) -> dict:
+    rows = [r for r in rows if r.get("n", 0) > 0]
+    if not rows:
+        return dict(n=0)
+    keys = set().union(*(r.keys() for r in rows))
+    return {k: float(np.mean([r[k] for r in rows])) for k in keys}
+
+
+def rankers(bk: Book) -> list[tuple[str, np.ndarray]]:
+    """並び順の候補。どれも「小さいほど先に取る」向きに揃えて返す。"""
+    return [
+        ("ピボットに近い順", bk.dist),
+        ("総合スコア順(現行)", -_tech_score(bk)),
+        ("枯れている順", bk.dryup),
+        ("200日線の傾き順", -bk.ma200sl),
+        ("RSが高い順", -bk.rs),
+        ("52週安値比が高い順", -bk.lr),
+    ]
+
+
+RANK_HOLDS = [10, 15]
+RANK_CAPS = [5, 8, 12]
+RANK_SEEDS = 5
+
+
+def part_rank(bk: Book) -> None:
+    print("\n" + "=" * 108)
+    print("【8】同じ日に複数出たとき、どれから枠に入れるか")
+    print("=" * 108)
+    print("  174 でピボットに近い順が勝ったが、あの比較に**現行の総合スコア順が")
+    print("  入っていなかった**。総合スコアには枯れ度が乗っていて、枯れ度は3変数の中で")
+    print("  一番時代をまたいでブレない(9勝2敗)。そこを飛ばして結論を出していた。")
+    print("  ここで並べ直し、画面の既定の並び順(app.js の CARD_SORT_DEFAULT)と")
+    print("  report.json の並び(priority.rank_by)を確定させる。\n")
+    print("  ※ 枠を決めなければ全部取れるので、並び順は成績に一切効かない。")
+    print("     枠がある場合だけの話なので、以下は全部 枠あり の表。\n")
+
+    sd = bk.defs[PRIM]
+    cand = rankers(bk)
+
+    for hold in [h for h in RANK_HOLDS if h <= HMAX]:
+        days, ret = run_exit(bk, sd, hold=hold)
+        print(f"  ── 保有{hold}日 × 枠{BASE_CAP}本")
+        print(HD_CAP)
+        print("  " + "-" * (len(HD_CAP) - 2))
+        for label, key in cand:
+            line_cap(label, simulate(bk, days, ret, sd, BASE_CAP, key))
+        rows = []
+        for s in range(RANK_SEEDS):
+            r = np.random.default_rng(1000 + s).random(bk.entry.size)
+            rows.append(simulate(bk, days, ret, sd, BASE_CAP, r))
+        line_cap(f"ランダム({RANK_SEEDS}回平均)", _avg_stats(rows))
+        print()
+
+    print(f"  ── 枠の数を変えても順位が変わらないか(保有{BASE_HOLD}日)")
+    hd = "    " + f"{'案':<24s}" + "".join(f"{f'枠{c}本':>10s}" for c in RANK_CAPS)
+    print(hd + "      ← 期待R")
+    print("    " + "-" * (len(hd) - 4))
+    days, ret = run_exit(bk, sd, hold=BASE_HOLD)
+    for label, key in cand:
+        cells = "".join(
+            f"{simulate(bk, days, ret, sd, c, key).get('meanR', float('nan')):>10.3f}"
+            for c in RANK_CAPS
+        )
+        print(f"    {label:<24s}{cells}")
+    print("\n    " + "-" * (len(hd) - 4))
+    print("    後半R(2015年以降。ここが痩せる案は、前半で稼いだだけなので採らない)")
+    for label, key in cand:
+        cells = "".join(
+            f"{simulate(bk, days, ret, sd, c, key).get('R_l', float('nan')):>10.3f}"
+            for c in RANK_CAPS
+        )
+        print(f"    {label:<24s}{cells}")
+
+    print(f"\n  ── 5本のストップ定義すべてで同じ向きか(保有{BASE_HOLD}日・枠{BASE_CAP}本)")
+    print("     損切り幅の決め方を変えたら順位が入れ替わる案は、1つの定義を掴んだだけ。")
+    names = list(bk.defs.keys())
+    hd2 = "    " + f"{'案':<24s}" + "".join(f"{n:>16s}" for n in names)
+    for title, key in [("期待R", "meanR"), ("後半R(2015年以降)", "R_l")]:
+        print(f"\n    {title}")
+        print(hd2)
+        print("    " + "-" * (len(hd2) - 4))
+        for label, rk in cand:
+            cells = ""
+            for n in names:
+                s = bk.defs[n]
+                dd_, rr_ = run_exit(bk, s, hold=BASE_HOLD)
+                v = simulate(bk, dd_, rr_, s, BASE_CAP, rk).get(key, float("nan"))
+                cells += f"{v:>16.3f}"
+            print(f"    {label:<24s}{cells}")
+
+    print("\n  読み方:")
+    print("   * 期待Rの差が ランダム との差より小さいなら、その並び順は効いていない。")
+    print("   * 枠の数を変えると順位が入れ替わる案は、枠8本を掴んだだけなので採らない。")
+    print("   * 前半・後半の両方で上なら採る。片方だけなら据え置き(現行=総合スコア順)。")
+    print("   * 取得率が100%に近い枠数では取りこぼしが無いので、並び順の差も消える。")
+    print("     差が出ているのは取得率が低い列だけ、という点は毎回確認すること。")
+
+
 def part_notes() -> None:
     print("\n" + "=" * 108)
     print("【6】読むときの注意")
@@ -663,6 +806,7 @@ PARTS = {
     "cap": part_cap,
     "grid": part_grid,
     "regime": part_regime,
+    "rank": part_rank,
 }
 
 
