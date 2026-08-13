@@ -18,7 +18,7 @@ BASELINE = {
     "ma150": 130.0,
     "ma200": 120.0,
     "ma200_slope_days": 30,
-    "ma200_slope_21d": 0.05,
+    "ma200_slope_21d": 0.08,
     "dryup_med_10_50": 0.8,
     "low_52w": 100.0,
     "high_52w": 160.0,
@@ -45,6 +45,8 @@ def test_all_conditions_pass_on_baseline():
         ({"close": 100.0}, "close_above_ma150_ma200"),
         ({"ma150": 110.0}, "ma150_above_ma200"),
         ({"ma200_slope_days": 10}, "ma200_uptrend_1m"),
+        ({"ma200_slope_21d": 0.02}, "ma200_uptrend_1m"),
+        ({"ma200_slope_21d": None}, "ma200_uptrend_1m"),
         ({"ma50": 115.0}, "ma_stack_50_150_200"),
         ({"close": 135.0}, "close_above_ma50"),
         ({"low_52w": 200.0}, "above_low52w_margin"),
@@ -55,6 +57,8 @@ def test_all_conditions_pass_on_baseline():
         "cond1_close_below_ma150_ma200",
         "cond2_ma150_below_ma200",
         "cond3_ma200_not_uptrend",
+        "cond3_ma200_slope_too_flat",
+        "cond3_ma200_slope_missing",
         "cond4_ma_stack_broken",
         "cond5_close_below_ma50",
         "cond6_below_low52w_margin",
@@ -70,9 +74,20 @@ def test_each_condition_fails_independently(mutation, expected_false_key):
     assert passes_trend_template(flags) is False
 
 
+def test_ma200_slope_boundary_is_inclusive():
+    """ちょうど下限(+5%)は通す。境界を跨いだ瞬間に落ちる。"""
+    floor = CONFIG["trend_template"]["ma200_slope_21d_min"]
+    on = dict(BASELINE, ma200_slope_21d=floor)
+    under = dict(BASELINE, ma200_slope_21d=floor - 0.001)
+    assert check_must_conditions(on, CONFIG)["ma200_uptrend_1m"] is True
+    assert check_must_conditions(under, CONFIG)["ma200_uptrend_1m"] is False
+
+
 def test_technical_score_is_higher_for_stronger_stock():
     """3変数(MA200の21日傾き / 52週安値からの倍率 / 枯れ度)全部が上の銘柄が上に来る。"""
-    weak = dict(BASELINE, ma200_slope_21d=0.005, close=142.0, dryup_med_10_50=1.6)
+    # weak 側も MUST は通す必要がある(落ちると採点母集団から外れて None になる)。
+    # 傾きの下限が 5% になったので 0.005 は使えない。
+    weak = dict(BASELINE, ma200_slope_21d=0.052, close=142.0, dryup_med_10_50=1.6)
     strong = dict(BASELINE, ma200_slope_21d=0.09, close=155.0, dryup_med_10_50=0.5)
     by_code = {"WEAK": weak, "STRONG": strong}
     attach_score_percentiles(by_code, CONFIG)

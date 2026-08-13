@@ -496,6 +496,61 @@ def _sort_key(stock: dict) -> tuple:
     return (-score, status_rank, stock.get("code") or "")
 
 
+# ---------------------------------------------------------------------------
+# 並び順 (2026-08-13改定: A-1)
+#
+# 一覧の並び順は「同時に持てる本数が足りないとき、どれを捨てるか」を決めている。
+# 25年16.8万件を枠8本で回して並べ方だけを取り替えた実測(log.md 174):
+#
+#   200日線の傾き順  期待R 0.105  前半 0.125  後半 0.083
+#   RSの高い順       期待R 0.106  前半 0.137  後半 0.074
+#   ランダム         期待R 0.095  前半 0.109  後半 0.081
+#   ピボットに近い順  期待R 0.119  前半 0.095  後半 0.145   ← これ
+#
+# RS順も傾き順もランダムとほぼ差が無い。**通す/通さないの門番として効く変数が、
+# 通った銘柄を並べる物差しとしても効くとは限らない。**log.md (140) と同じ結論。
+#
+# ★未検証の穴: 上の比較に「現行の総合スコア順」が入っていない。RS順・傾き順・
+#   ランダムの3つとしか比べていないので、総合スコア順に負ける可能性は消えていない
+#   (総合スコアには枯れ度が入っており、枯れ度は25年で最も安定した指標)。
+#   `tools/audit_exit.py --part rank` で実測してから、この既定値を確定させること。
+#   それまで戻せるように設定で切り替えられるようにしてある。
+# ---------------------------------------------------------------------------
+
+def _pivot_sort_key(stock: dict) -> tuple:
+    """ピボットまでの距離 昇順(近い順)。
+
+    `dist_to_pivot` は (ピボット − 終値) / ピボット × 100 なので、**すでに抜けた
+    銘柄はマイナス**になる。素直に昇順で並べると「一番伸びきったEXTENDED」が
+    先頭に来てしまう。検証で測ったのは「ピボット手前15%以内・まだ抜けていない
+    候補のうち、近い順」なので、抜けた側は 0 に潰して同着にし、その中の順序は
+    ステータス(ブレイク > 待機 > 追いかけ禁止)に任せる。
+
+    ピボットが立っていない銘柄(ベース未完成・NO_BASE等)は距離が None。
+    「次に建てる候補」ではないので距離ありの銘柄より必ず後ろへ回し、
+    その中は従来どおり総合スコア降順にする。
+    """
+    dist = stock.get("dist_to_pivot")
+    if dist is None or dist != dist:  # None / NaN
+        return (1,) + _sort_key(stock)
+    return (
+        0,
+        max(float(dist), 0.0),
+        STATUS_ORDER.get(stock["status"], 99),
+        -(stock.get("total_score") or 0.0),
+        stock.get("code") or "",
+    )
+
+
+RANK_KEYS = {"total_score": _sort_key, "pivot_distance": _pivot_sort_key}
+
+
+def rank_key(config: dict | None = None):
+    config = config or load_config()
+    name = (config.get("priority") or {}).get("rank_by", "pivot_distance")
+    return RANK_KEYS.get(name, _pivot_sort_key)
+
+
 def _fill_days_to_earnings(stocks: list[dict]) -> None:
     """決算までの日数が空のレコードを、書き出し直前に埋める。
 
@@ -539,7 +594,7 @@ def build_report(
     なく report{suffix}.json へ書き出す(スナップショット方式)。前場終了バッチが
     EOD の report.json を上書きせず、前場断面を独立ファイルとして残すために使う。
     """
-    ordered = sorted(stocks, key=_sort_key)
+    ordered = sorted(stocks, key=rank_key())
     _fill_days_to_earnings(ordered)
     report = {
         "generated_at": generated_at or datetime.now().astimezone().isoformat(),

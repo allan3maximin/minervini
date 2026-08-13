@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from src.config import load_config
+from src.screener.trend_template import ma200_uptrend_ok
 
 # 未達条件キー (フロント側で日本語ラベルにマップする)
 COND_CLOSE_ABOVE_MA50 = "close_above_ma50"
@@ -39,15 +40,18 @@ def passes_hard_filters(latest: dict, config: dict | None = None) -> bool:
     """ハードフィルタ3条件。1つでも未達なら対象外。
 
     1. 150日線 > 200日線
-    2. 200日線が1ヶ月以上上向き
+    2. 200日線が1ヶ月以上上向き、かつ21日上昇率が下限以上 (2026-08-13 A-2)
     3. 現在値が52週安値から +25% 以上 (config trend_template.low52w_margin)
+
+    2の大きさ条件は MUST 側 (trend_template.ma200_uptrend_ok) と同じ関数を使う。
+    ここだけ緩いと「P1なのにMUST落ち」という食い違いが出る。
     """
     config = config or load_config()
     tt = config["trend_template"]
     close = latest["close"]
     return bool(
         latest["ma150"] > latest["ma200"]
-        and latest["ma200_slope_days"] >= tt["ma200_up_days_min"]
+        and ma200_uptrend_ok(latest, tt)
         and close >= latest["low_52w"] * tt["low52w_margin"]
     )
 

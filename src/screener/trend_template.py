@@ -19,6 +19,28 @@ MUST_CONDITION_NAMES = [
 ]
 
 
+def ma200_uptrend_ok(latest: dict, tt: dict) -> bool:
+    """200日線の上昇条件。**向き(持続)と大きさ(強度)の両方**を要求する。
+
+    2026-08-13(A-2): 従来は `ma200_slope_days >= 21` だけ、つまり「21営業日
+    連続で200日線が前日より上」= 実質「向きだけ」だった。ここに 21日上昇率の
+    下限 `ma200_slope_21d_min` を足す。根拠は25年16.8万件の検証
+    (log.md 174 / THRESHOLD_REVIEW_2026-08.md A-2)で、0%→5%で期待Rが
+    0.136 → 0.209、2015年以降だけでも 0.108 → 0.180 に上がる。
+
+    `ma200_slope_21d` が取れない(履歴221営業日未満)場合は False。
+    条件を確認できないものを通さない方が保守的。閾値が未設定の設定ファイル
+    (旧版)では大きさの判定を飛ばして従来どおりの挙動になる。
+    """
+    if latest["ma200_slope_days"] < tt["ma200_up_days_min"]:
+        return False
+    floor = tt.get("ma200_slope_21d_min")
+    if floor is None:
+        return True
+    slope = _finite(latest.get("ma200_slope_21d"))
+    return slope is not None and slope >= floor
+
+
 def check_must_conditions(latest: dict, config: dict | None = None) -> dict[str, bool]:
     config = config or load_config()
     tt = config["trend_template"]
@@ -26,7 +48,7 @@ def check_must_conditions(latest: dict, config: dict | None = None) -> dict[str,
     return {
         "close_above_ma150_ma200": bool(close > latest["ma150"] and close > latest["ma200"]),
         "ma150_above_ma200": bool(latest["ma150"] > latest["ma200"]),
-        "ma200_uptrend_1m": bool(latest["ma200_slope_days"] >= tt["ma200_up_days_min"]),
+        "ma200_uptrend_1m": ma200_uptrend_ok(latest, tt),
         "ma_stack_50_150_200": bool(latest["ma50"] > latest["ma150"] > latest["ma200"]),
         "close_above_ma50": bool(close > latest["ma50"]),
         "above_low52w_margin": bool(close >= latest["low_52w"] * tt["low52w_margin"]),

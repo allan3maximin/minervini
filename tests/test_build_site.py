@@ -330,6 +330,35 @@ def test_build_report_sort_ties_break_on_status(tmp_path, monkeypatch):
     assert [s["code"] for s in report["stocks"]] == ["A", "B", "C"]
 
 
+def test_build_report_orders_by_pivot_distance(tmp_path, monkeypatch):
+    """2026-08-13(A-1): ピボットに近い順。
+
+    ・すでに抜けた銘柄(距離マイナス)は 0 に潰して同着にし、その中はステータス順。
+      素直に昇順にすると「一番伸びきったEXTENDED」が先頭に来てしまうため。
+    ・ピボットが立っていない銘柄は距離ありの後ろへ回し、その中は総合スコア降順。
+    """
+    import src.report.build_site as bs
+
+    monkeypatch.setattr(bs, "DOCS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(bs, "REPORT_PATH", tmp_path / "report.json")
+
+    stocks = [
+        {"code": "FAR", "tier": "pool", "status": "WATCH_A",
+         "total_score": 99, "dist_to_pivot": 8.0},
+        {"code": "NEAR", "tier": "pool", "status": "WATCH_A",
+         "total_score": 10, "dist_to_pivot": 0.5},
+        {"code": "BROKE", "tier": "confirmed", "status": "BREAKOUT",
+         "total_score": 20, "dist_to_pivot": -1.0},
+        {"code": "EXT", "tier": "cooled", "status": "EXTENDED",
+         "total_score": 95, "dist_to_pivot": -12.0},
+        {"code": "NOBASE", "tier": "watchlist", "status": "NO_BASE",
+         "total_score": 100, "dist_to_pivot": None},
+    ]
+    report = build_report(stocks, universe_size=1000, template_pass=87)
+    codes = [s["code"] for s in report["stocks"]]
+    assert codes == ["BROKE", "EXT", "NEAR", "FAR", "NOBASE"]
+
+
 def test_compute_breakout_success_rate_counts_holds_above_pivot():
     history = {
         "7134": [{"status": "WATCH_A"}] * 3
@@ -566,7 +595,14 @@ def test_margin_badge_none_when_ratio_high_but_dtc_below_warn():
 
 
 def test_margin_none_when_no_store_data():
-    record = _assemble_with_margin(margin_store=None)
+    """信用残の履歴が空なら None。
+
+    `margin_store=None` は build_margin_metrics 側で「引数の省略」と解釈され、
+    本物の data/margin_weekly.json を読みにいってしまう。実データに 7134 が
+    入った時点で落ちるようになった(2026-08-13)。ここで確かめたいのは
+    「データが無いとき」の挙動なので、空の store を明示的に渡す。
+    """
+    record = _assemble_with_margin(margin_store={"history": []})
     assert record["margin"] is None
 
 

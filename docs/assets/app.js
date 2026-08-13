@@ -4727,7 +4727,7 @@ const MUST_FLAG_LABELS = {
   tt: {
     close_above_ma150_ma200: "終値が150日線・200日線より上",
     ma150_above_ma200: "150日線が200日線より上",
-    ma200_uptrend_1m: "200日線が1ヶ月以上上向き",
+    ma200_uptrend_1m: "200日線が1ヶ月以上上向き かつ 21日で+5%以上",
     ma_stack_50_150_200: "50日線 > 150日線 > 200日線",
     close_above_ma50: "終値が50日線より上",
     above_low52w_margin: "52週安値から+25%以上",
