@@ -74,7 +74,7 @@ def _ohlcv_row(**overrides):
 
 def test_assemble_stock_record_carries_intraday_range_and_volume():
     record = assemble_stock_record(
-        "7134", "T", _ohlcv_row(), {}, _EMPTY_VCP, {"status": "WATCH_B", "pivot": None},
+        "7134", "T", _ohlcv_row(), {}, _EMPTY_VCP, {"status": "REJECTED", "pivot": None},
         _fund_info(), DRYUP_CONFIG,
     )
     assert (record["open"], record["high"], record["low"], record["close"]) == (
@@ -99,7 +99,7 @@ def test_assemble_stock_record_drops_nan_and_missing_price_fields():
     row = _ohlcv_row(high=float("nan"), vol_ma50=float("nan"))
     del row["low"]
     record = assemble_stock_record(
-        "7134", "T", row, {}, _EMPTY_VCP, {"status": "WATCH_B", "pivot": None},
+        "7134", "T", row, {}, _EMPTY_VCP, {"status": "REJECTED", "pivot": None},
         _fund_info(), DRYUP_CONFIG,
     )
     assert record["high"] is None
@@ -241,7 +241,7 @@ def test_dryup_badge_none_above_threshold():
 
 def test_dryup_badge_missing_diagnostics():
     vcp_result = {"vcp_score": None, "footprint": None, "must_flags": None, "contractions": []}
-    entry_result = {"status": "WATCH_B", "pivot": None}
+    entry_result = {"status": "REJECTED", "pivot": None}
     record = assemble_stock_record(
         "7134", "T", CONFIG_LATEST, {}, vcp_result, entry_result, _fund_info(tier="pool", full_score=None), DRYUP_CONFIG
     )
@@ -252,7 +252,7 @@ def test_dryup_badge_missing_diagnostics():
 def test_assemble_stock_record_pool_uses_tech_score_for_total():
     tt_flags = {"cond1": True}
     vcp_result = {"vcp_score": 70.0, "footprint": "7W 18/9/4 3T", "must_flags": {"V1": True}, "contractions": []}
-    entry_result = {"status": "WATCH_B", "pivot": None}
+    entry_result = {"status": "REJECTED", "pivot": None}
 
     record = assemble_stock_record(
         "9999", "Pool Co", CONFIG_LATEST, tt_flags, vcp_result, entry_result, _fund_info(tier="pool", tech_score=60.0, full_score=None)

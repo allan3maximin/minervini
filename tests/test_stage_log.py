@@ -22,7 +22,8 @@ def test_entry_status_with_pivot_is_order():
 
 
 def test_entry_status_without_pivot_is_watch():
-    assert stage_log.classify_bucket(_rec("3", "WATCH_B")) == "watch"
+    # ロックが切れた直後などピボットが解決できていない待機。発注はできない。
+    assert stage_log.classify_bucket(_rec("3", "WATCH_A")) == "watch"
 
 
 def test_extended_and_stale_are_cooled():
@@ -32,7 +33,7 @@ def test_extended_and_stale_are_cooled():
 
 
 def test_status_takes_precedence_over_setup_stage():
-    # app.js の cardBadgeIsForming は STATUS_BADGE があれば setup_stage を見ない。
+    # app.js の cardBadgeKey は status が付いていれば setup_stage を見ない。
     rec = _rec("6", "WATCH_A", pivot=10.0, stage="forming", near=True)
     assert stage_log.classify_bucket(rec) == "order"
 
@@ -69,7 +70,7 @@ def test_funnel_keeps_zero_buckets():
 
 def test_funnel_total_equals_input():
     recs = [
-        _rec("1", "WATCH_A", pivot=1.0), _rec("2", "WATCH_B"),
+        _rec("1", "WATCH_A", pivot=1.0), _rec("2", "WATCH_A"),
         _rec("3", "STALE"), _rec("4", stage="forming", near=True),
         _rec("5", stage="fresh_high"), _rec("6"),
     ]

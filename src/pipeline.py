@@ -51,7 +51,7 @@ DEBUG_PATH = REPO_ROOT / "data" / "trend_template_debug.json"
 # 今日エントリー判断ができるステータス(セットアップが生きていて追いかけ禁止でない)。
 # EXTENDED(伸びすぎ)と STALE(ブレイク鮮度切れ)は両方とも追いかけ禁止なので
 # ここには含めず、別途 COOLED_ENTRY_STATUSES で管理し cooled ティアへ隔離する。
-ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B"}
+ACTIONABLE_ENTRY_STATUSES = {"BREAKOUT", "BREAKOUT_WEAK", "WATCH_A"}
 
 # 追いかけ禁止ステータス: ブレイク済みで既に手遅れ。ピボット情報はあるが
 # エントリー不可。watchlist(セットアップ形成待ち)とは意味が違うため別ティア。
@@ -277,7 +277,7 @@ def run_daily(universe_rebuild: bool = False, config: dict | None = None) -> int
                 history, code, today_str, entry_result["status"], entry_result["pivot"], stop_ref_low, config
             )
 
-            if entry_result["status"] in ("WATCH_A", "WATCH_B"):
+            if entry_result["status"] == "WATCH_A":
                 watch_count += 1
                 # 本番フォワード検証用: 枯れ度レイヤー(indicators.build_dryup_layer が
                 # 唯一の生成点。ここで再実装しない)を1行1レコードで蓄積する。

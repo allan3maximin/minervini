@@ -115,7 +115,7 @@ tests/                      pytest 247件 (test_jquants.py, test_edinetdb.py, te
    `positions_mod.build_positions_report(positions, indicator_by_code, name_by_code)` → `write_positions_json`
    (docs/data/positions.json)。try/exceptで失敗しても本体は止めない。詳細は下記「ポジション管理」節。
 9. P1銘柄のみ: VCP評価 → エントリー評価 → `score_stock` → レコード組立 + チャートJSON出力
-   - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B/EXTENDED + pivotあり) → confirmed/pool ティア
+   - actionable (BREAKOUT/BREAKOUT_WEAK/WATCH_A/EXTENDED + pivotあり) → confirmed/pool ティア
    - それ以外 → `tier_override="watchlist"` (=フロントの〔候補〕)
    - **P2〜P4は2026-07-11以降 report.jsonへ出力しない**(フロントは`priority===1||null`のP1銘柄
      しか表示しておらず受信して捨てるだけだったため、`assemble_priority_record`ごと削除。
@@ -726,8 +726,8 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
     競わせないこと**。2段目を wrap させると DU の有無で右端位置が行ごとに動き、
     3段目を折り返させると「未達: A / B / C / D」が3行に伸びてカードを支配する。
   - バッジ = `statusBadgeHtml(s)` + `fundVerdictBadgeHtml(s)` + `marginBadgeHtml(s.margin)`。
-  - `statusBadgeHtml`: `STATUS_BADGE` に一致すれば〔ブレイク〕〔ブレイク弱〕〔待機A/B〕〔追禁〕。
-    無ければ `setupStageGroupKey(s)` から〔あと一歩〕/〔形成中〕。
+  - `statusBadgeHtml`: `cardBadgeKey(s)` が返す6種類〔ブレイク〕〔ブレイク弱〕〔待機〕
+    〔あと一歩〕〔形成中〕〔追禁〕のどれか。無し(null)なら空文字。色は `BADGE_CLASS`。
   - `s.tier === "cooled"` のカードに `.sc-cooled`(opacity 0.55、hover/focusで1.0)を付ける。
     **スコアは減点しない**(理由は「ティアとフロント表示の対応」節)。
   - チャートJSON未生成(`has_chart === false`)はクリック不可。それ以外は
@@ -746,20 +746,22 @@ index.html 1ファイルのみが担当 (末尾で initDashboard / initRouter �
 - **一覧フィルタは2層 (恒久 + アドホック、AND結合)**: 恒久=設定画面、localStorage
   `minervini_list_filters`。アドホック=ボトムシート、メモリ上の `adhocListFilter`(リロードで消える)。
   両方を `stockPassesListFilter` に通し、`applyListFilter` が `{kept, excluded}` を返す。
-  - **表示ステータス (`showStatuses`) はアドホック側だけが持つ** (2026-07-27追加)。既定は
-    `defaultShownStatuses()` = `FILTER_STATUS_ORDER` から `LIST_FILTER_DEFAULT_HIDDEN_STATUSES`
-    (= EXTENDED / STALE = 追禁、および FORMING = 形成中) を除いたもの。チェックボックスは
-    `initAdhocFilter` が `FILTER_STATUS_ORDER` から動的生成する(`#alf-show-statuses`)ので、
-    ステータスを増やしてもHTML修正不要。
-  - **`FORMING`(形成中)は擬似ステータス** (2026-07-30追加)。実体は `status` ではなく
-    `setup_stage` 由来のカードバッジなので `STATUS_ORDER` には無く、**フィルタUI上だけ**
-    同列に並べる。判定は `statusVisible(s)`: `cardBadgeIsForming(s)` が真なら素の
-    `status`(REJECTED/IMMATURE/…)ではなく `FORMING` チップだけを見る。
-    - **なぜ専用トグルではなく擬似ステータスなのか**: 形成中も追禁も利用者から見れば
-      同じ「毎朝まず消したい塊」で、消し方が2箇所に分かれていると管理が破綻する。
-      1つの `showStatuses` に寄せれば既定値も差分判定も1箇所で済む。
-    - `cardBadgeIsForming` は **`statusBadgeHtml` と同じ判定順で書くこと**。ズレると
-      チップに「形成中」と書いてあるのにカードが消えない、が起きる。
+  - **表示する状態 (`showStatuses`) はアドホック側だけが持つ** (2026-07-27追加)。既定は
+    `defaultShownStatuses()` = `CARD_BADGE_KINDS` から `LIST_FILTER_DEFAULT_HIDDEN_STATUSES`
+    (= COOLED = 追禁、FORMING = 形成中) を除いたもの。チェックボックスは
+    `initAdhocFilter` が `CARD_BADGE_KINDS` から動的生成する(`#alf-show-statuses`)ので、
+    種類を増やしてもHTML修正不要。
+  - **チップの単位は「カードのバッジ」** (2026-08-13改定)。`cardBadgeKey(s)` が
+    `BREAKOUT / BREAKOUT_WEAK / WATCH / NEAR / FORMING / COOLED` の6種類に畳み、
+    `statusBadgeHtml`(表示)と `statusVisible`(フィルタ)の**両方がこの1関数を見る**。
+    チップの名前とカードの名前が構造的に一致するので、押した結果が予想できる。
+    - 旧構成では12個のチップのうち6個(ベース不合格/ベース形成中/高値更新中/ボラ過大/
+      ベース未検出/監視B)がカードにその名前で出ることが無く、判定も
+      `cardBadgeIsForming` と `statusBadgeHtml` の2箇所に分かれてズレる余地があった。
+    - EXTENDED と STALE はどちらも `COOLED`(追禁)。バッジの見た目も元から同じだったのに
+      チップだけ2個に割れていたのを1個にまとめた。区別は `title` 属性にだけ残す。
+    - `cardBadgeKey` が `null` を返す銘柄(status も進行度も無い異常データ)は**消さない**。
+      黙って消えると異常に気づけないため。
   - 実装上の注意2点: (a) ステータス絞り込みは他フィルタが未設定でも効く必要があるため、
     `applyListFilter` の早期returnより**前**で filter する。(b) 除外件数 `excluded` には
     **含めない**(含めると「フィルタでN件を除外中」バナーが常時点灯する)。同じ理由で
@@ -1101,13 +1103,13 @@ python -m src.analyze --sql "SELECT ... FROM status_latest"
 何銘柄が後日 待機A/B に上がったか」が測れない。`breadth.vcp_funnel` は日次の集計値だけなので
 これも使えない(昇格率は銘柄を跨いだ追跡)。そこで **P1全銘柄のバケットを毎日1行ずつ**記録する。
 
-バケットは `docs/assets/app.js` の `statusVisible` / `cardBadgeIsForming` /
+バケットは `docs/assets/app.js` の `statusVisible` / `cardBadgeKey` /
 `setupStageGroupKey` を**サーバ側でミラーしたもの**。定義がずれると計測が無意味になるので
 **app.js のフィルタ分岐を変えたら `stage_log.classify_bucket` も変えること**(tests/test_stage_log.py が両者の一致を担保)。
 
 | bucket | 条件 | 画面での既定 |
 |---|---|---|
-| `order` | ピボットのある BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B | 表示 |
+| `order` | ピボットのある BREAKOUT/BREAKOUT_WEAK/WATCH_A | 表示 |
 | `watch` | 同ステータスだがピボット未確定 | 表示 |
 | `cooled` | EXTENDED / STALE (追撃禁止) | 非表示 |
 | `near` | `setup_stage.near = true` (あと一歩) | 表示 |
@@ -1117,7 +1119,7 @@ python -m src.analyze --sql "SELECT ... FROM status_latest"
 
 分類の入力は `vcp_result` ではなく **`stock_records`**(フロントが実際に食う確定レコード)。
 EXTENDED/STALE の上書きは entry 評価の後に載るため、`vcp_result` から数えると
-`breadth.vcp_funnel` のように report.json と件数がずれる(実測で待機A/Bが2件ずれていた)。
+`breadth.vcp_funnel` のように report.json と件数がずれる(実測で待機が2件ずれていた)。
 `breadth.stage_funnel` はこちらから作るので画面と一致する。
 
 2026-07-29 実測 (219銘柄): order 3 / watch 4 / cooled 2 / **near 21** / forming 13 /

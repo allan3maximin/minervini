@@ -1,6 +1,6 @@
 """本番フォワード検証用 枯れ度(DRY-UP)ログ。
 
-日次パイプラインで WATCH_A/WATCH_B 銘柄の枯れ度レイヤーを1行1レコードのJSONLで
+日次パイプラインで WATCH_A 銘柄の枯れ度レイヤーを1行1レコードのJSONLで
 ``data/dryup_log.jsonl`` に追記し、後日 outcome(ブレイク成否)を解決する。米株由来の
 暫定閾値が東証で予測力を持つかを、バックテスト(src/backtest.py)とは独立に本番データで
 検証するのが目的。集計は tools/aggregate_dryup_log.py が90日窓で行う。

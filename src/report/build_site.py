@@ -50,16 +50,15 @@ STATUS_ORDER = {
     "BREAKOUT": 0,
     "BREAKOUT_WEAK": 1,
     "WATCH_A": 2,
-    "WATCH_B": 3,
-    "EXTENDED": 4,
-    "STALE": 5,  # ブレイク鮮度切れ(2026-07-21追加)。EXTENDEDと同じ追いかけ禁止枠
+    "EXTENDED": 3,
+    "STALE": 4,  # ブレイク鮮度切れ(2026-07-21追加)。EXTENDEDと同じ追いかけ禁止枠
     # Watchlist tier: trend template passed, but VCP hasn't produced an
     # actionable setup yet. Ordered roughly by "how close to a real base".
-    "REJECTED": 6,
-    "IMMATURE": 7,
-    "TOO_RECENT": 8,
-    "TOO_VOLATILE": 9,
-    "NO_BASE": 10,
+    "REJECTED": 5,
+    "IMMATURE": 6,
+    "TOO_RECENT": 7,
+    "TOO_VOLATILE": 8,
+    "NO_BASE": 9,
 }
 # ティアの序列。**2026-07-29以降、一覧の並び順には使っていない**(_sort_key は
 # total_score 単一軸になった)。ティアはバッジ表示用にレコードへ残るだけなので、
@@ -466,7 +465,7 @@ def build_setup_stage(vcp_result: dict, config: dict | None = None) -> dict | No
             "missing": [],
             "detail": "基準となる高値/ベースなし",
         }
-    return None  # WATCH_A/B・BREAKOUT等のactionableステータス
+    return None  # WATCH_A・BREAKOUT等のactionableステータス
 
 
 def attach_priority(record: dict, priority_eval: dict | None) -> dict:

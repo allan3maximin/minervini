@@ -260,13 +260,12 @@
           <label class="lf-chip"><input type="checkbox" value="グロース" checked><span>グロース</span></label>
         </div>
       </div>
-      <!-- 表示するエントリーステータス。中身は app.js initAdhocFilter が
-           FILTER_STATUS_ORDER から生成する。既定は EXTENDED/STALE (追いかけ禁止) と
-           FORMING (形成中) が off。FORMING は status ではなく setup_stage 由来の
-           擬似ステータスで、フィルタUI上だけ同列に扱う (app.js statusVisible)。 -->
+      <!-- 表示する状態。中身は app.js initAdhocFilter が CARD_BADGE_KINDS から
+           生成する。チップ1個 = カードのバッジ1種類で、名前も揃えてある
+           (app.js cardBadgeKey が両方の判定元)。既定は追禁と形成中が off。 -->
       <div class="lf-group">
         <div class="lf-group-head">
-          <span class="lf-group-title">ステータス</span>
+          <span class="lf-group-title">状態</span>
           <button type="button" class="lf-toggle-all" data-target="alf-show-statuses">全て</button>
         </div>
         <div class="lf-chips lf-chips-status" id="alf-show-statuses"></div>
@@ -669,10 +668,10 @@
         <button type="button" id="lf-apply-btn" class="primary lf-apply">適用</button>
       </div>
     </div>
-    <!-- ステータス(監視A/ブレイクアウト/伸びすぎ 等)の表示切替は、日々変わる
+    <!-- 状態(待機/ブレイク/追禁 等)の表示切替は、日々変わる
          「今日どれを見るか」の話なので恒久フィルタには置かず、リスト画面側の
          一時フィルタに集約している。ここに無いのは実装漏れではないので明記する。 -->
-    <p class="tier-note lf-foot-note"><i class="bi bi-info-circle"></i> ステータス(伸びすぎ・鮮度切れ等)の表示切替は、日々切り替える設定なので<strong>リスト画面の <i class="bi bi-funnel"></i> フィルタ</strong>にあります。</p>
+    <p class="tier-note lf-foot-note"><i class="bi bi-info-circle"></i> 状態(追禁・形成中等)の表示切替は、日々切り替える設定なので<strong>リスト画面の <i class="bi bi-funnel"></i> フィルタ</strong>にあります。</p>
   </section>
   </div>
 

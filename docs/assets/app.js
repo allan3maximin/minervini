@@ -1,9 +1,11 @@
 // エントリーステータスの日本語ラベル (src/report/summary.py の STATUS_LABELS_JA と対で保守)。
+// 2026-08-13: WATCH_B を廃止(ピボットが付かず発注できないのに「待機B」と出ていた)。
+// 落ちた銘柄は REJECTED に寄り、落ちた条件が名前で出るようになった。A/B の区別が
+// 無くなったので WATCH_A のラベルからも「A」を外す。
 const STATUS_LABELS = {
   BREAKOUT: "本日のブレイクアウト",
   BREAKOUT_WEAK: "ブレイクアウト(出来高不足)",
-  WATCH_A: "監視A(ピボット待ち)",
-  WATCH_B: "監視B(ベース形成中)",
+  WATCH_A: "待機(ピボット待ち)",
   EXTENDED: "伸びすぎ(追いかけ禁止)",
   STALE: "ブレイク鮮度切れ(追いかけ禁止)",
   REJECTED: "ベース不合格",
@@ -12,11 +14,11 @@ const STATUS_LABELS = {
   TOO_VOLATILE: "ボラ過大(VCP評価対象外)",
   NO_BASE: "ベース未検出",
 };
+// 同着のときの並び順。src/report/build_site.py の STATUS_ORDER と対で保守する。
 const STATUS_ORDER = [
   "BREAKOUT",
   "BREAKOUT_WEAK",
   "WATCH_A",
-  "WATCH_B",
   "EXTENDED",
   "STALE",
   "REJECTED",
@@ -1212,7 +1214,9 @@ function renderBreadth(breadth, report) {
 
 // 候補がベース(値固め)のどの段階にいるかの内訳。breadth.json history の各エントリの
 // vcp_funnel(pipeline -> update_breadth)に依存。origin=ok は V判定に到達した銘柄
-// (WATCH_A+WATCH_B+REJECTED)。TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
+// (WATCH_A+REJECTED)。WATCH_B は2026-08-13に廃止したが、過去の breadth.json には
+// 残っているので足し込む(消すと過去日の件数だけ減って折れ線が段差になる)。
+// TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
 // 高値追い局面→調整入りでセットアップが増える先行指標として直近60日を折れ線表示する。
 function vcpFunnelHtml(history) {
   const withFunnel = history.filter((h) => h && h.vcp_funnel);
@@ -1557,31 +1561,51 @@ function emptyListFilter() {
 // 2026-07-30: 既定の非表示に「形成中」を追加した。形成中はユニバースの大半を
 // 占めていて、毎朝のスキャンではまず消したい塊なので、既定で見えている意味が薄い。
 //
-// ただし形成中はエントリーステータス(status)ではなく、セットアップ進行度
-// (setup_stage)から導くカードバッジなので STATUS_ORDER には存在しない。
-// そこでフィルタUI上だけ擬似ステータス FORMING として並べ、showStatuses に
-// 同居させる。こうすると「消したい塊」の管理場所が1つで済み、詳細フィルタの
-// チップから出し入れもできる(専用のシンプルフィルタは不要になった)。
-const PSEUDO_STATUS_FORMING = "FORMING";
-// フィルタのチップに並べる順。形成中は待機Bの次(進行度の並び順)に置く。
-const FILTER_STATUS_ORDER = [
-  "BREAKOUT",
-  "BREAKOUT_WEAK",
-  "WATCH_A",
-  "WATCH_B",
-  PSEUDO_STATUS_FORMING,
-  "EXTENDED",
-  "STALE",
-  "REJECTED",
-  "IMMATURE",
-  "TOO_RECENT",
-  "TOO_VOLATILE",
-  "NO_BASE",
-];
-const FILTER_STATUS_LABELS = { ...STATUS_LABELS, [PSEUDO_STATUS_FORMING]: "形成中(セットアップ未成立)" };
-const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["EXTENDED", "STALE", PSEUDO_STATUS_FORMING];
+// 2026-08-13: チップの単位を「カードに出るバッジ」に揃えた。
+//
+// 以前はチップが12個あり、うち6個(ベース不合格・ベース形成中・高値更新中・
+// ボラ過大・ベース未検出・監視B)はカード側に**その名前で出ることが無かった**。
+// カードのバッジは setup_stage から「あと一歩」「形成中」の2つに畳まれるので、
+// チップの名前とカードの表示が一致しようが無い状態だった。伸びすぎと鮮度切れも
+// 同じ「追禁」バッジなのにチップだけ2個に割れていた。
+//
+// そこでチップ = バッジの6種類にする。目に見えているものだけを消せる、という
+// 対応にすれば、押した結果が予想できる。
+const CARD_BADGE_KINDS = ["BREAKOUT", "BREAKOUT_WEAK", "WATCH", "NEAR", "FORMING", "COOLED"];
+const CARD_BADGE_LABELS = {
+  BREAKOUT: "ブレイク",
+  BREAKOUT_WEAK: "ブレイク弱",
+  WATCH: "待機",
+  NEAR: "あと一歩",
+  FORMING: "形成中",
+  COOLED: "追禁",
+};
+// チップのラベルはバッジ名だけだと素っ気ないので、意味を添えて出す。
+const FILTER_STATUS_LABELS = {
+  BREAKOUT: "ブレイク(本日突破)",
+  BREAKOUT_WEAK: "ブレイク弱(出来高不足)",
+  WATCH: "待機(ピボット待ち)",
+  NEAR: "あと一歩(条件が1つだけ未達)",
+  FORMING: "形成中(セットアップ未成立)",
+  COOLED: "追禁(伸びすぎ・鮮度切れ)",
+};
+
+// カードのどのバッジになるかを返す。statusBadgeHtml と statusVisible の両方が
+// これ1本を見る(2つに分かれていた頃はフィルタと表示がズレる余地があった)。
+function cardBadgeKey(s) {
+  if (s.status === "BREAKOUT") return "BREAKOUT";
+  if (s.status === "BREAKOUT_WEAK") return "BREAKOUT_WEAK";
+  if (s.status === "WATCH_A" || s.status === "WATCH_B") return "WATCH"; // WATCH_Bは旧データ互換
+  if (s.status === "EXTENDED" || s.status === "STALE") return "COOLED";
+  const g = setupStageGroupKey(s);
+  if (g === "near") return "NEAR";
+  if (g) return "FORMING";
+  return null; // バッジ無し = チップの対象外。黙って消さない(消えたら気づけない)
+}
+
+const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["COOLED", "FORMING"];
 function defaultShownStatuses() {
-  return FILTER_STATUS_ORDER.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
+  return CARD_BADGE_KINDS.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
 }
 
 // 既定(追いかけ禁止と形成中が非表示)から変えられているか。既定のままなら
@@ -1806,12 +1830,12 @@ function initAdhocFilter() {
   const segWrap = document.getElementById("alf-show-segments");
   const statWrap = document.getElementById("alf-show-statuses");
 
-  // ステータスのチェックボックスは FILTER_STATUS_ORDER から動的生成する
-  // (ステータスを増やしたときにHTML側の追記漏れが起きないように)。
-  // 擬似ステータスの FORMING(形成中)もここに混ざる。
+  // 状態のチェックボックスは CARD_BADGE_KINDS から動的生成する
+  // (種類を増やしたときにHTML側の追記漏れが起きないように)。
+  // チップ = カードのバッジなので、押した結果が見た目と一致する。
   if (statWrap && !statWrap.dataset.built) {
     statWrap.dataset.built = "1";
-    statWrap.innerHTML = FILTER_STATUS_ORDER.map(
+    statWrap.innerHTML = CARD_BADGE_KINDS.map(
       (st) =>
         `<label class="lf-chip"><input type="checkbox" value="${st}"><span>${escapeHtml(FILTER_STATUS_LABELS[st] || st)}</span></label>`
     ).join("");
@@ -1967,22 +1991,12 @@ function shownStatuses() {
   return (adhocListFilter && adhocListFilter.showStatuses) || defaultShownStatuses();
 }
 
-// カードの状態バッジが「形成中」になる銘柄か。statusBadgeHtml と同じ判定順で
-// 書く(あちらを変えたらこちらも変える。ズレるとフィルタと表示が食い違う)。
-function cardBadgeIsForming(s) {
-  if (STATUS_BADGE[s.status]) return false;
-  const g = setupStageGroupKey(s);
-  return !!g && g !== "near";
-}
-
-// ステータスチップによる表示判定。カードに「形成中」バッジが出る銘柄は、
-// 素の status(REJECTED/IMMATURE/…)ではなく擬似ステータス FORMING のチップで
-// 出し入れする。フィルタの見出しとカードの見た目を一致させるため
-// (チップに「形成中」と書いてあるのに消えない、を避ける)。
+// チップによる表示判定。チップとバッジは同じ cardBadgeKey を見るので、
+// 「チップに書いてある名前」と「カードに出ている名前」が必ず一致する。
+// バッジが付かない銘柄(status も進行度も無い異常データ)は消さずに残す。
 function statusVisible(s) {
-  const shown = shownStatuses();
-  if (cardBadgeIsForming(s)) return shown.includes(PSEUDO_STATUS_FORMING);
-  return s.status == null || shown.includes(s.status);
+  const k = cardBadgeKey(s);
+  return k == null || shownStatuses().includes(k);
 }
 
 function applyListFilter(stocks) {
@@ -2220,28 +2234,23 @@ function changePctHtml(s) {
 
 // 状態バッジ(2026-07-29)。ステータス/セットアップ進行度を1個のバッジに畳む。
 // スコアには一切入らない情報なので、順位ではなくバッジで示すのが役割分担。
-// 追いかけ禁止(EXTENDED/STALE)は「追禁」。
-const STATUS_BADGE = {
-  BREAKOUT: { text: "ブレイク", cls: "sc-badge-breakout" },
-  BREAKOUT_WEAK: { text: "ブレイク弱", cls: "sc-badge-breakout-weak" },
-  WATCH_A: { text: "待機A", cls: "sc-badge-watch" },
-  WATCH_B: { text: "待機B", cls: "sc-badge-watch" },
-  EXTENDED: { text: "追禁", cls: "sc-badge-cooled" },
-  STALE: { text: "追禁", cls: "sc-badge-cooled" },
+// 種類は cardBadgeKey が決める。ここは見た目(色)を割り当てるだけ。
+// 伸びすぎと鮮度切れはどちらも「追禁」で、区別はマウスを乗せた説明にだけ残る。
+const BADGE_CLASS = {
+  BREAKOUT: "sc-badge-breakout",
+  BREAKOUT_WEAK: "sc-badge-breakout-weak",
+  WATCH: "sc-badge-watch",
+  NEAR: "sc-badge-near",
+  FORMING: "sc-badge-forming",
+  COOLED: "sc-badge-cooled",
 };
 
 function statusBadgeHtml(s) {
-  const meta = STATUS_BADGE[s.status];
-  if (meta) {
-    const title = STATUS_LABELS[s.status] || s.status;
-    return `<span class="sc-badge ${meta.cls}" title="${escapeHtml(title)}">${meta.text}</span>`;
-  }
-  // VCPセットアップ未成立(旧・監視ティア)。進行度が付いていれば「あと一歩」だけ
-  // 別バッジにして、それ以外は一括で「形成中」。詳細な不足理由は3段目に出す。
-  const g = setupStageGroupKey(s);
-  if (g === "near") return `<span class="sc-badge sc-badge-near" title="あと一歩">あと一歩</span>`;
-  if (g) return `<span class="sc-badge sc-badge-forming" title="セットアップ形成中">形成中</span>`;
-  return "";
+  const k = cardBadgeKey(s);
+  if (!k) return "";
+  // 説明文は素のステータスがあればそちらを優先(伸びすぎ/鮮度切れを区別できる)。
+  const title = STATUS_LABELS[s.status] || FILTER_STATUS_LABELS[k] || k;
+  return `<span class="sc-badge ${BADGE_CLASS[k]}" title="${escapeHtml(title)}">${CARD_BADGE_LABELS[k]}</span>`;
 }
 
 // 決算をまたぐエントリーは、値動きの理由がチャートの外にある別種のリスク。個別画面には
@@ -3639,7 +3648,7 @@ function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, ind
 // エントリーステータスのうち「今日エントリー判断ができる」アクション対象。
 // バックエンドの pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
 // EXTENDED(伸びすぎ)と STALE(鮮度切れ)は追いかけ禁止なので除外。
-const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B"]);
+const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A"]);
 
 // ピックアップ銘柄の一覧テーブル(市場サマリー用の共通フォーマット)。
 function reviewStockTable(stocks, limit) {

@@ -23,8 +23,7 @@ from src.screener.trend_template import quarter_sort_key
 STATUS_LABELS_JA = {
     "BREAKOUT": "本日のブレイクアウト",
     "BREAKOUT_WEAK": "ブレイクアウト(出来高不足)",
-    "WATCH_A": "監視A(ピボット待ち)",
-    "WATCH_B": "監視B(ベース形成中)",
+    "WATCH_A": "待機(ピボット待ち)",
     "EXTENDED": "伸びすぎ(追いかけ禁止)",
     "STALE": "ブレイク鮮度切れ(追いかけ禁止)",
     "REJECTED": "ベース不合格",
@@ -240,13 +239,6 @@ def _build_headline(record: dict, config: dict) -> str:
                 f"逆指値{_num(record.get('buy_stop'))}円・損切り{_num(record.get('stop_loss'))}円"
                 f"(リスク{_num(record.get('risk_pct'), 1)}%)でブレイクアウト待ち。")
 
-    if status == "WATCH_B":
-        flags = (record.get("must_flags") or {}).get("vcp") or {}
-        labels = _vcp_fail_labels(config)
-        unmet = [labels[k] for k, v in flags.items() if v is False]
-        detail = f" 残る課題: {'、'.join(unmet)}。" if unmet else ""
-        return f"ベースは有効、仕上がり待ち。{detail}"
-
     if status == "EXTENDED":
         ext = config["entry"]["extended_pct"] * 100
         return f"ピボットから{ext:.0f}%超上放れており追いかけ買いは禁止。次のベース形成まで待機。"
@@ -313,7 +305,7 @@ def build_stock_summary(
 
     headline = _build_headline(record, config)
     if record.get("new_breakout_today"):
-        points.append("昨日まで監視A → 本日新規ブレイクアウト。")
+        points.append("昨日まで待機 → 本日新規ブレイクアウト。")
     if record.get("market_guard_warning"):
         cautions.append("TOPIX急落日のブレイクアウト(マーケットガード発動)。見送り推奨。")
 

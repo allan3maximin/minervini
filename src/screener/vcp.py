@@ -547,12 +547,19 @@ def check_vcp_must_conditions(
 
 
 def vcp_status(flags: dict[str, bool]) -> str:
+    """V1〜V7 の合否から VCP のステータスを決める。返すのは2つだけ。
+
+    2026-08-13まで、V1/V3/V6/V7 だけ通った銘柄に WATCH_B を返していた。
+    ただし entry.evaluate_entry がピボットを付けるのは WATCH_A のときだけで、
+    WATCH_B にはピボットが付かない=発注できない。画面には「待機B」と出るのに
+    買う値段が無い、という状態だった。REJECTED に寄せれば build_setup_stage が
+    「VCP未達: V4」のように落ちた条件を名指しで出し、1つだけ落ちた銘柄は
+    「あと一歩」に上がる。表示できる中身は増える。
+    """
     if not flags["V3"] or not flags["V7"]:
         return "REJECTED"
     if all(flags.values()):
         return "WATCH_A"
-    if flags["V1"] and flags["V3"] and flags["V6"] and flags["V7"]:
-        return "WATCH_B"
     return "REJECTED"
 
 
@@ -763,7 +770,7 @@ def evaluate_vcp(df: pd.DataFrame, config: dict | None = None) -> dict:
         "vcp_diagnostics": diagnostics,
     }
 
-    if status in ("WATCH_A", "WATCH_B"):
+    if status == "WATCH_A":
         score = vcp_quality_score(contractions, base_days, base_df, config, diagnostics=diagnostics)
         result.update(score)
     else:

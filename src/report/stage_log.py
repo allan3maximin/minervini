@@ -18,11 +18,11 @@
 
 ## バケット定義
 
-docs/assets/app.js の statusVisible / cardBadgeIsForming / setupStageGroupKey と
+docs/assets/app.js の statusVisible / cardBadgeKey / setupStageGroupKey と
 **同じ分岐をサーバ側で再現している**。フロントと定義がずれたら計測の意味が無い
 ので、app.js 側を変えたらここも変えること。
 
-    order    ピボットのある BREAKOUT/BREAKOUT_WEAK/WATCH_A/WATCH_B (=発注可能)
+    order    ピボットのある BREAKOUT/BREAKOUT_WEAK/WATCH_A (=発注可能)
     watch    上記だがピボット未確定
     cooled   EXTENDED / STALE (追撃禁止)
     near     setup_stage.near = true (あと一歩)
@@ -41,8 +41,9 @@ from src.config import REPO_ROOT
 STAGE_HISTORY_JSONL = REPO_ROOT / "data" / "history" / "stage.jsonl"
 STAGE_HISTORY_KEY = ("code", "date")
 
-# app.js の STATUS_BADGE と同じ集合。ここに入る status は setup_stage を見ない。
-ENTRY_STATUSES = ("BREAKOUT", "BREAKOUT_WEAK", "WATCH_A", "WATCH_B")
+# app.js の cardBadgeKey が status だけで決める集合。ここに入る status は
+# setup_stage を見ない。
+ENTRY_STATUSES = ("BREAKOUT", "BREAKOUT_WEAK", "WATCH_A")
 COOLED_STATUSES = ("EXTENDED", "STALE")
 
 BUCKETS = (

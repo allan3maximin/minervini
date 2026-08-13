@@ -111,6 +111,7 @@ class Book:
         self.lr = B["lr"].to_numpy(dtype=np.float64)         # 終値/52週安値
         self.ma200sl = B["ma200sl"].to_numpy(dtype=np.float64)
         self.dryup = B["dryup"].to_numpy(dtype=np.float64)   # 直近10日出来高中央値/50日平均
+        self.bo_gap = B["bo_gap"].to_numpy(dtype=np.float64) # ブレイク日のピボット超過
 
         # parquet 側の数字(自己検算用)
         self.mae_pq = B["mae"].to_numpy(dtype=np.float64)
@@ -698,6 +699,11 @@ def rankers(bk: Book) -> list[tuple[str, np.ndarray]]:
         ("200日線の傾き順", -bk.ma200sl),
         ("RSが高い順", -bk.rs),
         ("52週安値比が高い順", -bk.lr),
+        # 画面の「前日比」ボタン相当。前日比そのものは parquet に無いので、
+        # ブレイク日にピボットをどれだけ超えたか(bo_gap)で代用する。
+        # 「その日いちばん動いた銘柄から取る」= 追いかける向きなので、
+        # A-1(ピボットに近い順)のちょうど裏になるはず。それを確かめる。
+        ("前日比が大きい順(代用)", -bk.bo_gap),
     ]
 
 

@@ -74,7 +74,7 @@ def test_market_guard_triggered():
 
 def test_status_history_locked_pivot_and_new_breakout_detection():
     history: dict = {}
-    history = record_status(history, "7134", "2026-06-25", "WATCH_B", None, None, CONFIG)
+    history = record_status(history, "7134", "2026-06-25", "REJECTED", None, None, CONFIG)
     history = record_status(history, "7134", "2026-06-26", "WATCH_A", 1280.0, 1210.0, CONFIG)
 
     # Before appending today's entry: yesterday was WATCH_A, today is BREAKOUT
