@@ -32,6 +32,11 @@ data/prices_long/
 # 消しても --stage build からやり直せば再生成できる。
 data/audit_cache/
 
+# 型1(短期売られすぎリバウンド)の中間行列 (2026-08-19〜)。
+# tools/meanrev/run.py --stage build が作る。上と同じく日付×銘柄の密行列で
+# 合計600MB級。消しても build からやり直せば再生成できる。
+data/mr_cache/
+
 # stage.jsonl backfill の中間状態 (2026-07-30〜)。
 # scripts/backfill_stage_history.py の prepare が作る指標フレームの pickle
 # (1579銘柄×460本で百MB級) と、replay の進捗・合成 status_history。
