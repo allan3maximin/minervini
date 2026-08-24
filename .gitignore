@@ -58,3 +58,7 @@ audit27.txt
 # 復号済みの生成物 (2026-07-29〜)。tools/pull_site_data.py が gh-pages から
 # 取ってきて復号したもの。暗号化の意味が消えるので master には絶対に載せない。
 data/plain/
+
+# J-Quants から生のまま落としたデータ (2026-08-24〜)。tools/event/fetch_jq.py --pull
+# が作る。有料プラン1ヶ月ぶんで数百MB〜GB級になるので載せない。消しても再取得できる。
+data/raw/
