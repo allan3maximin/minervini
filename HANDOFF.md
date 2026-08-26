@@ -54,6 +54,15 @@ src/
     summary.py              個別銘柄のルールベース日本語サマリー生成 (LLM不使用。status/VCP詳細/ファンダ/地合いの言語化を
                             {headline, points, cautions} で report.json の各銘柄 "summary" に格納。app.jsの
                             renderStockSummaryが個別銘柄画面の先頭に描画。STATUS_LABELS_JAはapp.jsのSTATUS_LABELSと対で保守。2026-07-12追加)
+  deepdive/                 深掘り銘柄分析ツール。独立CLI (python -m src.deepdive)、日次パイプラインからは
+                            呼ばれない完全に別系統。詳細は §15。
+    store.py                レコード読み書き + R1〜R4規律ルール (predict/actual/note/ver の検証・書き込み)
+    jq_raw.py                J-Quants生データ取得 → data/deepdive/raw/{code}.jsonl (gitignore対象)
+    metrics.py               進捗率・ガイダンス乖離・PERパーセンタイル等の純関数群
+    prep.py                  Aレイヤ生成 (build_a_layer)。長期株価/TOPIX代用(1306)ロードもここ
+    sheet.py                 Aレイヤ dict → Markdown準備シートへの整形 (純関数フォーマッタ)
+    outcome.py               実績の紐付け・的中判定 (dir_hit/level_err_pct/ret_next_day/ret_5d) + 成績集計 (score)
+    cli.py                   watch/fetch/prep/predict/actual/note/ver/score/calendar 各サブコマンド
 docs/                       GitHub Pages ルート
   index.html                1ページSPA (2026-07-08〜): view-dashboard/view-sectormap/view-invest/view-positions/view-batch/view-stock の
                             6セクション+下部Dockナビ(#dock-nav)。表示切替は location.hash ベース(app.jsのshowView/initRouter)。
@@ -88,6 +97,11 @@ data/                       中間データ (universe.json, prices/*.parquet, in
                             sector_map.json,
                             trend_template_debug.json, ※J-Quants実行後: fundamentals_auto.json, jquants_state.json,
                             ※EDINET DB実行後: edinetdb_auto.json, edinetdb_state.json)
+data/deepdive/               深掘りツール専用データ。他パイプラインとは完全独立、git管理対象(raw/以外)。詳細は §15
+                            (watchlist.jsonl, predictions.jsonl, actuals.jsonl, outcomes.jsonl, notes.jsonl,
+                            model_versions.jsonl ← いずれも history_store 形式の追記専用JSONL,
+                            prep/{code}_{quarter}.md ← Aレイヤ準備シート,
+                            raw/{code}.jsonl ← J-Quants生データキャッシュ。.gitignore対象)
 src/history_store.py        追記専用JSONLの読み書き基盤 (append_records / load_deduped / compact)
 src/analyze.py              履歴JSONLをDuckDBでSQL分析するCLI (--list / --preset / --sql)
 scripts/migrate_history_to_jsonl.py  旧履歴JSON → JSONL への一括変換 (冪等・--dry-run あり)
@@ -1348,3 +1362,69 @@ data/prices/ の520営業日分の日足キャッシュを使ったイベント�
 - [ ] `git fetch` して origin との乖離を確認したか (botが毎日コミットする)
 - [ ] push はユーザーに依頼したか
 - [ ] UI文言に P1/P2/P3/P4 という語を新たに出していないか (概念はUI廃止済み)
+
+## 15. 深掘り銘柄分析ツール (src/deepdive/)
+
+2026-08 追加。ウォッチ中の少数銘柄(2〜5)を決算のたびに深掘りするための**完全に独立した CLI**。
+`DESIGN_DEEPDIVE.md` が仕様の一次情報源(716行、実装前に全部読むこと)。
+
+**日次パイプラインからは独立している。** `src/pipeline.py` からは一切呼ばれず、`src/deepdive/` も
+`src/pipeline.py` を一切importしない。GitHub Actionsのdaily.ymlにも組み込まれていない。
+実行は手動 (`python -m src.deepdive <サブコマンド>`)。壊れてもスクリーナー本体には影響しない。
+
+### 構成
+
+- `store.py` — レコードの読み書きと規律ルール(R1〜R4・UC-1)。
+  - R1: 発表当日中に書いた予想でも記入日が発表日以降なら `valid: false`(削除はしない。集計側で除外)
+  - R2: `predictions.jsonl` は `(ticker, quarter, model_ver)` で一度書いたら書き換え不可
+  - R3: `model_versions.jsonl` は既存 `ver` への再追加を拒否(ロジック変更の遡及禁止)
+  - R4: 削除コマンドをどの階層にも作らない(`delete`/`rm` 系サブコマンド無し)
+  - UC-1: `watch add` は `drivers`/`break_conditions` が空だと拒否(適性判定を兼ねる)
+- `jq_raw.py` — J-Quants生データ取得 → `data/deepdive/raw/{code}.jsonl`
+- `metrics.py` — 進捗率・ガイダンス乖離・PERパーセンタイル等の純関数
+- `prep.py` — Aレイヤ生成(`build_a_layer`)。長期株価/TOPIX代用(`jp_1306`)ロードもここ
+- `sheet.py` — Aレイヤ dict → Markdown準備シートへの整形(純関数フォーマッタ)
+- `outcome.py` — 実績の紐付けと的中判定(`dir_hit`/`level_err_pct`/`ret_next_day`/`ret_5d`)、成績集計(`score`)
+- `cli.py` — `watch add/list` / `fetch` / `prep` / `predict` / `actual` / `note` / `ver add` / `score` / `calendar`
+
+### `load_first_wins` は `load_deduped` の**真逆**
+
+`src/history_store.py :: load_deduped` は「後勝ち」(同一キーの最新行を採用)で、日次パイプラインの
+履歴データ(status.jsonl等)全般で使う標準動作。対して `store.py :: load_first_wins` は
+「**初出勝ち**」で、`predictions.jsonl` と `model_versions.jsonl` にだけ使う。
+
+理由: 予想は「発表後に書き換えない」という規律(R2/R3)が本ツールの存在意義そのものであり、
+これが崩れると「当たった予想」を後から作文できてしまう。ファイルを直接エディタで編集して
+同一キーの行を複数追加されても、`load_first_wins` なら最初の行だけが「記録された予想」として
+扱われる — 規律ルールの最後の砦。取り違えて `load_deduped` を使うと、この防御が丸ごと無効になる。
+
+### 出せない指標とその理由(再調査させないための記録)
+
+J-Quants Free プランは「12週間前 〜 2年12週間前」しか返さない**契約上の制限**であり、
+保存側の切り詰めではないのでコードでは直せない(Premiumに上げれば18年分取れる)。
+これに伴い、以下は構造的に出せない・出さない:
+
+- **PBR / EV/EBITDA** — 純資産・有利子負債・現金・減価償却を取得していないため(恒久。取得元を
+  増やさない限り直らない)
+- **PER の5年レンジ** — 株価は5年取れるが EPS が2年しかないため、5年レンジは作れない。
+  2年レンジ(またはその時点で取れる実期間)で代用し、`n=` を出力に明記する
+- **過去5期の期初予想→着地乖離率・過去3期の同時点進捗率** — 同じ2年制限で概ね1〜2期しか
+  取れない。取れる範囲を出し、件数(n)を必ず併記する。n<3なら中央値を出さず全値を並べる
+- **配当利回りの5年レンジ** — 唯一5年で出せる(配当・株価はどちらも5年取れるため)
+- **月次(既存店前年比)** — 自動化の対象外。手入力
+
+出せない項目は欄自体を作らず、準備シート末尾の「この期に出せなかったもの」節に理由を1行ずつ書く
+(空欄を毎回見せて「そこに何かあるはず」と期待させないため)。
+
+### `data/deepdive/` の git 管理
+
+`watchlist.jsonl` / `predictions.jsonl` / `actuals.jsonl` / `outcomes.jsonl` / `notes.jsonl` /
+`model_versions.jsonl` / `prep/*.md` は git 管理下(記録そのものに価値があるため)。
+`raw/{code}.jsonl`(J-Quants生データキャッシュ)だけ `.gitignore` 対象 — 取得し直せば再現できるため。
+
+### 成績集計の設計原則
+
+`score()` の出力・`format_score()` のテキストに信頼区間や有意差の表現を**入れないこと**。
+年4回×2〜5銘柄では統計的な結論は出ない。このツールが記録するのは「当たった/外れた」であって
+「有意に当たる」ではない(n は永遠に足りない)。`valid: false` の予想は集計から除外するが、
+除外件数は必ず表示する(無効票が増えているのは規律が緩んでいる兆候のため)。

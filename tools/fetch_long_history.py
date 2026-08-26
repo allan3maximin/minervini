@@ -95,6 +95,7 @@ from src.config import load_config  # noqa: E402
 from src.data.prices import fetch_yfinance_chunk  # noqa: E402
 
 LONG_DIR = ROOT / "data" / "prices_long"
+ASSET_DIR = ROOT / "data" / "prices_asset"
 LIVE_DIR = ROOT / "data" / "prices"
 MANIFEST_PATH = LONG_DIR / "_manifest.json"
 FETCHLOG_PATH = LONG_DIR / "_fetchlog.json"
@@ -135,6 +136,174 @@ JPX_DOMESTIC_YEAR_END = {
     2024: 3975 - 133 - 6,
     2025: 3945 - 163 - 5,
 }
+
+
+# ---------------------------------------------------------------------------
+# 指数・ETF (資産配分/積立の検証用)   2026-08-22 追加
+# ---------------------------------------------------------------------------
+# 日本株の個別銘柄とは保存先を分ける (`data/prices_asset/`)。
+# 理由: `data/prices_long/` は「日本の個別株だけ」という前提で
+# 生存バイアスの集計 (--survivorship-report) や履歴開始日の分布
+# (--coverage-report) が全ファイルを舐めている。ここに指数を混ぜると
+# それらの数字が静かに壊れる。
+#
+# ★配当の扱いが対象によって違う。ここが一番の落とし穴★
+# yfinance は auto_adjust=True で「分割 + 配当」を調整するが、それが効くのは
+# **ETFや個別株**だけ。**指数(^で始まるもの)は配当が入らない値段だけの指数**で、
+# いくら調整しても配当は乗らない。積立の検証で配当を落とすと年利が2%近く
+# 目減りするので、下の表では対象ごとに tr(配当込みか) を明示している。
+#   tr=True  … 配当込みで使える
+#   tr=False … 値段だけ。単独で年利を語ってはいけない
+ASSET_TICKERS: dict[str, dict] = {
+    # --- 指数(歴史が長い。検証はこちらでやる) ---
+    "idx_sp500_tr":   {"t": "^SP500TR", "tr": True,  "note": "S&P500 配当込み指数 (1988〜)"},
+    "idx_sp500":      {"t": "^GSPC",    "tr": False, "note": "S&P500 値段だけ (1927〜)"},
+    "idx_nikkei225":  {"t": "^N225",    "tr": False, "note": "日経平均 値段だけ (1965〜)"},
+    "idx_topix":      {"t": "^TPX",     "tr": False, "note": "TOPIX 値段だけ。取れないことがある"},
+    "idx_nasdaq100":  {"t": "^NDX",     "tr": False, "note": "NASDAQ100 値段だけ"},
+    "idx_us10y":      {"t": "^TNX",     "tr": False, "note": "米10年金利。価格ではなく利回り(%)"},
+    "fx_usdjpy":      {"t": "JPY=X",    "tr": False, "note": "ドル円。為替なので配当の概念なし"},
+    # --- 米国ETF(配当込みで長い。実質これが検証本体になる) ---
+    "us_acwi":        {"t": "ACWI", "tr": True, "note": "全世界株 (2008〜)"},
+    "us_vt":          {"t": "VT",   "tr": True, "note": "全世界株 (2008〜)"},
+    "us_spy":         {"t": "SPY",  "tr": True, "note": "S&P500 (1993〜)"},
+    "us_agg":         {"t": "AGG",  "tr": True, "note": "米国総合債券 (2003〜)"},
+    "us_ief":         {"t": "IEF",  "tr": True, "note": "米国債7-10年 (2002〜)"},
+    "us_tlt":         {"t": "TLT",  "tr": True, "note": "米国債20年超 (2002〜)"},
+    "us_gld":         {"t": "GLD",  "tr": True, "note": "金 (2004〜)"},
+    "us_vnq":         {"t": "VNQ",  "tr": True, "note": "米国REIT (2004〜)"},
+    "us_ewj":         {"t": "EWJ",  "tr": True, "note": "日本株(ドル建て) (1996〜) 配当込みの日本株として使える"},
+    # --- 国内ETF(実装手段。歴史が短い。「実際に建てられるか」の確認用) ---
+    "jp_1306":        {"t": "1306.T", "tr": True, "note": "TOPIX (2001〜) 配当込みの日本株として一番長い"},
+    "jp_1330":        {"t": "1330.T", "tr": True, "note": "日経225 (2001〜)"},
+    "jp_1655":        {"t": "1655.T", "tr": True, "note": "S&P500 (2017〜)"},
+    "jp_1657":        {"t": "1657.T", "tr": True, "note": "先進国株 (2017〜)"},
+    "jp_2558":        {"t": "2558.T", "tr": True, "note": "S&P500 円建て (2019〜)"},
+    "jp_2559":        {"t": "2559.T", "tr": True, "note": "全世界株 (2019〜)"},
+    "jp_1540":        {"t": "1540.T", "tr": True, "note": "金 現物 (2010〜)"},
+    "jp_1343":        {"t": "1343.T", "tr": True, "note": "J-REIT (2008〜)"},
+    "jp_1656":        {"t": "1656.T", "tr": True, "note": "米国債7-10年 (2017〜)"},
+    "jp_2510":        {"t": "2510.T", "tr": True, "note": "国内債 総合 (2017〜)"},
+    "jp_2511":        {"t": "2511.T", "tr": True, "note": "外国債 (2017〜)"},
+    "jp_1489":        {"t": "1489.T", "tr": True, "note": "日経高配当50 (2017〜)"},
+    "jp_1478":        {"t": "1478.T", "tr": True, "note": "MSCI日本高配当 (2015〜)"},
+    "jp_1570":        {"t": "1570.T", "tr": True, "note": "日経レバ (2012〜) ★NISA成長投資枠の対象外★"},
+}
+
+
+def parse_tickers_arg(spec: str) -> dict[str, dict]:
+    """`--tickers` の文字列を表に変換する。
+
+    書き方:  alias=TICKER,alias2=TICKER2   例) sp=^GSPC,gold=GLD
+    alias を省いてティッカーだけ書いてもよい (`^GSPC,GLD`)。その場合は
+    ファイル名に使えない文字を落としたものが alias になる。
+    """
+    out: dict[str, dict] = {}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            alias, ticker = part.split("=", 1)
+            alias, ticker = alias.strip(), ticker.strip()
+        else:
+            ticker = part
+            alias = "".join(ch for ch in ticker if ch.isalnum() or ch in "_-").lower()
+        if not alias or not ticker:
+            raise ValueError(f"--tickers の書き方が不正: {part!r}")
+        out[alias] = {"t": ticker, "tr": None, "note": "コマンドラインで指定"}
+    return out
+
+
+def asset_path(alias: str) -> Path:
+    return ASSET_DIR / f"{alias}.parquet"
+
+
+def run_fetch_assets(args, config: dict) -> None:
+    """指数・ETFを `data/prices_asset/` に取る。"""
+    if args.tickers:
+        table = parse_tickers_arg(args.tickers)
+    else:
+        table = dict(ASSET_TICKERS)
+        if args.asset_group:
+            pref = tuple(g.strip() + "_" for g in args.asset_group.split(","))
+            table = {k: v for k, v in table.items() if k.startswith(pref)}
+    if not table:
+        print("対象が空。--asset-group の指定を確認する (idx / fx / us / jp)。")
+        return
+
+    aliases = list(table)
+    todo = aliases if args.force else [a for a in aliases if not asset_path(a).exists()]
+    print(f"取得開始日 {args.start}")
+    print(f"対象 {len(aliases)} 本 / 取得対象 {len(todo)} / スキップ済 {len(aliases) - len(todo)}")
+    if not todo:
+        print("取得するものがない。--force で強制再取得。")
+        return
+
+    data_cfg = config["data"]
+    chunk_size = int(data_cfg.get("chunk_size", 50))
+    sleep_lo, sleep_hi = data_cfg.get("sleep_range", [2.0, 4.0])
+
+    ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    ok = fail = 0
+    failed: list[str] = []
+    meta: dict[str, dict] = {}
+    metapath = ASSET_DIR / "_manifest.json"
+    if metapath.exists():
+        try:
+            meta = json.loads(metapath.read_text(encoding="utf-8")).get("entries", {})
+        except Exception:
+            meta = {}
+
+    for i in range(0, len(todo), chunk_size):
+        chunk = todo[i : i + chunk_size]
+        tickers = [table[a]["t"] for a in chunk]
+        fetched = fetch_yfinance_chunk(tickers, start=args.start, period=None, config=config)
+        for alias, ticker in zip(chunk, tickers):
+            df = fetched.get(ticker)
+            if df is None or df.empty:
+                fail += 1
+                failed.append(f"{alias}({ticker})")
+                continue
+            df = df.copy()
+            df["date"] = pd.to_datetime(df["date"])
+            if getattr(df["date"].dtype, "tz", None) is not None:
+                df["date"] = df["date"].dt.tz_localize(None)
+            keep = [c for c in OHLCV if c in df.columns]
+            df = (
+                df[keep].dropna(subset=["close"]).drop_duplicates(subset=["date"])
+                .sort_values("date").reset_index(drop=True)
+            )
+            if df.empty:
+                fail += 1
+                failed.append(f"{alias}({ticker})")
+                continue
+            df.to_parquet(asset_path(alias), index=False)
+            ok += 1
+            meta[alias] = {
+                "ticker": ticker,
+                "total_return": table[alias].get("tr"),
+                "note": table[alias].get("note", ""),
+                "first": df["date"].min().strftime("%Y-%m-%d"),
+                "last": df["date"].max().strftime("%Y-%m-%d"),
+                "rows": len(df),
+            }
+            print(f"  {alias:16s} {ticker:10s} {meta[alias]['first']}〜{meta[alias]['last']} {len(df):,}行", flush=True)
+        metapath.write_text(
+            json.dumps(
+                {"generated_at": datetime.now().astimezone().isoformat(),
+                 "requested_start": args.start, "entries": meta},
+                ensure_ascii=False, indent=1,
+            ),
+            encoding="utf-8",
+        )
+        if i + chunk_size < len(todo):
+            time.sleep(random.uniform(sleep_lo, sleep_hi))
+
+    print(f"\n完了: 成功 {ok} / 失敗 {fail}  → data/prices_asset/")
+    if failed:
+        print(f"失敗: {failed}")
+        print("※ Yahoo に無いティッカー(^TPX など)は取れないことがある。代わりが表の note にある。")
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +404,11 @@ def save_long(code: str, df: pd.DataFrame) -> int:
 
 def run_fetch(args, config: dict) -> None:
     start = pd.Timestamp(args.start)
-    codes = load_codes(args.codes)
+    codes = (
+        [c.strip() for c in args.only.split(",") if c.strip()]
+        if getattr(args, "only", "")
+        else load_codes(args.codes)
+    )
     if args.limit:
         codes = codes[: args.limit]
 
@@ -533,13 +706,32 @@ def main() -> None:
     ap.add_argument("--start", default="2000-01-01", help="取得開始日 (既定 2000-01-01)")
     ap.add_argument("--codes", choices=["all", "universe"], default="all",
                     help="all=sector_map.jsonの全候補(既定) / universe=universe.jsonの1000銘柄")
+    ap.add_argument("--only", default="",
+                    help="カンマ区切りの銘柄コードだけ取る(指定時は --codes を無視。deepdive 用)")
     ap.add_argument("--limit", type=int, default=0, help="先頭N銘柄だけ(動作確認用)")
     ap.add_argument("--force", action="store_true", help="既存ファイルも再取得")
     ap.add_argument("--verify", action="store_true", help="運用キャッシュとの突合のみ実行")
     ap.add_argument("--survivorship-report", action="store_true", help="年別の標本銘柄数のみ出力")
     ap.add_argument("--coverage-report", action="store_true", help="履歴開始日の分布のみ出力")
     ap.add_argument("--manifest-only", action="store_true", help="マニフェスト再生成のみ")
+    ap.add_argument("--assets", action="store_true",
+                    help="日本の個別株ではなく、指数・ETFを data/prices_asset/ に取る")
+    ap.add_argument("--asset-group", default="",
+                    help="--assets の絞り込み。idx=指数 / fx=為替 / us=米国ETF / jp=国内ETF (カンマ区切り)")
+    ap.add_argument("--tickers", default="",
+                    help="任意のティッカーを取る。書き方 alias=TICKER,alias2=TICKER2 (--assets と併用)")
+    ap.add_argument("--list-assets", action="store_true", help="指数・ETFの表を出すだけ")
     args = ap.parse_args()
+
+    if args.list_assets:
+        print(f"{'別名':16s} {'ティッカー':10s} {'配当込み':6s} 説明")
+        for alias, spec in ASSET_TICKERS.items():
+            tr = "はい" if spec["tr"] else "いいえ"
+            print(f"{alias:16s} {spec['t']:10s} {tr:6s} {spec['note']}")
+        return
+    if args.assets or args.tickers:
+        run_fetch_assets(args, load_config())
+        return
 
     if args.verify:
         run_verify(args)

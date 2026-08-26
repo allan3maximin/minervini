@@ -294,3 +294,13 @@ margin:
   high_ratio_warn: 5.0    # 信用倍率これ以上で「買い長」注意
   dtc_warn: 3.0           # days_to_cover これ以上で「買残重い」注意
   low_ratio_info: 1.0     # これ以下で「売り長」(踏み上げ余地)表示
+
+# 深掘り銘柄分析ツール (src/deepdive/)。日次パイプラインからは呼ばれない。
+deepdive:
+  enabled: true
+  tickers: ["7134", "7611"]       # watchlist.jsonl が正。ここは fetch の既定対象
+  valuation_lookback_years: 5     # 取れなければ取れるだけ使い、実期間を出力に明記する
+  progress_history_min_n: 3       # これ未満なら中央値を出さず全値を並べる
+  return_windows: [21, 63]        # 1M / 3M (営業日)
+  volume_windows: [[5, 20], [5, 60]]
+  sheet_dir: "data/deepdive/prep"

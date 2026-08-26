@@ -62,3 +62,7 @@ data/plain/
 # J-Quants から生のまま落としたデータ (2026-08-24〜)。tools/event/fetch_jq.py --pull
 # が作る。有料プラン1ヶ月ぶんで数百MB〜GB級になるので載せない。消しても再取得できる。
 data/raw/
+
+# 深掘りツールの J-Quants 生取得 (2026-08-25〜)。src/deepdive/jq_raw.py が作る。
+# 消しても fetch で再取得できる。
+data/deepdive/raw/

@@ -80,6 +80,391 @@ n=10,000 なら ±0.04。**期待Rの差が0.05前後の話をするなら数千
 
 ---
 
+## 206 (2026-08-26): 深掘りツール残り全部実装 — predict/actual/note/ver/score/calendar + outcome.py
+
+205の「次」に書いた未実装分(DESIGN_DEEPDIVE.md §10 手順7〜12)を全部実装した。
+
+### やったこと
+
+- `src/deepdive/store.py`: `add_note()` を追加(C層の定性メモ追記。ticker/quarter/text
+  必須、dedupキー無しの追記専用。訂正は書き直すのではなく新しい行を積む前提)。
+- `src/deepdive/outcome.py` を新規作成(§3.5)。`dir_hit`(会社予想を基準線にした上振れ/
+  下振れの的中判定。差分0またはいずれか欠損ならNone)、`level_err_pct`(水準誤差%)、
+  `disclosure_returns`/`_base_index`/`_return_between`(timing別に起点が変わる翌日/5日騰落率
+  — 引け後は発表日終値が起点、寄り前/場中は前営業日終値が起点。pandasの`searchsorted`で
+  営業日インデックス上の位置を探す)、`build_outcomes`/`store_outcomes`(actual記入時に
+  全model_verぶんまとめて判定してoutcomes.jsonlへ)、`score`/`format_score`(§6の成績表。
+  `valid:false`は除外し除外件数を必ず表示。§12の原則により信頼区間・有意差の表現は
+  一切入れない)。
+- `src/deepdive/cli.py`: `predict`/`actual`/`note`/`ver add`/`score`/`calendar` の6サブコマンドを
+  追加。`predict`は`earnings_date`/`priced_in_1m_vs_topix`をフラグで受け付けず、必ず
+  `prep.build_a_layer`のAレイヤから自動補完する(§3.2: 「織り込み」は後から都合よく
+  書き換えられる余地を残さない)。`--from-file`でJSON一括入力にも対応(`predict`/`actual`
+  共通)。R4を守るため`delete`/`rm`系はどの階層にも作っていない(既存テストの再帰チェックで
+  `ver`サブコマンドも自動的にカバーされることを確認済み)。
+- `tests/test_deepdive_outcome.py` を新規作成(28件)。`dir_hit`/`level_err_pct`の境界値、
+  timing別`disclosure_returns`の起点ロジック(引け後/寄り前/場中、非営業日・系列末尾超え・
+  空系列のフォールバック)、`build_outcomes`/`store_outcomes`の一連の流れ、`score`の
+  除外件数・グルーピング(ver別/ticker別)、`format_score`が「信頼区間」「有意」「統計的」
+  を一切出力しないことをテストで固定。
+- `tests/test_deepdive_cli.py` に新規6サブコマンドのテストを追加(24件、既存9件と合わせて
+  計24件に再構成)。`prep.build_a_layer`をモックして自動補完・R1(発表日以降記入の無効化)・
+  R2(重複キー拒否)・R3(ver重複拒否)を確認、`actual`が`outcome.store_outcomes`を実際に
+  呼んで的中判定を書くところまで通しで確認。
+- `tools/fetch_long_history.py`: `--only`フラグを追加(カンマ区切り銘柄コードだけ取る。
+  `prep.py`の`MissingDataError`メッセージが元々案内していたコマンドがこれで実在するように
+  なった)。
+- `config.yaml`: `deepdive:`セクションを追加(§8どおり。tickers/valuation_lookback_years/
+  progress_history_min_n/return_windows/volume_windows/sheet_dir)。
+- `HANDOFF.md`: §2のリポジトリ構成ツリーに`src/deepdive/`・`data/deepdive/`を追加、
+  末尾に`## 15. 深掘り銘柄分析ツール`を新設。パイプラインからの独立性、
+  `load_first_wins`が`load_deduped`の真逆であることとその理由、出せない指標一覧
+  (PBR/EV-EBITDA恒久・PER5年レンジ代用・過去期数の制約)とJ-Quants2年制限が契約由来で
+  コードでは直らないこと、`data/deepdive/`のgit管理範囲(`raw/`のみignore)を明記(§11どおり)。
+
+### 確認
+
+- `pytest tests/`: 719 passed、失敗0(206より前は676件だったので、outcome関連28件+
+  cli関連15件の追加ぶん)。
+- 実行後、既知のpytest汚染(`data/history/candidate_outcomes.jsonl`に1行、
+  `review.jsonl`に7行の偽データ追記)が発生。今回は`git checkout --`が
+  「unable to unlink」で失敗したため、`git show HEAD:<path>`の出力で対象ファイルを
+  直接上書き(unlinkを伴わないtruncate書き込みなら失敗しない)して元のmd5と一致することを
+  確認して復元した。`.git/index.lock`もgitコマンドを叩くたびに再生成される(このsandboxの
+  virtiofsマウントはunlinkできない仕様)ので、都度`mv`で退避してから実行する運用を継続。
+  `data/deepdive/`(ユーザーが実機で作った本物のwatchlist/raw/prepデータ)はmd5一致を
+  確認し、無傷であることを検証済み。
+
+### 次
+
+DESIGN_DEEPDIVE.md §10 の実装項目は全部完了。残っているのはユーザー側の実運用
+(実機で`predict`→決算後に`actual`を記入→`score`で成績確認、を最低1サイクル回して
+CLIの使い勝手を見る)のみ。コミットはこのセッションでは行っていない(運用ルールどおり
+push含めユーザー判断)。
+
+---
+
+## 205 (2026-08-25): TOPIXベンチマークを `idx_topix`(^TPX)から `jp_1306` に切り替え
+
+ユーザーが実機(J-Quants APIキー保持)で `python3 -m src.deepdive prep 7611` を実行し、
+出てきたシートで「値動き」の TOPIX比が全部 `—`(算出不能)になっていた。原因調査と
+修正をこのセッションで行った。
+
+### 原因
+
+`data/prices_asset/idx_topix.parquet` が1行(2015-10-20のみ)しか無かった。
+`_manifest.json` の該当エントリも `{"ticker": "^TPX", "note": "TOPIX 値段だけ。
+取れないことがある", "first": "2015-10-20", "last": "2015-10-20", "rows": 1}` と
+一致しており、たまたまの欠損ではなく構造的な欠陥。ユーザーに
+`--tickers idx_topix=^TPX --force` で強制再取得してもらったが、それでも1行のまま
+(同じ2015-10-20のみ)だった。つまりキャッシュの古さの問題ではなく、Yahoo/yfinance側が
+`^TPX` を実質配信していない。
+
+`tools/fetch_long_history.py` の `ASSET_TICKERS` には既にこの欠陥が明記されており
+(`idx_topix` の note が「取れないことがある」、失敗時に表示される警告文
+「※ Yahoo に無いティッカー(^TPX など)は取れないことがある。代わりが表の note にある」)、
+代替として `jp_1306`(1306.T、TOPIX連動・配当込みETF、2001〜のデータあり、既に
+フル取得済み)が案内されていた。ユーザーに3案(a. jp_1306に切り替え、b. TOPIX比較を
+諦めて省略、c. 他の指数ETFを探す)を提示し、a を選んでもらった。
+
+### やったこと
+
+- `prep.py`: `load_topix()`/`require_topix()` が読むファイルを
+  `data/prices_asset/idx_topix.parquet` → `jp_1306.parquet` に変更。エラーメッセージの
+  案内コマンドも `--tickers jp_1306=1306.T` に変更。モジュール冒頭に切り替えの経緯と
+  「`jp_1306` は配当込み(tr=True)なので、TOPIX比は厳密な価格指数比ではなく配当込み
+  ETF比になる(年1〜2%程度有利に出る)」という注意書きを追記。
+  `data_freshness` に `"benchmark"` キー(path・latest)を追加。
+- `sheet.py`: 値動きセクションのラベルを「TOPIX比」→「TOPIX比・1306で代用」に変更。
+  「使ったデータの鮮度」節に `benchmark` の行を追加(§5・§6.1の鮮度明記ルールに従う。
+  `.get("benchmark")` で未設定でも落ちないようにした)。
+- `DESIGN_DEEPDIVE.md`: §2のリソース表、§4の指標表、§4.2.1の該当節を上記に合わせて更新。
+  切り替えの経緯と配当込みの注意点を§4.2.1に明記。
+- `tests/test_deepdive_prep.py`: `wired_prep` フィクスチャの書き込み先を
+  `idx_topix.parquet` → `jp_1306.parquet` に変更。`test_require_topix_raises_with_asset_command`
+  のアサーションを新エラーメッセージ(`--tickers jp_1306=1306.T`)に合わせて修正。
+  `test_build_a_layer_data_freshness_paths` に benchmark 鮮度のアサーションを追加。
+- `tests/test_deepdive_sheet.py`: フル/空の両フィクスチャに `data_freshness.benchmark` を
+  追加。ラベル変更後の文言でアサーションを修正。benchmark鮮度あり/日付取得不能/
+  キー自体が無い(後方互換)の3パターンをテストでカバー。
+
+### 訂正(204より)
+
+204の本文中、「TOPIXは `data/prices_asset/idx_topix.parquet` を直読み」と書いた箇所は
+上記の理由でもう正しくない。実装は `jp_1306.parquet` に切り替え済み。直読み(
+`get_benchmark_close()` を使わずネットワークに触らない)という方針自体は変わっていない。
+
+### 確認
+
+- `pytest tests/test_deepdive_prep.py tests/test_deepdive_sheet.py` 36件全部pass
+  (テスト2件追加: benchmark鮮度の正常系・欠落系)。
+- 全体 `pytest -q` で676 passed・失敗0(前回675 passedから、追加した1件ぶんの差分)。
+- テスト実行で `data/history/candidate_outcomes.jsonl`・`review.jsonl` に既知のpytest汚染
+  (null埋めのダミー行)が入ったため `git checkout --` で復元済み。sandboxの
+  `.git/index.lock` 問題の亜種(`mv` が「inter-device move failed」で失敗)に当たったが、
+  `mv .git/index.lock .git/index.lock.bak`(同一ファイルシステム内へのリネーム)で回避。
+  `data/deepdive/`・`data/prices_asset/` はユーザーが実機で作った本物のデータなので触れず。
+
+### 次
+
+7611での実地確認は完了(TOPIX比以外は正常動作、進捗の算出不能はFY末開示の仕様どおり
+で正しい挙動と確認済み)。204の「次」に書いた未実装コマンド群(`predict`/`actual`/
+`note`/`ver`/`score`/`calendar`)、`fetch_long_history.py --only`、`config.yaml`の
+`deepdive:`セクション、`HANDOFF.md`追記は引き続き未着手。
+
+---
+
+## 204 (2026-08-25): prep.py / sheet.py + prep コマンド実装 — DESIGN_DEEPDIVE.md §10 手順6
+
+`src/deepdive/prep.py`(A レイヤ生成・実ファイルI/O)と `src/deepdive/sheet.py`
+(マークダウン整形)を実装し、CLI に `prep` サブコマンドを追加した。
+
+### 作ったもの
+
+- `metrics.py` に6関数追加(prep.py から呼ぶ純関数): `quarter_of`(公開ラッパ)、
+  `next_quarter_label`、`fy_eps_points`、`per_series`、`since_date_return`、
+  `sector_relative_return`、`revision_proxy`。
+- `prep.py`: `build_a_layer(code, quarter=None, config=None)` が本体。
+  - 株価は `require_long_prices`、TOPIXは `data/prices_asset/idx_topix.parquet` を
+    直読み(§4.2.1どおり `get_benchmark_close()` は使わない。ネットワークに触らない)。
+  - どちらも無ければ§4.2どおりの固定メッセージを stderr に出して exit 2
+    (`MissingDataError` → cli.py で catch)。
+  - 業種同業比較は `data/sector_map.json` の `d["sectors"]` から業種を引き、
+    同業種で `prices_long/{code}.parquet` が実在する銘柄だけを母集団にする
+    (無い銘柄は黙って除外。実際に使えた頭数 `n_peer_codes` を必ず出力)。
+  - PERは「FY開示のEPSを階段関数として株価indexにffill→percentile_in_series」で
+    代用(§4.1の△判定どおり。四半期差分でTTM EPSを組む案は既存jquants.pyの
+    ロジック流用が要って複雑になるため見送り、単純なFY階段関数にした)。
+  - `guidance_gap` の「期初予想→着地」は「前期FY開示の `NxFOP`(翌期予想)」を
+    期初予想、「その期のFY開示の `OP`」を着地、として組んだ(`NxFOP` は
+    前期末決算発表時点で開示される翌期予想そのものなので「期初予想」の定義に
+    合う、という読み方)。
+  - `revision`(期中修正の回数・向き)は正式な修正履歴を持っていないため、
+    同一 `CurFYSt` 内でFY開示ごとの `FOP`(通期営業利益予想)の変化を数える
+    簡易代用にした(`revision_proxy`)。`DocType` に `FinancialStatements` を
+    含まない `ForecastRevision_...` レコードは除外(確定決算のみで数える)。
+  - 配当利回りは実装せず `omitted` に理由付きで明記(キャッシュ未実装。
+    §4.2の「暗黙のネットワークアクセスをしない」方針を優先し、この段階では
+    yfinance呼び出しを prep.py に追加しなかった)。
+- `sheet.py`: A レイヤ dict → マークダウン。§5・§6.1どおり「この期に出せなかったもの」
+  「使ったデータの鮮度」の2セクションを必須で末尾に出す。純関数のみ、ファイルI/O無し
+  (書き込みは cli.py 側で `utils_io.atomic_write_text`)。
+- `cli.py` に `prep <code> [--quarter ...]` を追加。`prep/{code}_{quarter}.md` に書き、
+  標準出力にも出す。`MissingDataError` は exit 2(§既定の「必須データ欠落」用コード)。
+- `tests/conftest.py` に `deepdive_prep.PREP_DIR` の退避を追加(書き込み先のみ。
+  `LONG_DIR`/`ASSET_DIR`/`SECTOR_MAP_PATH` は読み取り専用なので個別テストで
+  monkeypatch する方針は既存どおり)。
+- `tests/test_deepdive_prep.py`(21件: I/O系ユニット7件 + `build_a_layer` 統合13件)、
+  `tests/test_deepdive_sheet.py`(14件: フルデータ・ほぼNoneの2パターン)。
+
+### 訂正(203より)
+
+203で書いた `next_earnings_date` の解説文中、raw レコードのフィールド名を
+`TypeOfDocument` と書いていたが誤記。実装(および実際に使っている確認済み
+フィールド)は `CurPerType` が正しい。上の203の本文に訂正を追記した。
+
+### 確認
+
+- `pytest tests/test_deepdive_prep.py tests/test_deepdive_sheet.py` 35件全部pass。
+- 深掘り関連テスト(prep/sheet/metrics/cli/store/jq_raw)まとめて94件全部pass。
+- 全体 `pytest -q` で675 passed・失敗0(本セッション開始前は640 passed・0 failed。
+  今回追加した35件ちょうどの差分)。203で見た「pyarrow未導入で3件失敗」は
+  今回のsandboxでは再現せず(pyarrow 25.0.1がインストール済みだった。203時点の
+  メモが古いか別環境の話だった可能性)。
+- テスト前後で `git status --short data/ docs/` の行数が24件のまま不変
+  (`data/deepdive/` ディレクトリ自体テスト後も存在しない)。汚染なし。
+
+### 次
+
+§10 手順6は完了。次に残っているのは `predict` / `actual` / `note` / `ver` / `score` /
+`calendar` コマンド群(未実装)、`tools/fetch_long_history.py --only` フラグ追加
+(今回書いたエラーメッセージが指示する手順を実際に動くようにするため必要)、
+`config.yaml` の `deepdive:` セクション追加、`HANDOFF.md` への追記。
+どれも本セッションでは着手していない。実データ(7611等)での目視確認は
+ユーザーの実機(J-Quants APIキー保持)側で行う必要がある。
+
+---
+
+## 203 (2026-08-25): metrics.py 実装 — DESIGN_DEEPDIVE.md §10 手順5
+
+`src/deepdive/metrics.py` を実装。§4/§5 で列挙された8関数すべて。**純関数のみ、
+I/O・ネットワークは一切しない**方針どおり(parquet読込やTOPIX読込は prep.py の責務、
+ここでは pd.Series/list を受け取って計算するだけ)。
+
+### 作ったもの
+
+- `progress_rate` / `progress_vs_history` / `guidance_gap`(§1.3どおり n<3 は median=None)
+  / `percentile_in_series`(§4.3の順位ベースpct + start/end/nを返す)
+  / `return_pct` / `relative_return`(TOPIX比=単純差、§4.2.1)
+  / `volume_ratio` / `next_earnings_date`(§1.4の3段フォールバック)。
+- `next_earnings_date` の「前年同期からの推定」は独自解釈が要った。設計書は
+  「DiscDateの前年同四半期+曜日補正なし」としか書いていないので、raw レコードの
+  `CurPerType`(1Q/2Q/3Q/FY)から直近の次四半期を割り出し、その四半期の
+  前回実績DiscDateに+365日する実装にした。次四半期の過去実績が無ければ
+  推定不能として None を返す(§1.2で7134のように短い履歴しか無い銘柄はここで
+  詰まりうる。手入力フォールバックがあるので実用上は問題ない)。
+  **訂正(204で気づいた): 上の段落は当初 `TypeOfDocument` と書いていたが、
+  実装が使っているのは `CurPerType` の誤記だった。**
+- `tests/test_deepdive_metrics.py`(22件)。fixtureだけで完結、ネットワーク/ファイルI/O無し。
+
+### 確認
+
+- `pytest tests/test_deepdive_metrics.py` 22件全部pass。全体は636 passed / 3 failed
+  (失敗3件は毎度おなじみpyarrow未導入のsandbox環境依存、無関係)。
+- `data/deepdive/` はテスト後も存在しない(汚染なし)。
+
+### 次
+
+§10 手順6: `prep.py` / `sheet.py` + `prep` コマンド。ここで初めて実ファイルI/O
+(prices_long parquet, sector_map.json, raw/{code}.jsonl)を組み合わせる。
+7611で1枚出して目視確認する想定。
+
+---
+
+## 202 (2026-08-25): jq_raw.py + fetch コマンド実装 — DESIGN_DEEPDIVE.md §10 手順4
+
+§7の実地確認(201)で確定したフィールド名を受け、`src/deepdive/jq_raw.py` と
+`fetch` CLI コマンドを実装した。
+
+### 作ったもの
+
+- `src/deepdive/jq_raw.py`: `src/data/jquants.py :: fetch_summaries` の
+  ページネーション・429リトライロジックを**コピー**(import しない、§1.1/§7.2の
+  疎結合方針どおり)。`fetch_summaries(api_key, config, *, code)` で1銘柄ぶん
+  全ページ取得し、`fetch_and_store(code, api_key=None, config=None)` が
+  `data/deepdive/raw/{code}.jsonl` に追記する。生レコードは加工しない(int化もしない)。
+  - 再実行しても重複が無限に増えないよう、`DiscDate` を鍵に既存行と突き合わせて
+    未取得ぶんだけ追記する(既存行の書き換えはしない。追記専用のまま)。
+  - `RAW_DIR` は `store.DEEPDIVE_DIR` を import せず `REPO_ROOT` から独自に組み立てる。
+    import すると conftest.py の monkeypatch(store側)が効かなくなるため
+    (各モジュールが自分の定数を持つ既存パターンに合わせた)。
+- `src/deepdive/cli.py`: `fetch <code>` / `fetch --all` を追加。`--all` は
+  `watch list` の active 銘柄すべてを対象にする(設計書の「tickers はwatchlistが正」
+  という記述に沿い、config.yaml の deepdive.tickers ではなく watchlist を正とした)。
+- `tests/conftest.py`: `deepdive_jq_raw.RAW_DIR` を tmp_path 配下へ退避する行を追加
+  (data/deepdive/raw/ を汚さないため)。
+- `.gitignore`: `data/raw/` の直後に `data/deepdive/raw/` を追加(§10 手順11の一部を前倒し)。
+- `tests/test_deepdive_jq_raw.py`(7件)+ `tests/test_deepdive_cli.py` に fetch 用4件追加。
+  fixture は `tests/fixtures/jq_summary_page{1,2}.json`(実在銘柄の数字ではなく合成データ)。
+  ページネーション継続・429リトライ(1回だけ)・DiscDate重複スキップ・APIキー未設定エラーを検証。
+  ネットワークには一切出ない(requests.get を monkeypatch)。
+
+### 確認
+
+- `pytest tests/test_deepdive_*.py` 41件全部pass。全体は614 passed / 3 failed
+  (失敗3件は pyarrow 未導入によるsandbox環境依存で無関係、200のときと同じ)。
+- `git status --short data/deepdive/` → ディレクトリごと存在しない。テスト分離が効いている。
+
+### 次
+
+§10 手順5: `metrics.py`(純関数)+ テスト。fixtureだけで完結するので次はここが速い。
+
+---
+
+## 201 (2026-08-25): §7 実地確認完了 — 営業利益は `OP`、7134も`?code=`で取れる
+
+萩山の手元で §7.1 のスクリプトを実行(7611・7134の2銘柄)。結果を DESIGN_DEEPDIVE.md
+§7.1.1 に確定値として追記した。
+
+### 分かったこと
+
+- 営業利益(実績)は `OP`、経常利益は `OdP`。値は文字列型(`"190000000"`)で `int()` 要。
+- 予想は `F` 接頭辞(今期)/ `NxF` 接頭辞(翌期)、非連結は `NC` 接頭辞。既存の命名規則から
+  正しく推測できていたが、実地確認したことで `jq_raw.py` に推測ではなく確定値を書ける。
+- **7134(ユニバース外)も `?code=` で 200・8件返ってきた。** 199 で立てた
+  「ウォッチ銘柄 ⊄ ユニバース」の前提が実地で裏取りできた。
+- 取れた期間は 7611: 2024-07-05〜2026-04-10(n=12)、7134: 2024-08-13〜2026-05-08(n=8)。
+  198 の「Freeは2年」と一致。
+
+### 次にやること
+
+設計書 §10 手順4以降(`jq_raw.py` + `fetch`)に進める。§7 のブロッカーは解消済み。
+
+---
+
+## 200 (2026-08-25): 深掘りツールの実装開始 — store.py と watch add/list、R1〜R4のテストまで
+
+199 の設計書 §10 手順1〜2(§7の実地確認に依存しない部分)を実装した。
+
+### 作ったもの
+
+- `src/deepdive/store.py`: `data/deepdive/` 配下6ファイルのパス定数、`now_iso()`
+  (JST・引数なし)、`load_first_wins`(初出勝ち。`history_store.load_deduped` の逆)、
+  `load_last_wins`、`add_watch` / `add_prediction` / `add_actual` / `add_version`。
+  R1〜R4・UC-1 を全部コードで強制する形にした(設計書§3.3どおり)。
+- `src/deepdive/cli.py` + `__main__.py`: `python -m src.deepdive watch add/list` のみ実装。
+  `predict` 等の他コマンドは §7 待ちでまだ無い。R4(削除コマンドを作らない)を
+  満たすよう、`delete`/`rm` はどの階層にも置いていない。
+- `tests/conftest.py` の `isolate_write_paths` に `src.deepdive.store` のパス定数6本を追加。
+  既存の「pytestがdata/を汚す」事故と同じ穴を deepdive でも塞いだ(memory参照)。
+- `tests/test_deepdive_store.py`(23件)/ `tests/test_deepdive_cli.py`(5件)。
+  R1(発表日当日でもvalid:false・例外にしない)、R2(重複登録拒否・直接編集された
+  2行のうち1行目を採用)、R3(ver重複拒否)、R4(deleteサブコマンド不在)、
+  UC-1(drivers/break_conditions 必須)を個別にテストした。
+
+### 確認したこと
+
+`pytest tests/test_deepdive_store.py tests/test_deepdive_cli.py` で25件全部通過。
+全体テストも通したが、`test_indices.py` / `test_prices.py` の3件は pyarrow 未インストールの
+サンドボックス環境依存で落ちているだけ(deepdive とは無関係。ローカルの `.venv` では
+pyarrow が入っているはずなので再現しない想定)。`git status` で `data/deepdive/` 配下に
+何も汚染が出ていないことも確認した。
+
+### 次にやること
+
+設計書 §10 の手順3、**§7 の実地確認(営業利益のフィールド名、7134が `?code=` で
+取れるか)を萩山の手元で実行**。サンドボックスから J-Quants に出られないので
+そこだけは代われない。それが終わったら手順4(`jq_raw.py` + `fetch`)へ進む。
+
+---
+
+## 199 (2026-08-25): 深掘り銘柄分析ツールの設計書を書いた（実装はまだ）
+
+ユーザーから要件定義の提示。少数銘柄(初期は 7134 アップガレージ、7611 ハイデイ日高)について
+「決算前に期待値を書き、記録し、後で答え合わせする」ツール。スクリーナーとは役割が違い、
+**エッジを見つけない。記録するだけ。**
+
+成果物は `DESIGN_DEEPDIVE.md` 1本。Sonnet がこれを読んで実装できる粒度まで書いた。
+ユーザーの選択: 同じリポジトリ内に新パッケージ / 保存は JSONL 追記専用 /
+取れる範囲(2年)で出して期数を明記。
+
+### 設計中に見つかった、要件のまま作ると動かない箇所4つ
+
+1. **営業利益がリポジトリのどこにも無い。** 要件の中核は「自分の予想(営業利益)」なのに、
+   `jquants.py` も `edinetdb.py` も売上・EPS・純利益しか拾っていない。
+   `OpProfit|OrdProfit|営業利益` で grep してヒットゼロ。API には入っているはずなので
+   **フィールド名の実地確認から始める**(設計書 §7 に確認用スクリプトを置いた。
+   サンドボックスからは J-Quants に出られないので萩山の手元で実行)。
+2. **7134 が `fundamentals_auto.json` に無い。** 売買代金1億円の足切りでユニバース外。
+   `data/prices/` にも無い(`data/prices_long/` にはある)。
+   「ウォッチ銘柄 ⊄ ユニバース」を前提に組む必要がある。
+3. **「過去5期」は原理的に出せない**(198 と同じ話)。PBR と EV/EBITDA に至っては
+   元データが無いので**欄ごと消す**方針にした。「取得失敗」の空欄を毎回見るのは
+   そこに何かあるはずだという誤った期待を持ち続けることになるので。
+4. **7611 は発表予定日が取れない。** `earnings_calendar` は3月期・9月期のみで、
+   ハイデイ日高は2月期。カレンダー→前年同期から推定→手入力の3段構えにする。
+
+### 設計で一番効いている判断
+
+**`load_first_wins` を新設する**(`history_store.load_deduped` の真逆)。
+既存の `load_deduped` は後勝ちで、「同日再実行は既存を置換」という日次バッチの
+意味論のためのもの。予想レコードは逆に**初出勝ち**でないと
+「発表後に予想を書き換えない」という規律がコードで守れない。ここを取り違えると
+ツール全体が意味を失うので、設計書の冒頭近くに書いた。
+
+あわせて `written_at` は**引数で受け取らず実行時刻をコードで埋める**。
+発表日以降に書いた予想は例外にせず `valid: false` で保存し、集計時に除外して
+**除外件数を表に出す**。無効票が増えているのは規律が緩んでいる兆候で、
+それ自体が読むべき数字だから。
+
+### 次にやること
+
+設計書 §7 の実地確認(営業利益のキー名)。それが済むまで実装に入らない。
+`tools/fetch_long_history.py` に `--only CODE` が無いので、それも足す必要がある
+(現状 `--codes {all,universe}` の2択で、1銘柄だけ取れない)。
+
+---
+
 ## 198 (2026-08-24): 2年の壁の正体は**契約プラン**だった。値動き以外を測りたいなら課金が要る
 
 197 の続き。ユーザーから「アナリスト予想・買われ方・その結果の上げ下げは測れるか」。

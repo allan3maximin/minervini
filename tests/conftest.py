@@ -27,6 +27,9 @@ def isolate_write_paths(tmp_path, monkeypatch):
     import src.pipeline as pipeline_mod
     import src.universe as universe_mod
     from src.data import edinetdb, fundamentals, indices, jquants, prices
+    from src.deepdive import jq_raw as deepdive_jq_raw
+    from src.deepdive import prep as deepdive_prep
+    from src.deepdive import store as deepdive_store
     from src.report import build_site, dryup_log, heatmap, positions, stage_log
     from src.screener import entry
 
@@ -61,6 +64,25 @@ def isolate_write_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(universe_mod, "SECTOR_MAP_PATH", data_dir / "sector_map.json")
     monkeypatch.setattr(pipeline_mod, "DEBUG_PATH", data_dir / "trend_template_debug.json")
     monkeypatch.setattr(backtest_mod, "BACKTEST_DIR", data_dir / "backtest")
+
+    # --- data/deepdive 配下 (深掘りツール。2026-08-25追加) ---
+    # 予想・実績等が誤って本物の data/deepdive/*.jsonl に追記されないようにする
+    # (memory: 「pytestがdata/を汚す」の再発防止。個々のテストの記述に頼らない)。
+    deepdive_dir = data_dir / "deepdive"
+    monkeypatch.setattr(deepdive_store, "DEEPDIVE_DIR", deepdive_dir)
+    monkeypatch.setattr(deepdive_store, "WATCHLIST_PATH", deepdive_dir / "watchlist.jsonl")
+    monkeypatch.setattr(deepdive_store, "PREDICTIONS_PATH", deepdive_dir / "predictions.jsonl")
+    monkeypatch.setattr(deepdive_store, "ACTUALS_PATH", deepdive_dir / "actuals.jsonl")
+    monkeypatch.setattr(deepdive_store, "OUTCOMES_PATH", deepdive_dir / "outcomes.jsonl")
+    monkeypatch.setattr(deepdive_store, "NOTES_PATH", deepdive_dir / "notes.jsonl")
+    monkeypatch.setattr(deepdive_store, "VERSIONS_PATH", deepdive_dir / "model_versions.jsonl")
+    # jq_raw.py は store.DEEPDIVE_DIR を import せず独自に RAW_DIR を持つ
+    # (jq_raw.py 冒頭コメント参照)ため、ここも個別に差し替える。
+    monkeypatch.setattr(deepdive_jq_raw, "RAW_DIR", deepdive_dir / "raw")
+    # prep.py も同じ理由で独自に PREP_DIR を持つ(書き込み先のみ差し替え。
+    # LONG_DIR/ASSET_DIR/SECTOR_MAP_PATH は読み取り専用なので個々のテストで
+    # monkeypatch する — このフィクスチャの方針どおり)。
+    monkeypatch.setattr(deepdive_prep, "PREP_DIR", deepdive_dir / "prep")
 
     # --- docs/data 配下 (Pages配信ファイル) ---
     monkeypatch.setattr(build_site, "DOCS_DATA_DIR", docs_data_dir)
