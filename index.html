@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinerviniScreener</title>
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="assets/style.css?v=d2bc68a6">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<!-- 起動時パスキーゲート: 初回描画から不透明オーバーレイで全画面を覆い、
+     アクセス判定(暗号化か平文か・鍵の有無)が済むまでダッシュボードを隠す
+     (中身のチラ見え防止)。判定後、平文/解錠済みなら消し、暗号化+未解錠なら
+     パスキー解錠を促す (app.js ensureDataAccess)。
+
+     2026-07-27 UI刷新: 「暗号化されています…」といった説明文は読まれないので廃止。
+     ネイティブアプリのスプラッシュに寄せ、ロゴ+ワードマーク+"TAP TO UNLOCK" だけの
+     ミニマル構成にした。カード枠は無く、真っ黒背景にコンテンツだけが浮かぶ。 -->
+<div id="lock-screen" class="lock-screen">
+  <div class="lock-stage">
+    <div class="lock-mark" aria-hidden="true">
+      <!-- 上昇するステージ2の足取りを模したマーク(SVG。外部依存なし) -->
+      <svg viewBox="0 0 64 64" class="lock-mark-svg">
+        <defs>
+          <linearGradient id="lockMarkGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0f8f6a"/>
+            <stop offset="100%" stop-color="#4ade9f"/>
+          </linearGradient>
+        </defs>
+        <path class="lock-mark-line" d="M6 50 L20 38 L30 44 L44 22 L58 12"
+              fill="none" stroke="url(#lockMarkGrad)" stroke-width="4"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <circle class="lock-mark-dot" cx="58" cy="12" r="4.5" fill="#4ade9f"/>
+      </svg>
+    </div>
+    <h1 class="lock-wordmark">Minervini<span>Screener</span></h1>
+    <div class="lock-action">
+      <p class="lock-cta" id="lock-loading"><span class="lock-spinner" aria-hidden="true"></span>LOADING</p>
+      <button type="button" id="lock-unlock-btn" class="lock-cta lock-cta-btn" hidden>
+        <i class="bi bi-fingerprint" aria-hidden="true"></i>TAP TO UNLOCK
+      </button>
+    </div>
+    <div id="lock-error" class="lock-err" hidden></div>
+  </div>
+</div>
+<!-- アプリ共通ヘッダ。2026-07-30 まではダッシュボードでしか出していなかったが、
+     どの画面でも「今どこにいるか」の手掛かりが欲しいので常時表示に変えた。
+     右端の #list-summary はリスト画面の件数(リスト以外では app.js が隠す)。
+     最終更新行(#generated-at)はダッシュボードでのみ表示。 -->
+<header class="page-header">
+  <div class="page-header-top">
+    <h1>MinerviniScreener</h1>
+    <span class="page-header-count" id="list-summary" hidden></span>
+  </div>
+  <div id="generated-at" class="meta-line"></div>
+  <!-- データ断面の切り替え(2026-07-30)。既定は report.json / report_maezyou.json の
+       generated_at が新しい方(app.js の resolveDefaultSnapshot が決める)。ここで
+       手動固定できる。銘柄の絞り込みフィルタとは別物(ページ全体のデータ元が変わる)
+       なので、ツールバーではなくヘッダに置いている。 -->
+  <div id="snapshot-switch" class="meta-line snapshot-switch" hidden>
+    <label for="snapshot-select">断面</label>
+    <select id="snapshot-select" aria-label="データ断面">
+      <option value="">大引</option>
+      <option value="_maezyou">前場</option>
+    </select>
+  </div>
+</header>
+
+<main>
+
+<section id="view-dashboard" class="view-section market-view">
+  <div id="p1-warning" class="p1-warning" hidden></div>
+  <div id="positions-warning" class="warning-banner" hidden></div>
+  <div id="staleness-warning" class="warning-banner" hidden></div>
+  <!-- 前場断面のときだけ出す。途中の値なので確定していないものをまとめて1本で注意喚起。 -->
+  <div id="snapshot-warning" class="warning-banner" hidden></div>
+
+  <div class="market-panels" id="market-panels">
+    <div class="market-panel active" data-panel="data">
+      <section class="market-overview" id="market-overview" hidden>
+        <h2>市場概況 <span id="market-live-badge" class="live-badge" hidden>● 自動更新中</span></h2>
+        <p class="tier-note">カードをタップすると各指数の詳細(推移・期間別騰落)を表示します。</p>
+        <div id="market-cards" class="market-cards"></div>
+        <div id="market-live-meta" class="market-live-meta"></div>
+      </section>
+
+      <!-- 振り返り・作戦データ (2026-07-27 UI刷新)。長い説明文＋横並びの3ボタンを、
+           セッションごとの「タイル」に置き換えた。各タイルにデータ断面と用途を
+           1行で添えることで、本文の説明パラグラフを読まなくても選べるようにする。 -->
+      <section class="session-review" id="session-review">
+        <div class="session-review-head">
+          <h2><i class="bi bi-clipboard-data"></i> 振り返り・作戦データ</h2>
+          <span class="session-review-hint">タップでMarkdownをコピー → Claudeに貼り付け</span>
+        </div>
+        <div class="session-review-btns">
+          <button type="button" id="copy-zaraba-mae-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">ザラ場前</span>
+              <span class="session-btn-sub">前営業日EOD・寄り前の作戦立案</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="copy-maezyou-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">前場</span>
+              <span class="session-btn-sub">前場終了スナップショット・後場の作戦</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="copy-goba-btn" class="session-btn">
+            <span class="session-btn-main">
+              <span class="session-btn-title">後場</span>
+              <span class="session-btn-sub">大引け(EOD)・本日の総括と翌日の作戦</span>
+            </span>
+            <i class="bi bi-clipboard session-btn-icon" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p class="session-review-foot">内容: 主要指数 / 地合い / 保有ポジション / ピックアップ銘柄。いずれも「地合い予測」「ウォッチ銘柄予測」の指示付き。</p>
+        <div id="session-review-status" class="session-review-status" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <div class="market-panel" data-panel="analysis">
+      <!-- 「今の地合い(結論)+ 地合いの中身(根拠・畳んである)」→「いま候補は何銘柄か」の2枚。
+           以前は3枚目にVCPファネルを分けていたが、同じ銘柄件数の話なので2枚目に統合した。 -->
+      <div id="market-signal-card" class="market-signal-card" hidden></div>
+      <div id="breadth-meter" class="breadth-meter"></div>
+    </div>
+
+    <!-- レビュー(2026-07-31)。大引バッチが吐く docs/data/review.json を読んで、
+         その日の相場を機械的にまとめて出すだけのタブ。中身はすべて app.js の
+         renderReview() が組み立てるので、ここは受け皿の器だけ置いておく。
+         タブを最初に開いたときに1回だけ読む(ensureReviewLoaded)。 -->
+    <div class="market-panel" data-panel="review">
+      <div id="review-body" class="review-body">
+        <p class="tier-note">読み込み中...</p>
+      </div>
+      <!-- 過去の成績(2026-07-31)。docs/data/stats.json は履歴が溜まってから初めて
+           作られる別ファイルなので、レビュー本体とは器を分けて独立に描く
+           (片方が無くてももう片方は出る)。中身は renderReviewStats() が入れる。 -->
+      <div id="review-stats-body"></div>
+    </div>
+  </div>
+
+  <div class="market-tabs" id="market-tabs" role="tablist">
+    <button type="button" class="market-tab active" data-panel="data" role="tab">市況データ</button>
+    <button type="button" class="market-tab" data-panel="analysis" role="tab">市況分析</button>
+    <button type="button" class="market-tab" data-panel="review" role="tab">レビュー</button>
+  </div>
+</section>
+
+<section id="view-heatmap" class="view-section hm-view" hidden>
+  <div id="hm-meta" class="hm-meta"></div>
+  <div class="hm-panels" id="hm-panels">
+    <div class="hm-panel" data-view="detail">
+      <div id="hm-container-detail" class="hm-container">
+        <p class="tier-note" id="hm-empty" hidden>ヒートマップデータがまだありません。次回のバッチ実行後に表示されます。</p>
+      </div>
+    </div>
+    <div class="hm-panel" data-view="simple">
+      <div id="hm-container-simple" class="hm-container"></div>
+    </div>
+  </div>
+
+  <div class="hm-bottom-bar">
+    <div class="segmented" id="hm-view-toggle">
+      <button type="button" data-view="detail" class="active">詳細</button>
+      <button type="button" data-view="simple">簡易</button>
+    </div>
+    <div class="segmented" id="hm-period-toggle">
+      <button type="button" data-period="d1" class="active">1日</button>
+      <button type="button" data-period="d5">5日</button>
+      <button type="button" data-period="d20">20日</button>
+      <button type="button" data-period="d60">60日</button>
+    </div>
+  </div>
+</section>
+
+<section id="view-stocklist" class="view-section list-view" hidden>
+  <!-- 2026-07-29: 本命/候補/監視の3タブを廃止し、総合スコア降順の単一リストに統合。
+       ティア(ファンダ強度)・セットアップ進行度・追いかけ禁止はすべて行内のバッジで
+       表す。統合できた理由は combined_score が VCP欠損を0扱いに変わり、全ティアで
+       total_score の意味が揃ったから。経緯と設計は log.md (143)。 -->
+  <div class="list-panels" id="list-panels">
+    <div class="list-panel active" data-panel="all">
+      <section class="tier-section">
+        <div id="stock-list-body"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ツールバー: フィルタ/並び替え(タブは廃止)。
+       2026-07-30: 件数(#list-summary)はページ上部のヘッダ右へ移動。かんたん
+       フィルタは廃止し、既定で追禁と形成中を隠す(詳細フィルタで出し入れ可)。 -->
+  <div class="list-tabs-bar">
+    <div class="list-tools">
+      <button type="button" class="list-tool-btn" id="list-sort-btn" aria-label="並び替え">
+        <i class="bi bi-sort-down"></i>
+      </button>
+      <button type="button" class="list-tool-btn" id="list-filter-btn" aria-label="フィルタ">
+        <i class="bi bi-funnel"></i>
+        <span id="adhoc-filter-badge" class="adhoc-filter-badge" hidden></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ボトムシート: 共有バックドロップ + フィルタ/並び替え -->
+  <div class="sheet-backdrop" id="list-sheet-backdrop" hidden></div>
+
+  <div class="bottom-sheet" id="filter-sheet" role="dialog" aria-label="詳細フィルタ" hidden>
+    <div class="sheet-head">
+      <span class="sheet-title"><i class="bi bi-funnel"></i> 詳細フィルタ <small>リロードで解除</small></span>
+      <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <!-- 2026-07-27 UI刷新: 「下限/上限」を別ラベルの入力欄に分けると4行ぶんの
+         ラベルを読ませることになるので、レンジ(min 〜 max)を1行に統合した。
+         市場/ステータスは小さいチェックボックスをやめ、指で押せるチップにして
+         「押した=表示する」を面で示す。操作(リセット/適用)はシート下端に固定。 -->
+    <div class="sheet-body list-filter-form" id="adhoc-filter-form">
+      <div class="lf-group">
+        <span class="lf-group-title">株価</span>
+        <div class="lf-range">
+          <input type="number" id="alf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="株価の下限(円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="alf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="株価の上限(円)">
+          <span class="lf-unit">円</span>
+        </div>
+      </div>
+      <div class="lf-group">
+        <span class="lf-group-title">時価総額</span>
+        <div class="lf-range">
+          <input type="number" id="alf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="時価総額の下限(億円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="alf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="時価総額の上限(億円)">
+          <span class="lf-unit">億円</span>
+        </div>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">RSレーティング <small>以上</small></span>
+          <input type="number" id="alf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">総合スコア <small>以上</small></span>
+          <input type="number" id="alf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
+        </label>
+      </div>
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">市場</span>
+          <button type="button" class="lf-toggle-all" data-target="alf-show-segments">全て</button>
+        </div>
+        <div class="lf-chips" id="alf-show-segments">
+          <label class="lf-chip"><input type="checkbox" value="プライム" checked><span>プライム</span></label>
+          <label class="lf-chip"><input type="checkbox" value="スタンダード" checked><span>スタンダード</span></label>
+          <label class="lf-chip"><input type="checkbox" value="グロース" checked><span>グロース</span></label>
+        </div>
+      </div>
+      <!-- 表示する状態。中身は app.js initAdhocFilter が CARD_BADGE_KINDS から
+           生成する。チップ1個 = カードのバッジ1種類で、名前も揃えてある
+           (app.js cardBadgeKey が両方の判定元)。既定は追禁と形成中が off。 -->
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">状態</span>
+          <button type="button" class="lf-toggle-all" data-target="alf-show-statuses">全て</button>
+        </div>
+        <div class="lf-chips lf-chips-status" id="alf-show-statuses"></div>
+      </div>
+      <div class="lf-actions">
+        <button type="button" id="alf-clear-btn" class="secondary">リセット</button>
+        <button type="button" id="alf-apply-btn" class="primary">適用</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-sheet" id="sort-sheet" role="dialog" aria-label="並び替え" hidden>
+    <div class="sheet-head">
+      <span class="sheet-title"><i class="bi bi-sort-down"></i> 並び替え</span>
+      <button type="button" class="sheet-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="sheet-body">
+      <p class="sheet-hint" id="sort-sheet-hint">一覧のカードを並び替えます。</p>
+      <!-- 枯れ度は「小さいほど枯れている=良い」ので、他と違い昇順で並ぶ
+           (符号反転は app.js CARD_SORTS.dryup 側で行う)。
+           ピボットも同じく昇順(近い順)で、抜けた銘柄は同着扱い。既定はこれ。 -->
+      <div class="segmented sort-options" id="list-sort-options" role="group" aria-label="並び替え">
+        <button type="button" data-sort="pivot_distance">ピボット</button>
+        <button type="button" data-sort="total_score">スコア</button>
+        <button type="button" data-sort="rs">RS</button>
+        <button type="button" data-sort="change_pct">前日比</button>
+        <button type="button" data-sort="dryup">枯れ度</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="view-invest" class="view-section invest-view" hidden>
+
+  <!-- ページャ。initInvestView が data-section の一致する1枚だけ表示し、下部のナビで前後に送る。 -->
+  <div class="invest-content" id="invest-pager">
+
+    <section class="invest-section" data-section="cycle">
+      <h3>SEPAの基本サイクル</h3>
+      <p>Mark MinervinìのSEPA(Specific Entry Point Analysis / 特定エントリーポイント分析)は、機関投資家の資金が入り始めた「成長株(スーパーパフォーマンス株)」を、ベースを抜けた瞬間に低リスクで拾いに行く順張り手法。株価は方向感の無い停滞から上昇、天井圏、下降という<b>4つのステージ</b>を必ず巡っており、SEPAが狙うのは<b>ステージ2(上昇局面)の初期</b>だけ。それ以外の局面では基本的に手を出さない。</p>
+      <p>SEPAは「テクニカルだけ」の手法ではなく、次の<b>5つの柱</b>を重ね合わせて判断する。</p>
+      <ol>
+        <li><b>トレンド(Trend)</b> ステージ2にあること。すべての出発点で、これが無ければ他の条件が良くても買わない。</li>
+        <li><b>ファンダメンタルズ(Fundamentals)</b> 増収増益・利益率の改善など、株価上昇を正当化する業績の裏付け。</li>
+        <li><b>触媒(Catalyst)</b> 新製品・新サービス・新経営陣・規制変更など、大口が買う「理由」となる出来事。</li>
+        <li><b>エントリーポイント(Entry Point)</b> VCP完成後のピボット。リスクが最小になる一点で仕掛ける。</li>
+        <li><b>イグジット(Exit)</b> 損切りと利確をあらかじめ決めておく。入る前に「どこで降りるか」を持つ。</li>
+      </ol>
+      <p>この5つと市場全体の地合いが揃ったときに最も大きく張り、1つでも欠ければサイズを落とすか見送る。順序は「ステージ2で絞り込み → ファンダ・触媒で厚みを確認 → VCPでタイミングを計り → ピボットで入る → 決めたルールで降りる」。</p>
+    </section>
+
+    <section class="invest-section" data-section="stage">
+      <h3>ステージ分析(4つの局面)</h3>
+      <p>株価は下の4局面をぐるぐる巡る。今どの局面にいるかを移動平均線の「並び」と「傾き」、そして出来高で見分ける。買っていいのは<b>ステージ2だけ</b>。この判定を外すと、他がどれだけ良くても勝てない。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 210" role="img" aria-label="ステージ1〜4の株価サイクル図">
+          <rect class="fig-zone" x="165" y="14" width="150" height="168" />
+          <line class="fig-div" x1="165" y1="14" x2="165" y2="182" />
+          <line class="fig-div" x1="315" y1="14" x2="315" y2="182" />
+          <line class="fig-div" x1="452" y1="14" x2="452" y2="182" />
+          <path class="fig-ma" d="M20,162 C120,160 175,150 260,120 C340,96 400,90 460,106 C520,122 580,152 620,166" />
+          <polyline class="fig-price" points="20,160 55,153 85,161 115,150 145,157 165,150 195,138 220,146 248,108 272,118 300,80 315,60 340,80 362,58 388,90 412,64 436,92 452,74 488,104 512,94 540,138 566,126 596,166 620,176" />
+          <text class="fig-label" x="92" y="200" text-anchor="middle">①底固め</text>
+          <text class="fig-label fig-label-buy" x="240" y="200" text-anchor="middle">②上昇(買い)</text>
+          <text class="fig-label" x="383" y="200" text-anchor="middle">③天井</text>
+          <text class="fig-label" x="536" y="200" text-anchor="middle">④下降</text>
+        </svg>
+        <figcaption>破線=200日線。買うのは50&gt;150&gt;200が上向きに揃い、押し目が浅いステージ2だけ。</figcaption>
+      </figure>
+      <ul>
+        <li><b>ステージ1(底固め・無関心期)</b> 長い下落や急落のあと、値動きが横ばいのレンジに落ち着く。200日線がフラット化し、株価はその上下を行き来する。出来高は細り、世間の関心も薄い。ここでスマートマネーが静かに仕込む。<b>まだ方向感が無いので買わず、監視リストに入れて待つ</b>。数ヶ月〜年単位で続くこともある。</li>
+        <li><b>ステージ2(上昇・前進期)</b> トレンドテンプレート合格の局面。<b>50日 &gt; 150日 &gt; 200日</b>の並びで各線が上向きになり、株価は高値・安値を切り上げる。押し目は<b>出来高を減らして</b>浅く作り、ブレイクは<b>出来高を伴って</b>上放れる。大陽線が多く、下げは短く浅い。<b>唯一の買い場</b>で、SEPAの全エネルギーをここに集中する。</li>
+        <li><b>ステージ3(天井圏・分配期)</b> 上昇の勢いが鈍り、値動きが上下に荒くなる(ボラティリティ増大)。大口が一般投資家に静かに売り渡す「分配」の局面で、200日線の傾きが緩みフラットへ向かう。急騰後の乱高下・出来高を伴う大陰線が増える。<b>新規は避け、保有は利確・一部利食いでリスクを落とす</b>。</li>
+        <li><b>ステージ4(下降・下落期)</b> 200日線が明確に下向きになり、<b>50日 &lt; 150日 &lt; 200日</b>のデッド順へ。戻りは戻り売りに押され、安値を切り下げる。出来高を伴う下げが目立つ。<b>絶対に買わない</b>(空売りを検討する局面)。「安くなったから」と拾うのが最も危険。</li>
+      </ul>
+      <p class="invest-note">見分けの3軸: ①MAの並び(2はゴールデン順・4はデッド順) ②MAの傾き(200日線が上向きか下向きか) ③出来高(上昇日に増え、押し目に減るのが健全)。この3つが揃ってはじめてステージ2と判断する。ステージ1→2の転換初動を捉えられると、上昇のいちばん美味しい部分を取れる。</p>
+    </section>
+
+    <section class="invest-section" data-section="fundamentals">
+      <h3>ファンダメンタルズ(業績と触媒)</h3>
+      <p>大化け株の背後にはほぼ例外なく<b>急激な業績改善</b>がある。テクニカルは「いつ・いくらで買うか」を、ファンダは「なぜ大きく伸びるのか」を教えてくれる。両輪で見ることでブレイクアウトの成功率が上がる。</p>
+      <p><b>業績で見るポイント</b></p>
+      <ul>
+        <li><b>EPS(1株利益)成長</b> 直近四半期のEPSが前年同期比で大きく伸びている(目安+25%以上)。単発でなく<b>複数四半期の継続</b>が理想。</li>
+        <li><b>成長の加速</b> 成長率そのものが四半期ごとに上向いている(例: +20%→+35%→+60%)。減速局面より加速局面が強い。</li>
+        <li><b>売上の伸び</b> 利益だけでなく売上も伴って伸びている(コスト削減頼みの増益は息切れしやすい)。</li>
+        <li><b>利益率の改善</b> 営業利益率・純利益率が拡大している=ビジネスの質が上がっている。</li>
+        <li><b>ガイダンス・上方修正</b> 会社予想やアナリスト予想が上振れ・上方修正されている。</li>
+      </ul>
+      <p><b>触媒(カタリスト)</b> — 大口が買う「きっかけ」。新製品・新サービスのヒット、新薬や新技術の承認、経営陣の刷新、業界全体の需要爆発、規制や制度の変更、大型受注など。強い決算サプライズそのものも触媒になる。</p>
+      <p class="invest-note">「良い会社」を探すのではなく「今まさに業績が変わりつつある会社」を探すのがコツ。ファンダが良くてもステージ2に入っていなければ待つ。逆にファンダの裏付けが弱いブレイクは、サイズを落とすか見送る。</p>
+    </section>
+
+    <section class="invest-section" data-section="template">
+      <h3>トレンドテンプレート(8条件)</h3>
+      <p>ステージ2にあることを機械的に確認するための8つのMUST条件。感覚を排し、1つでも欠ければステージ2とは認めない。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 680 170" role="img" aria-label="株価と移動平均線の並び図">
+          <polyline class="fig-price" points="20,124 45,112 70,120 95,102 120,110 150,90 180,98 210,80 240,88 275,68 315,76 355,58 400,64 450,48 500,56 555,42 596,38" />
+          <line class="fig-ma fig-ma50" x1="20" y1="128" x2="596" y2="54" />
+          <line class="fig-ma" x1="20" y1="140" x2="596" y2="88" />
+          <line class="fig-ma" x1="20" y1="150" x2="596" y2="116" />
+          <text class="fig-label fig-label-buy" x="604" y="40" text-anchor="start">株価</text>
+          <text class="fig-label" x="604" y="58" text-anchor="start">50日</text>
+          <text class="fig-label" x="604" y="92" text-anchor="start">150日</text>
+          <text class="fig-label" x="604" y="120" text-anchor="start">200日</text>
+        </svg>
+        <figcaption>ステージ2の並び=上から株価&gt;50日&gt;150日&gt;200日。各線がそろって右肩上がり。</figcaption>
+      </figure>
+      <ol>
+        <li><b>終値が150日線・200日線より上</b> — 中長期の買い方が利益を持っている状態。</li>
+        <li><b>150日線が200日線より上</b> — 中期の勢いが長期を上回っている。</li>
+        <li><b>200日線が最低1ヶ月(理想は4〜5ヶ月以上)上向き</b> — 長期トレンドが確かに上を向いている。</li>
+        <li><b>50日線 &gt; 150日線 &gt; 200日線 の並び</b> — 短中長期がきれいなゴールデン順。</li>
+        <li><b>終値が50日線より上</b> — 短期でも買い方優位。</li>
+        <li><b>52週安値から+25%以上離れている</b> — 底値圏の停滞銘柄を除外(強いものは30〜100%以上離れる)。</li>
+        <li><b>52週高値から-25%以内(高値圏に近い)</b> — 高値を更新できる強さがある銘柄に絞る。</li>
+        <li><b>RSレーティングが70以上(理想は80〜90以上)</b> — 相対的強さ。市場・同業と比べて明確に強い。</li>
+      </ol>
+      <p class="invest-note">8条件は「入場資格」に過ぎず、合格しただけでは買わない。ここを通った銘柄の中から、ファンダと次のVCPで実際のエントリーを絞り込む。RSは高いほど良く、主導銘柄はRS90超が多い。</p>
+    </section>
+
+    <section class="invest-section" data-section="vcp">
+      <h3>VCP(値幅収縮パターン, V1〜V7)</h3>
+      <p>強い銘柄でも上昇前には必ず「収縮」する。上げが続くと利食い・投げが出て一度押すが、強い銘柄ほど押しが浅く・短くなっていく。この<b>売り圧力の減衰=供給の枯れ</b>を、値幅と出来高の両面から確認するのがVCP(Volatility Contraction Pattern)。チャート上は左が深く右が浅い、階段状に締まっていく「足あと」として現れる。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 232" role="img" aria-label="VCP 値幅収縮とブレイクの図">
+          <line class="fig-pivot" x1="118" y1="66" x2="470" y2="66" />
+          <text class="fig-label fig-label-warn" x="120" y="58" text-anchor="start">ピボット</text>
+          <polyline class="fig-price" points="20,150 60,108 90,120 120,66 150,102 175,128 205,94 235,70 262,96 285,110 308,88 330,72 352,92 372,98 394,84 415,74 432,84 448,88 466,70 484,60 512,42 548,28 578,20" />
+          <text class="fig-label" x="175" y="146" text-anchor="middle">深い</text>
+          <text class="fig-label" x="448" y="106" text-anchor="middle">浅い</text>
+          <g class="fig-vol">
+            <rect x="44" y="182" width="12" height="30" />
+            <rect x="114" y="188" width="12" height="24" />
+            <rect x="169" y="192" width="12" height="20" />
+            <rect x="229" y="194" width="12" height="18" />
+            <rect x="279" y="198" width="12" height="14" />
+            <rect x="324" y="201" width="12" height="11" />
+            <rect x="366" y="204" width="12" height="8" />
+            <rect x="409" y="206" width="12" height="6" />
+            <rect x="442" y="207" width="12" height="5" />
+          </g>
+          <rect class="fig-vol-spike" x="480" y="170" width="14" height="42" />
+          <text class="fig-label" x="405" y="228" text-anchor="middle">出来高ドライアップ</text>
+          <text class="fig-label fig-label-buy" x="512" y="164" text-anchor="middle">ブレイク↑</text>
+        </svg>
+        <figcaption>押しが深→浅と収縮し安値は切り上がる。出来高が枯れた後、ピボットを出来高増で上抜けた点が本来のエントリー。</figcaption>
+      </figure>
+      <ol>
+        <li><b>V1 収縮の回数</b> 押し(収縮)が2〜6回。回数はTで数える(2T・3T…)。</li>
+        <li><b>V2 収縮の深さが逓減</b> 押しの深さが段階的に浅くなる(例: 25%→15%→8%)。これが最重要。</li>
+        <li><b>V3 最初の収縮が35%以内</b> 初回の押しが深すぎない(ダメージが大きすぎない)。</li>
+        <li><b>V4 最後の収縮が10%以内</b> 直前の押しがタイト(理想は数%)。タイトなほど良い。</li>
+        <li><b>V5 出来高のドライアップ</b> 収縮の終盤で出来高が枯れる(直近10日平均が50日平均の0.8倍以下)。売り手が居なくなった証拠。</li>
+        <li><b>V6 ベース期間</b> ベース全体が15〜200日。短すぎず長すぎず。</li>
+        <li><b>V7 安値の切り上がり</b> 収縮のたびに安値が切り上がる(下値を支える買いが強い)。</li>
+      </ol>
+      <p>V字急反発のように一気に高値へ戻る「ワイドでルーズ」なベースは、供給がまだ残っていて失敗しやすい。逆に、最後の収縮がタイト(数%)で出来高がカラカラに乾いているほど、わずかな買いで飛びやすい良形になる。ベースの中でエントリーを前倒しする<b>チート(cheat)/ロー・チート</b>という早仕掛けもあるが、まずは正統なピボット上抜けを基本にする。</p>
+      <p class="invest-note">VCPが完成しただけではまだ買わない。ピボット(直近の抵抗ライン=最後の小さな収縮の高値)を出来高を伴って上抜けた瞬間が本来のエントリーポイント。</p>
+    </section>
+
+    <section class="invest-section" data-section="entry">
+      <h3>エントリーの実例</h3>
+      <p>ピボットは「最後の小さな収縮の高値=ベースの直近の抵抗ライン」。そこを平時より明確に多い出来高(目安: 50日平均の1.5倍以上)で上抜けたバーの引けで買うのが基本形。逆指値でブレイク価格に置いておき、抜けたら乗る形でも良い。狙いは「抵抗を抜けて、そこが今度は支持に変わる」瞬間。</p>
+      <figure class="invest-fig">
+        <svg viewBox="0 0 640 210" role="img" aria-label="ピボット上抜けエントリーの図">
+          <line class="fig-pivot" x1="40" y1="82" x2="470" y2="82" />
+          <text class="fig-label fig-label-warn" x="44" y="74" text-anchor="start">ピボット(抵抗→支持)</text>
+          <polyline class="fig-price" points="20,120 55,102 95,112 135,94 175,100 215,90 255,96 300,88 345,92 378,88" />
+          <rect class="fig-up" x="398" y="42" width="18" height="52" />
+          <line class="fig-up-wick" x1="407" y1="30" x2="407" y2="42" />
+          <polyline class="fig-price" points="416,46 450,40 486,32 520,26" />
+          <g class="fig-vol">
+            <rect x="52" y="176" width="10" height="16" />
+            <rect x="132" y="178" width="10" height="14" />
+            <rect x="212" y="180" width="10" height="12" />
+            <rect x="297" y="182" width="10" height="10" />
+            <rect x="375" y="183" width="10" height="9" />
+          </g>
+          <rect class="fig-vol-spike" x="399" y="150" width="16" height="42" />
+          <text class="fig-label fig-label-buy" x="440" y="150" text-anchor="middle">出来高急増でブレイク</text>
+        </svg>
+        <figcaption>抵抗(ピボット)まで浅い収縮でタメ、出来高急増を伴って抜けたバーの引けで買う。抜けた抵抗は以後の支持になる。</figcaption>
+      </figure>
+      <p><b>良いブレイクアウト(仕掛けたい形)</b></p>
+      <ul>
+        <li>最終収縮がタイト(値幅10%以内、理想は数%)で、直前に出来高がドライアップしている。</li>
+        <li>ブレイク当日に出来高が急増(平均比+50%〜、理想は2倍前後)、ローソクの実体が大きく引けが高い。</li>
+        <li>ピボットからまだ+2〜3%以内で、追いかけずに済む位置で入れる。</li>
+        <li>市場全体(指数)がステージ2で、地合いが追い風。同業・同テーマにも強い銘柄が並ぶ。</li>
+      </ul>
+      <p><b>悪いブレイクアウト(だまし・見送る形)</b></p>
+      <ul>
+        <li>出来高が伴わない静かな上抜け(参加者が薄い=戻されやすい)。</li>
+        <li>ベースがワイドでルーズ、V字急反発で高値に戻ってきただけ。</li>
+        <li>ピボットから+5%以上離れて過熱(EXTENDED)、高値掴みになる位置。</li>
+        <li>指数が調整・下落局面で、個別だけ突出している(続きにくい)。</li>
+      </ul>
+      <p class="invest-note">ブレイク後にすぐピボットを割り込んで戻ってきたら「だまし」を疑う。損切りライン(リスク管理の項)に触れたら機械的に撤退し、同じ銘柄でも形が整え直すまで追わない。1回目が失敗しても、2回目・3回目のベースで決まることは多い。</p>
+    </section>
+
+    <section class="invest-section" data-section="market">
+      <h3>地合い / 市場全体の判定</h3>
+      <p>個別が良くても、市場全体が下落トレンドだとブレイクアウトの多くは失敗する。統計的にも個別株の値動きの多くは指数に連動するため、「<b>指数がステージ2の時にフルに攻め、それ以外は守る</b>」のが大原則。エンジンがかかった市場(market in gear)でだけアクセルを踏む。</p>
+      <ul>
+        <li><b>フォロースルーデイ(FTD)</b> 下げが一度底を試して反発した後、反発<b>4〜7日目</b>あたりで指数が<b>出来高増を伴って+1.5%以上</b>上昇する日。上昇トレンド転換の初動サインで、ここから新規の点数・サイズを段階的に上げていく。</li>
+        <li><b>ディストリビューションデイ(売り抜け日)</b> 指数が前日より出来高を増やして下落する日。大口の売りを示す。短期間(3〜4週)に4〜5回積み上がったら、上昇トレンドの黄〜赤信号。</li>
+        <li><b>攻めと守りの切替</b> 地合い良好=新規を増やしフルインベストへ。地合い悪化=新規を絞る/サイズ縮小/現金比率を上げる/利の乗らない玉を外す。自分のブレイクアウトが失敗続きなのも、地合い悪化を示す生きたシグナル。</li>
+      </ul>
+      <p class="invest-note">このダッシュボードの「市況概要」(指数カードの前日比グラデ)で全体の温度感をまず確認してから個別を見ると、逆風下での無駄なエントリーを減らせる。地合いの判定は個別の分析より先に行うのがコツ。</p>
+    </section>
+
+    <section class="invest-section" data-section="risk">
+      <h3>リスク管理・資金管理</h3>
+      <p>SEPAの生命線は「損は小さく、利は伸ばす」の<b>非対称性</b>。勝率(バッティングアベレージ)が50%を割っても、平均利益が平均損失の2倍以上あればトータルで勝てる。だからこそ、当てることより「負けを小さく揃える」ことを最優先する。</p>
+      <ul>
+        <li><b>損切りは-7〜8%が機械的な上限</b> 買値からこの幅に触れたら理由を問わず撤退。VCPが締まった良い位置で入れれば、実際の損切りはもっと浅く(-3〜5%)できる。上限は「これ以上は絶対に待たない」ライン。</li>
+        <li><b>1トレードのリスクは口座の1.25〜2%</b> 1回の負けで資金を大きく削らないための上限。連敗しても致命傷にならない水準に抑える。</li>
+        <li><b>ポジションサイズ = 許容損失額 ÷ (エントリー価格 − 損切り価格)</b> で逆算する。損切り幅が広い銘柄ほど枚数を減らし、<b>どの銘柄でも1回の負け額を揃える</b>のがポイント。「いくら儲かるか」より先に「いくらまで負けられるか」から株数を決める。</li>
+        <li><b>集中しすぎない</b> 同時保有は地合いに応じて数銘柄〜十数銘柄程度に分散。1銘柄への過度な集中は、1つの決算やニュースで口座が吹き飛ぶリスクになる。</li>
+        <li><b>段階的な資金投入(プログレッシブ・エクスポージャー)</b> 最初は試し玉で入り、含み益が出て正しさが確認できたら買い増す。うまくいっている時だけエクスポージャーを増やす。</li>
+        <li><b>買い増し(ピラミッディング)は初動だけ</b> ブレイク直後の含み益が出ている間に少量ずつ、平均取得単価を大きく引き上げない範囲で。伸びきってからの買い増しはやらない。</li>
+        <li><b>連敗時は縮小</b> ドローダウンが続いたらサイズを落とすか一旦手を止める。地合いが戻り、自分のトレードが噛み合い出すまで無理に張らない。</li>
+      </ul>
+    </section>
+
+    <section class="invest-section" data-section="exit">
+      <h3>利益確定とポジション管理</h3>
+      <p>売りには「<b>強さで売る</b>(上げている最中に利確)」と「<b>弱さで売る</b>(崩れたら撤退)」の2種類がある。両方を状況で使い分ける。</p>
+      <ul>
+        <li><b>まず無リスク化</b> 含み益が乗ったら損切りラインを建値まで引き上げる(ブレイクイーブンストップ)。最悪でも負けないポジションにしてから利を伸ばす。</li>
+        <li><b>弱さで売る(トレーリング)</b> 利が乗った後は、直近スイングロー割れや50日線割れなど、トレンドが崩れたサインで手仕舞う。トレンドが続く限り持ち、崩れたら降りる。</li>
+        <li><b>強さで売る(クライマックス)</b> 急騰・出来高急増・連日の大陽線・窓を空けた飛びつき買いなどは「買われすぎ」のサイン。過熱した強さの中で一部を利確する。</li>
+        <li><b>決算・イベント跨ぎ</b> 決算跨ぎは一晩で大きく飛ぶ値幅リスクがある。ポジションサイズを事前に調整するか、跨がない判断も選択肢にする。</li>
+        <li><b>非対称性を守る</b> 勝ちトレードは伸ばし、負けトレードは素早く切る。これが崩れると、いくら良い銘柄を選んでもトータルでは勝てない。</li>
+      </ul>
+    </section>
+
+    <section class="invest-section" data-section="map">
+      <h3>このダッシュボードとの対応</h3>
+      <p>本ダッシュボードの3ティアは、SEPAの絞り込みステップにそのまま対応している。上から順に条件が厳しくなる。</p>
+      <ul>
+        <li><b>〔監視〕</b> トレンドテンプレート8条件に合格(=ステージ2入り)。まだタイミングは来ていないが、ステージ2にある候補群。「あと一歩」「ベース形成中」などのセットアップ進行度で枠分けしている。</li>
+        <li><b>〔候補〕</b> 監視の中でVCPが完成し、テクニカルの引き金が整った段階。ブレイクアウト・ブレイクアウト直前など、実際に手を出しうる状態。</li>
+        <li><b>〔本命〕</b> 候補のうち、ファンダメンタルズの裏付けまで確認できたもの。SEPAの5本柱がもっとも揃った、優先的に狙うグループ。</li>
+      </ul>
+      <p class="invest-note">毎日ざっと見るなら「市況概要で地合い → 監視の"あと一歩" → 候補/本命」の順が効率的。地合いが悪い日は無理に新規を探さない、というルールと合わせて使う。</p>
+    </section>
+
+    <!-- 2026-07-29追加。tech_score 全面作り直しの検証結果(log.md (140))をそのまま読み物化したもの。
+         数字を書き換えるときは必ず再検証の結果と対で更新すること。 -->
+    <section class="invest-section" data-section="edge">
+      <h3>このツールの閾値と、実測したエッジ</h3>
+      <p>ここまでは書籍どおりのSEPAの説明。このページだけは、<b>このツールが実際に使っている閾値</b>と、それを2000〜2026年の日本株で検証した結果をそのまま載せている。数字の出どころが分かっていないと、スクリーナーの結果をどこまで信じてよいか判断できないため。</p>
+      <p>評価の物差しは<b>期待値(R)</b><button type="button" class="help-btn" data-help="expectancy_r" aria-label="用語説明: 期待値(R)">?</button>で、勝率は使わない。比較の基準は<b>ベースライン +0.126R</b><button type="button" class="help-btn" data-help="edge_baseline" aria-label="用語説明: ベースライン(+0.126R)">?</button> — MUST条件<button type="button" class="help-btn" data-help="must_condition" aria-label="用語説明: MUST条件">?</button>を通ったブレイクアウトを絞り込まず全部取った場合の値(約51,000件)。</p>
+
+      <h4>1. 足切り(MUST条件)の閾値</h4>
+      <ul>
+        <li><b>200日線が21営業日以上連続で上向き</b> — 「最低1ヶ月」の実装値。</li>
+        <li><b>52週安値の1.25倍以上</b>(+25%以上離れている)。</li>
+        <li><b>52週高値の0.75倍以上</b>(高値から-25%以内)。</li>
+        <li><b>RSレーティング<button type="button" class="help-btn" data-help="rs_rating" aria-label="用語説明: RSレーティング">?</button> 70以上</b>。</li>
+      </ul>
+      <p>これらは書籍どおりで、変更していない。ここは「入場資格」なので緩めるつもりはない。</p>
+
+      <h4>2. 順位付け(テクニカルスコア)に使う3変数</h4>
+      <p>2026年7月29日に、テクニカルスコア<button type="button" class="help-btn" data-help="tech_score" aria-label="用語説明: テクニカルスコア">?</button>を全面的に作り替えた。使うのは次の3変数だけで、<b>等ウェイト</b><button type="button" class="help-btn" data-help="equal_weight" aria-label="用語説明: 等ウェイト">?</button>の<b>断面パーセンタイル</b><button type="button" class="help-btn" data-help="cross_section_rank" aria-label="用語説明: 断面パーセンタイル">?</button>平均。閾値も重みも1つも持っていない。</p>
+      <div class="invest-table-wrap">
+        <table class="invest-table">
+          <thead>
+            <tr><th>変数</th><th>期待値の幅</th><th>局面安定性<button type="button" class="help-btn" data-help="regime_stability" aria-label="用語説明: 局面安定性">?</button></th></tr>
+          </thead>
+          <tbody>
+            <tr><td>200日線の21日上昇率<button type="button" class="help-btn" data-help="ma200_slope_21d" aria-label="用語説明: 200日線の21日上昇率">?</button></td><td class="num pos">+0.277R</td><td class="num">8勝1敗</td></tr>
+            <tr><td>52週安値からの倍率<button type="button" class="help-btn" data-help="low52w_ratio" aria-label="用語説明: 52週安値からの倍率">?</button></td><td class="num pos">+0.216R</td><td class="num">6勝4敗</td></tr>
+            <tr><td>出来高の枯れ度<button type="button" class="help-btn" data-help="dryup" aria-label="用語説明: 枯れ度(出来高ドライアップ)">?</button></td><td class="num pos">−0.142R</td><td class="num">9勝2敗</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="invest-note">枯れ度がマイナス表記なのは「値が小さいほど期待値が高い」ため。スコアでは符号を反転して扱っている。数字の絶対値ではなく、11局面をまたいで符号が反転しないことのほうが重要。</p>
+
+      <h4>3. 点数に使わない変数(あえて捨てたもの)</h4>
+      <p>MUST条件としては残しつつ、<b>点数への配分をゼロにした</b>変数がある。足切りに有効なことと、通過した銘柄の中で順位を付けられることは別だった。</p>
+      <ul>
+        <li><b>RS</b>(旧配分54.5%) — 通過銘柄内での期待値の幅は<b>+0.019R</b>、7勝4敗。ほぼ効かない。</li>
+        <li><b>52週高値への近さ</b>(旧配分27.3%) — <b>−0.035R</b>、5勝6敗。しかも山型で、<b>高値に近すぎる(0.98倍以上)ほど成績が悪い</b>。</li>
+        <li><b>200日線が上向きの連続日数</b>(旧配分18.2%) — <b>+0.025R</b>、5勝5敗。300日超えは逆に悪化。角度(強度)とは別物で、こちらは効かなかった。</li>
+      </ul>
+
+      <h4>4. 作り替え前後の比較(26年・11局面)</h4>
+      <p>旧スコアの上位20%は<b>+0.117R</b>で、<b>絞り込まないベースライン(+0.126R)を下回っていた</b>。つまり順位付けが逆効果だった。新スコアの上位20%は<b>+0.209R</b>で、11局面中<b>10局面で旧を上回った</b>。</p>
+      <div class="invest-table-wrap">
+        <table class="invest-table">
+          <thead><tr><th>絞り込み</th><th>期待値(全期間)</th><th>旧に勝った局面</th></tr></thead>
+          <tbody>
+            <tr><td>絞り込みなし</td><td class="num">+0.126R</td><td class="num">—</td></tr>
+            <tr><td>旧スコア 上位20%</td><td class="num neg">+0.117R</td><td class="num">—</td></tr>
+            <tr><td>新スコア 上位20%</td><td class="num pos">+0.209R</td><td class="num">10 / 11</td></tr>
+            <tr><td>新スコア 上位50%</td><td class="num pos">+0.161R</td><td class="num">7 / 11</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>5. 数字の読み方についての注意</h4>
+      <ul>
+        <li><b>閾値の最適値は探していない</b> — 探す行為そのものが<b>カーブフィッティング</b><button type="button" class="help-btn" data-help="curve_fitting" aria-label="用語説明: カーブフィッティング">?</button>になる。見ているのは分布上の位置・単調性・局面をまたいだ符号の安定性の3つだけ。</li>
+        <li><b>局面差のほうが大きい</b> — 同じスコア上位でも、良い局面(+0.45R)と悪い局面(−0.21R)の差は<b>0.41R以上</b>あり、どの変数の効果よりも大きい。<b>銘柄選びより地合いの判断が先</b>という結論はここから出ている。</li>
+        <li><b>生存バイアスは未補正</b> — 上場廃止銘柄が検証データに含まれていないため、実測値は実際よりやや良い方向にずれている可能性がある。局面間の比較には影響しにくいが、絶対値はそのまま将来の期待値とは読めない。</li>
+        <li><b>手数料・スリッページは含まない</b> — 約定できる前提で計算している。値幅制限やザラ場の板の薄さは考慮していない。</li>
+      </ul>
+      <p class="invest-note">このページの数字は、検証をやり直すたびに更新される。検証の詳細な経緯とデータはリポジトリの log.md に残してある。</p>
+    </section>
+
+  </div>
+
+  <nav class="invest-pager-nav" id="invest-pager-nav">
+    <a class="invest-pager-btn" id="invest-prev" href="#invest"><i class="bi bi-chevron-left"></i> 前に</a>
+    <span class="invest-pager-pos" id="invest-pager-pos"></span>
+    <a class="invest-pager-btn" id="invest-next" href="#invest">次に <i class="bi bi-chevron-right"></i></a>
+  </nav>
+</section>
+
+<section id="view-positions" class="view-section" hidden>
+  <h2>保有ポジション</h2>
+  <div id="positions-meta" class="meta-line"></div>
+  <p class="tier-note" id="positions-empty" hidden></p>
+  <div id="positions-table-wrap"></div>
+  <p class="tier-note" id="positions-warnings" hidden></p>
+</section>
+
+<section id="view-batch" class="view-section batch-view" hidden>
+  <h2>設定</h2>
+
+  <div class="settings-subpanels">
+  <div class="settings-subpanel active" data-subpanel="batch">
+  <section class="settings-section">
+    <h3>アクセス</h3>
+    <p class="tier-note">書き込み操作(バッチ手動実行・ファンダ手動入力)を行うには解錠が必要です。</p>
+    <!-- パスキー解錠(書き込み用PAT)。ロック画面を素通しした(平文データ等)後に
+         PATを解錠する唯一の手段。app.js initVaultUi がラベル/クリックを制御する。 -->
+    <button type="button" id="vault-unlock-btn" class="secondary passkey-gated">🔓 解錠</button>
+  </section>
+
+  <section class="settings-section">
+    <h3>バッチ実行</h3>
+    <p class="tier-note">GitHub Actionsのワークフローを手動でトリガーできます。実行には🔓解錠(書き込み権限のあるGitHub PAT)が必要です。</p>
+    <div id="batch-cards" class="batch-cards passkey-gated"></div>
+    <div id="batch-history"></div>
+  </section>
+  </div>
+
+  <div class="settings-subpanel" data-subpanel="filter">
+  <section class="settings-section">
+    <h3>銘柄リストのフィルタ</h3>
+    <p class="tier-note">ここで設定した条件は、次に変更するまで銘柄リスト(本命/候補/監視)に永続で適用されます。空欄の項目は無視します。指標データが無い銘柄はそのフィルタでは除外しません。</p>
+    <div class="list-filter-form" id="list-filter-form">
+      <div class="lf-group">
+        <span class="lf-group-title">株価</span>
+        <div class="lf-range">
+          <input type="number" id="lf-min-close" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="株価の下限(円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="lf-max-close" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="株価の上限(円)">
+          <span class="lf-unit">円</span>
+        </div>
+      </div>
+      <div class="lf-group">
+        <span class="lf-group-title">時価総額</span>
+        <div class="lf-range">
+          <input type="number" id="lf-min-mcap" min="0" step="1" inputmode="numeric" placeholder="下限" aria-label="時価総額の下限(億円)">
+          <span class="lf-range-sep">〜</span>
+          <input type="number" id="lf-max-mcap" min="0" step="1" inputmode="numeric" placeholder="上限" aria-label="時価総額の上限(億円)">
+          <span class="lf-unit">億円</span>
+        </div>
+      </div>
+      <div class="lf-row">
+        <label class="lf-field">
+          <span class="lf-label">RSレーティング <small>以上</small></span>
+          <input type="number" id="lf-min-rs" min="0" max="99" step="1" inputmode="numeric" placeholder="例: 80">
+        </label>
+        <label class="lf-field">
+          <span class="lf-label">総合スコア <small>以上</small></span>
+          <input type="number" id="lf-min-score" min="0" step="1" inputmode="numeric" placeholder="例: 60">
+        </label>
+      </div>
+      <div class="lf-group">
+        <div class="lf-group-head">
+          <span class="lf-group-title">市場</span>
+          <button type="button" class="lf-toggle-all" data-target="lf-show-segments">全て</button>
+        </div>
+        <div class="lf-chips" id="lf-show-segments">
+          <label class="lf-chip"><input type="checkbox" value="プライム" checked><span>プライム</span></label>
+          <label class="lf-chip"><input type="checkbox" value="スタンダード" checked><span>スタンダード</span></label>
+          <label class="lf-chip"><input type="checkbox" value="グロース" checked><span>グロース</span></label>
+        </div>
+      </div>
+      <div class="lf-actions">
+        <button type="button" id="lf-clear-btn" class="secondary">クリア</button>
+        <span id="lf-status" class="lf-status">フィルタなし</span>
+        <button type="button" id="lf-apply-btn" class="primary lf-apply">適用</button>
+      </div>
+    </div>
+    <!-- 状態(待機/ブレイク/追禁 等)の表示切替は、日々変わる
+         「今日どれを見るか」の話なので恒久フィルタには置かず、リスト画面側の
+         一時フィルタに集約している。ここに無いのは実装漏れではないので明記する。 -->
+    <p class="tier-note lf-foot-note"><i class="bi bi-info-circle"></i> 状態(追禁・形成中等)の表示切替は、日々切り替える設定なので<strong>リスト画面の <i class="bi bi-funnel"></i> フィルタ</strong>にあります。</p>
+  </section>
+  </div>
+
+  <div class="settings-subpanel" data-subpanel="invest">
+  <section class="settings-section">
+    <h3>投資法(SEPA)の解説</h3>
+    <p class="tier-note">読みたい項目を選ぶと、その解説を開く(下部の前に/次にで順送りもできる)。</p>
+    <div class="settings-link-list">
+      <a href="#invest/cycle" class="settings-link-card">
+        <i class="bi bi-1-circle"></i>
+        <span class="settings-link-text"><strong>SEPAの基本サイクル</strong><span class="tier-note">手法の全体像と5つの柱</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/stage" class="settings-link-card">
+        <i class="bi bi-2-circle"></i>
+        <span class="settings-link-text"><strong>ステージ分析(4局面)</strong><span class="tier-note">今どこにいるかの見分け方</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/fundamentals" class="settings-link-card">
+        <i class="bi bi-3-circle"></i>
+        <span class="settings-link-text"><strong>ファンダメンタルズ</strong><span class="tier-note">増益・利益率・触媒</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/template" class="settings-link-card">
+        <i class="bi bi-4-circle"></i>
+        <span class="settings-link-text"><strong>トレンドテンプレート(8条件)</strong><span class="tier-note">ステージ2を機械判定するMUST条件</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/vcp" class="settings-link-card">
+        <i class="bi bi-5-circle"></i>
+        <span class="settings-link-text"><strong>VCP(値幅収縮)</strong><span class="tier-note">供給の枯れをV1〜V7で確認</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/entry" class="settings-link-card">
+        <i class="bi bi-6-circle"></i>
+        <span class="settings-link-text"><strong>エントリーの実例</strong><span class="tier-note">ピボット買いと良し悪しの見分け</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/market" class="settings-link-card">
+        <i class="bi bi-7-circle"></i>
+        <span class="settings-link-text"><strong>地合い / 市場全体の判定</strong><span class="tier-note">FTD・売り抜け日・攻守の切替</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/risk" class="settings-link-card">
+        <i class="bi bi-8-circle"></i>
+        <span class="settings-link-text"><strong>リスク管理・資金管理</strong><span class="tier-note">損切り・サイズ・段階投入</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/exit" class="settings-link-card">
+        <i class="bi bi-9-circle"></i>
+        <span class="settings-link-text"><strong>利益確定とポジション管理</strong><span class="tier-note">強さで売る/弱さで売る</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/map" class="settings-link-card">
+        <i class="bi bi-grid-3x3-gap"></i>
+        <span class="settings-link-text"><strong>このダッシュボードとの対応</strong><span class="tier-note">本命/候補/監視との対応</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+      <a href="#invest/edge" class="settings-link-card">
+        <i class="bi bi-clipboard-data"></i>
+        <span class="settings-link-text"><strong>このツールの閾値と実測エッジ</strong><span class="tier-note">2000-2026年の検証結果と数字の読み方</span></span>
+        <i class="bi bi-chevron-right settings-link-chevron"></i>
+      </a>
+    </div>
+  </section>
+  </div>
+  </div>
+
+  <div class="settings-subtabs settings-subtabs-bottom" id="settings-subtabs" role="tablist">
+    <button type="button" class="settings-subtab active" data-subtab="batch" role="tab">バッチ実行/履歴</button>
+    <button type="button" class="settings-subtab" data-subtab="filter" role="tab">フィルター設定</button>
+    <button type="button" class="settings-subtab" data-subtab="invest" role="tab">投資法</button>
+  </div>
+</section>
+
+<section id="view-stock" class="view-section stock-view" hidden>
+  <div class="stock-header">
+    <h1 id="stock-title"></h1>
+  </div>
+
+  <div class="stock-panels" id="stock-panels">
+    <div class="stock-panel" data-panel="summary">
+      <div id="stock-meta" class="meta-chips"></div>
+      <div class="stock-actions">
+        <button type="button" id="copy-stock-data-btn" hidden>分析用データをコピー</button>
+        <a id="yahoo-finance-link" class="yahoo-link" href="#" target="_blank" rel="noopener noreferrer" hidden><i class="bi bi-box-arrow-up-right"></i> Yahoo!ファイナンス</a>
+      </div>
+      <div id="stock-summary" class="stock-summary" hidden></div>
+      <section class="detail-card">
+        <h2>スコア内訳</h2>
+        <div id="score-breakdown"></div>
+      </section>
+      <section class="detail-card">
+        <h2>MUST条件チェックリスト</h2>
+        <div id="must-checklist"></div>
+      </section>
+      <!-- footprint("11W 19/5/3 3T")は深さしか持たないので、各収縮が「いつ・
+           何日かけて」形成されたかを表で補う。深さ5%でも29営業日かけた収縮と
+           3日で終わった収縮ではまったく意味が違う。 -->
+      <section class="detail-card">
+        <h2>収縮の内訳</h2>
+        <div id="contraction-table"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="chart">
+      <!-- 株価/出来高/RSは1枚のカードに統合(チャートインスタンスは3つ別々のまま)。
+           出来高/RSのラベルはチャート左上のオーバーレイで高さゼロ。
+           期間切替(1ヶ月/3ヶ月/…)はチャート下部に配置。 -->
+      <section class="chart-card chart-stack">
+        <div class="chart-card-head">
+          <h2>株価・移動平均線</h2>
+          <div class="line-toggles">
+            <label class="line-toggle"><input type="checkbox" id="toggle-vcp" checked> VCP</label><button type="button" class="help-btn" data-help="vcp_line" aria-label="用語説明: VCPライン">?</button>
+            <label class="line-toggle"><input type="checkbox" id="toggle-pivot"> ピボット</label><button type="button" class="help-btn" data-help="pivot" aria-label="用語説明: ピボット">?</button>
+            <label class="line-toggle"><input type="checkbox" id="toggle-stop"> 損切り</label><button type="button" class="help-btn" data-help="stop" aria-label="用語説明: 損切り(ストップ)">?</button>
+          </div>
+          <div id="ohlc-legend" class="ohlc-legend"></div>
+        </div>
+        <div id="chart-container" class="chart-box"></div>
+        <div class="chart-sub" id="volume-card">
+          <span class="chart-sub-label">出来高</span>
+          <div id="volume-container" class="chart-box chart-box-small"></div>
+        </div>
+        <div class="chart-sub" id="rs-card">
+          <span class="chart-sub-label">RS（対TOPIX）<button type="button" class="help-btn" data-help="rs_line" aria-label="用語説明: RS(対TOPIX)">?</button></span>
+          <div id="rs-container" class="chart-box chart-box-small"></div>
+        </div>
+        <div id="chart-date-axis" class="chart-date-axis" aria-hidden="true"></div>
+      </section>
+
+      <div class="chart-toolbar chart-toolbar-bottom">
+        <div class="segmented" id="timeframe-toggle">
+          <button type="button" data-tf="22" class="active">1ヶ月</button>
+          <button type="button" data-tf="66">3ヶ月</button>
+          <button type="button" data-tf="130">半年</button>
+          <button type="button" data-tf="250">1年</button>
+          <button type="button" data-tf="500">2年</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stock-panel" data-panel="margin">
+      <section class="detail-card">
+        <h2>需給(信用取引)</h2>
+        <div id="margin-detail-body"></div>
+      </section>
+      <section class="detail-card">
+        <div class="margin-card-head">
+          <h2>信用倍率の推移</h2>
+          <div class="segmented margin-view-toggle" id="margin-view-toggle">
+            <button type="button" data-mview="chart" class="active">グラフ</button>
+            <button type="button" data-mview="table">表</button>
+          </div>
+        </div>
+        <div id="margin-view-chart" class="margin-view">
+          <div class="segmented margin-tf-toggle" id="margin-tf-toggle">
+            <button type="button" data-mtf="1" class="active">1ヶ月</button>
+            <button type="button" data-mtf="3">3ヶ月</button>
+            <button type="button" data-mtf="6">半年</button>
+            <button type="button" data-mtf="12">1年</button>
+          </div>
+          <div id="margin-ratio-chart" class="margin-chart-box"></div>
+          <p id="margin-chart-empty" class="tier-note" hidden>推移グラフに必要な履歴データがありません</p>
+        </div>
+        <div id="margin-view-table" class="margin-view" hidden>
+          <div id="margin-table-body" class="margin-table"></div>
+          <button type="button" id="margin-table-more" class="margin-more-btn" hidden>+ もっと見る</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="fund">
+      <section class="detail-card">
+        <h2>ファンダメンタルズ</h2>
+        <div id="fund-detail-body"></div>
+      </section>
+    </div>
+
+    <div class="stock-panel" data-panel="sizing">
+      <section class="detail-card" id="sizing-card">
+        <h2>ポジションサイジング</h2>
+        <div class="sizing-inputs">
+          <label class="sizing-field">
+            総資金(円)
+            <input type="number" id="sizing-capital" min="0" step="10000" inputmode="numeric" placeholder="例: 10000000">
+          </label>
+          <div class="sizing-field">
+            1トレードあたりリスク(%)<button type="button" class="help-btn" data-help="risk_pct" aria-label="用語説明: 1トレードあたりリスク(%)">?</button>
+            <div class="segmented" id="sizing-risk-toggle">
+              <button type="button" data-risk="0.5">0.5%</button>
+              <button type="button" data-risk="0.75">0.75%</button>
+              <button type="button" data-risk="1.0" class="active">1.0%</button>
+              <button type="button" data-risk="1.25">1.25%</button>
+            </div>
+          </div>
+        </div>
+        <div id="sizing-result"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="stock-tabs-bar">
+    <button type="button" class="stock-nav-btn" id="stock-nav-next" aria-label="次の銘柄へ"><i class="bi bi-chevron-left"></i></button>
+    <div class="stock-tabs" id="stock-tabs" role="tablist">
+      <button type="button" class="stock-tab active" data-panel="summary" role="tab" aria-label="サマリー"><i class="bi bi-card-text st-icon"></i><span class="st-label">サマリー</span></button>
+      <button type="button" class="stock-tab" data-panel="chart" role="tab" aria-label="グラフ"><i class="bi bi-graph-up st-icon"></i><span class="st-label">グラフ</span></button>
+      <button type="button" class="stock-tab" data-panel="margin" role="tab" aria-label="需給"><i class="bi bi-bar-chart-line st-icon"></i><span class="st-label">需給</span></button>
+      <button type="button" class="stock-tab" data-panel="fund" role="tab" aria-label="ファンダ"><i class="bi bi-clipboard-data st-icon"></i><span class="st-label">ファンダ</span></button>
+      <button type="button" class="stock-tab" data-panel="sizing" role="tab" aria-label="ロット"><i class="bi bi-calculator st-icon"></i><span class="st-label">ロット</span></button>
+    </div>
+    <button type="button" class="stock-nav-btn" id="stock-nav-prev" aria-label="前の銘柄へ"><i class="bi bi-chevron-right"></i></button>
+  </div>
+</section>
+
+</main>
+
+<nav class="dock-nav" id="dock-nav">
+  <button type="button" class="dock-btn" data-view="dashboard" title="市況" aria-label="市況"><i class="bi bi-graph-up-arrow dock-icon"></i><span class="dock-label">市況</span></button>
+  <button type="button" class="dock-btn" data-view="heatmap" title="セクターヒートマップ" aria-label="セクターヒートマップ"><i class="bi bi-grid-3x3-gap-fill dock-icon"></i><span class="dock-label">セクター</span></button>
+  <button type="button" class="dock-btn" data-view="stocklist" title="銘柄リスト" aria-label="銘柄リスト"><i class="bi bi-list-ul dock-icon"></i><span class="dock-label">リスト</span></button>
+  <button type="button" class="dock-btn" data-view="positions" title="保有" aria-label="保有"><i class="bi bi-briefcase-fill dock-icon"></i><span class="dock-label">保有</span></button>
+  <button type="button" class="dock-btn" data-view="batch" title="設定" aria-label="設定"><i class="bi bi-gear-fill dock-icon"></i><span class="dock-label">設定</span></button>
+</nav>
+
+<script src="assets/config.js?v=eac8f02e"></script>
+<script src="assets/secure-fetch.js?v=d0729505"></script>
+<script src="assets/github-api.js?v=85463b38"></script>
+<script src="assets/webauthn-vault.js?v=9c0129c2"></script>
+<script src="assets/fundamentals-modal.js?v=419c69f8"></script>
+<script src="assets/heatmap.js?v=78ef6740"></script>
+<script src="assets/batch.js?v=e3e065be"></script>
+<script src="assets/app.js?v=f5568601"></script>
+</body>
+</html>
