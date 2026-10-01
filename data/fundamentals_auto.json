@@ -11700,69 +11700,76 @@
   "source": "jquants"
  },
  "2502": {
-  "checked_date": "2026-03-10",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-06-11",
-   "feps": 80.24,
-   "fsales": 2890000000000.0,
+   "disc_date": "2026-07-08",
+   "feps": null,
+   "fsales": null,
    "fy_start": "2025-01-01",
-   "nx_feps": null,
-   "nx_fsales": null,
+   "nx_feps": 129.71,
+   "nx_fsales": 3220000000000.0,
    "per_n": 4,
-   "shares_fy": null
+   "shares_fy": 1521010086.0
   },
   "quarters": [
    {
     "disc_date": "2024-05-14",
-    "eps": 15.8546,
+    "eps": 16.2923,
     "fiscal_quarter": "2024Q1",
     "ni": 23830000000.0,
     "revenue": 616614000000.0
    },
    {
     "disc_date": "2024-08-07",
-    "eps": 34.9532,
+    "eps": 35.9182,
     "fiscal_quarter": "2024Q2",
     "ni": 52536000000.0,
     "revenue": 762352000000.0
    },
    {
     "disc_date": "2024-11-14",
-    "eps": 41.8832,
+    "eps": 43.0395,
     "fiscal_quarter": "2024Q3",
     "ni": 62952000000.0,
     "revenue": 788986000000.0
    },
    {
     "disc_date": "2025-02-14",
-    "eps": 35.1036,
+    "eps": 36.0727,
     "fiscal_quarter": "2024Q4",
     "ni": 52762000000.0,
     "revenue": 771470000000.0
    },
    {
     "disc_date": "2025-05-12",
-    "eps": 14.3177,
+    "eps": 14.7129,
     "fiscal_quarter": "2025Q1",
     "ni": 21520000000.0,
     "revenue": 630423000000.0
    },
    {
     "disc_date": "2025-08-07",
-    "eps": 24.7532,
+    "eps": 25.4366,
     "fiscal_quarter": "2025Q2",
     "ni": 37205000000.0,
     "revenue": 729128000000.0
    },
    {
     "disc_date": "2026-03-10",
-    "eps": 29.3246,
+    "eps": 30.1342,
     "fiscal_quarter": "2025Q3",
     "ni": 44076000000.0,
     "revenue": 795273000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 12.8349,
+    "fiscal_quarter": "2025Q4",
+    "ni": 18773000000.0,
+    "revenue": 739852000000.0
    }
   ],
-  "shares": 1503037642.0,
+  "shares": 1462657525.0,
   "source": "jquants"
  },
  "2503": {
@@ -13102,15 +13109,15 @@
   "source": "jquants"
  },
  "2670": {
-  "checked_date": "2026-04-08",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-08",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 187.39,
-   "nx_fsales": 400800000000.0,
-   "per_n": 4,
+   "disc_date": "2026-07-08",
+   "feps": 187.39,
+   "fsales": 400800000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
    "shares_fy": 247618938.0
   },
   "quarters": [
@@ -13169,6 +13176,13 @@
     "fiscal_quarter": "2025Q4",
     "ni": 12646000000.0,
     "revenue": 99339000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 57.7344,
+    "fiscal_quarter": "2026Q1",
+    "ni": 14296000000.0,
+    "revenue": 105483000000.0
    }
   ],
   "shares": 247616620.0,
@@ -22613,16 +22627,16 @@
   "source": "jquants"
  },
  "3391": {
-  "checked_date": "2026-04-09",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-09",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 91.62,
-   "nx_fsales": 2555000000000.0,
-   "per_n": 4,
-   "shares_fy": 454308990.0
+   "disc_date": "2026-07-08",
+   "feps": 91.62,
+   "fsales": 2555000000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
+   "shares_fy": 454365490.0
   },
   "quarters": [
    {
@@ -22632,14 +22646,14 @@
    },
    {
     "disc_date": "2025-04-04",
-    "eps": 20.3255,
+    "eps": 20.3149,
     "fiscal_quarter": "2024Q1",
     "ni": 9207000000.0,
     "revenue": 273213000000.0
    },
    {
     "disc_date": "2025-04-04",
-    "eps": -1.7727,
+    "eps": -1.7718,
     "fiscal_quarter": "2024Q2",
     "ni": -803000000.0,
     "revenue": 263116000000.0
@@ -22651,34 +22665,41 @@
    },
    {
     "disc_date": "2025-07-14",
-    "eps": 24.531,
+    "eps": 24.5183,
     "fiscal_quarter": "2025Q1",
     "ni": 11112000000.0,
     "revenue": 272530000000.0
    },
    {
     "disc_date": "2025-10-10",
-    "eps": 20.427,
+    "eps": 20.4164,
     "fiscal_quarter": "2025Q2",
     "ni": 9253000000.0,
     "revenue": 285301000000.0
    },
    {
     "disc_date": "2026-01-14",
-    "eps": 14.5945,
+    "eps": 14.587,
     "fiscal_quarter": "2025Q3",
     "ni": 6611000000.0,
     "revenue": 275552000000.0
    },
    {
     "disc_date": "2026-04-09",
-    "eps": 34.6463,
+    "eps": 34.6283,
     "fiscal_quarter": "2025Q4",
     "ni": 15694000000.0,
     "revenue": 617202000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 29.7366,
+    "fiscal_quarter": "2026Q1",
+    "ni": 13477000000.0,
+    "revenue": 636886000000.0
    }
   ],
-  "shares": 452977961.0,
+  "shares": 453213267.0,
   "source": "jquants"
  },
  "3395": {
@@ -59901,76 +59922,83 @@
   "source": "jquants"
  },
  "6183": {
-  "checked_date": "2026-04-08",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-08",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 114.33,
-   "nx_fsales": 152000000000.0,
-   "per_n": 4,
+   "disc_date": "2026-07-08",
+   "feps": 114.33,
+   "fsales": 152000000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
    "shares_fy": 74522695.0
   },
   "quarters": [
    {
     "disc_date": "2024-07-10",
-    "eps": 22.6914,
+    "eps": 22.6905,
     "fiscal_quarter": "2024Q1",
     "ni": 1687000000.0,
     "revenue": 36816000000.0
    },
    {
     "disc_date": "2024-10-09",
-    "eps": 17.9836,
+    "eps": 17.9829,
     "fiscal_quarter": "2024Q2",
     "ni": 1337000000.0,
     "revenue": 35224000000.0
    },
    {
     "disc_date": "2025-01-09",
-    "eps": 22.2879,
+    "eps": 22.287,
     "fiscal_quarter": "2024Q3",
     "ni": 1657000000.0,
     "revenue": 35903000000.0
    },
    {
     "disc_date": "2025-04-09",
-    "eps": 44.6834,
+    "eps": 44.6816,
     "fiscal_quarter": "2024Q4",
     "ni": 3322000000.0,
     "revenue": 35664000000.0
    },
    {
     "disc_date": "2025-07-09",
-    "eps": 24.9646,
+    "eps": 24.9636,
     "fiscal_quarter": "2025Q1",
     "ni": 1856000000.0,
     "revenue": 36605000000.0
    },
    {
     "disc_date": "2025-10-08",
-    "eps": 26.4576,
+    "eps": 26.4565,
     "fiscal_quarter": "2025Q2",
     "ni": 1967000000.0,
     "revenue": 36538000000.0
    },
    {
     "disc_date": "2026-01-14",
-    "eps": 30.8695,
+    "eps": 30.8682,
     "fiscal_quarter": "2025Q3",
     "ni": 2295000000.0,
     "revenue": 36317000000.0
    },
    {
     "disc_date": "2026-04-08",
-    "eps": 27.7489,
+    "eps": 27.7478,
     "fiscal_quarter": "2025Q4",
     "ni": 2063000000.0,
     "revenue": 36366000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 30.5051,
+    "fiscal_quarter": "2026Q1",
+    "ni": 2268000000.0,
+    "revenue": 36701000000.0
    }
   ],
-  "shares": 74345321.0,
+  "shares": 74348335.0,
   "source": "jquants"
  },
  "6191": {
@@ -91399,21 +91427,21 @@
   "source": "jquants"
  },
  "7921": {
-  "checked_date": "2026-03-25",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-03-25",
-   "feps": 240.06,
-   "fsales": 33000000000.0,
+   "disc_date": "2026-07-08",
+   "feps": null,
+   "fsales": null,
    "fy_start": "2025-06-01",
-   "nx_feps": null,
-   "nx_fsales": null,
-   "per_n": 3,
+   "nx_feps": 271.16,
+   "nx_fsales": 34200000000.0,
+   "per_n": 4,
    "shares_fy": 13153293.0
   },
   "quarters": [
    {
     "disc_date": "2024-09-30",
-    "eps": 88.7843,
+    "eps": 88.7842,
     "fiscal_quarter": "2024Q1",
     "ni": 1146000000.0,
     "revenue": 8370000000.0
@@ -91434,21 +91462,21 @@
    },
    {
     "disc_date": "2025-07-09",
-    "eps": 184.0763,
+    "eps": 184.0761,
     "fiscal_quarter": "2024Q4",
     "ni": 2376000000.0,
     "revenue": 8638000000.0
    },
    {
     "disc_date": "2025-09-29",
-    "eps": 92.4255,
+    "eps": 92.4254,
     "fiscal_quarter": "2025Q1",
     "ni": 1193000000.0,
     "revenue": 9086000000.0
    },
    {
     "disc_date": "2025-12-25",
-    "eps": 26.4184,
+    "eps": 26.4183,
     "fiscal_quarter": "2025Q2",
     "ni": 341000000.0,
     "revenue": 6989000000.0
@@ -91459,9 +91487,16 @@
     "fiscal_quarter": "2025Q3",
     "ni": 148000000.0,
     "revenue": 6255000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 131.7043,
+    "fiscal_quarter": "2025Q4",
+    "ni": 1700000000.0,
+    "revenue": 8824000000.0
    }
   ],
-  "shares": 12907691.0,
+  "shares": 12907705.0,
   "source": "jquants"
  },
  "7931": {
@@ -97987,15 +98022,15 @@
   "source": "jquants"
  },
  "8194": {
-  "checked_date": "2026-04-09",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-09",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 219.61,
-   "nx_fsales": 922500000000.0,
-   "per_n": 4,
+   "disc_date": "2026-07-08",
+   "feps": 219.61,
+   "fsales": 922500000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
    "shares_fy": 90501600.0
   },
   "quarters": [
@@ -98015,14 +98050,14 @@
    },
    {
     "disc_date": "2025-01-10",
-    "eps": 45.0659,
+    "eps": 45.066,
     "fiscal_quarter": "2024Q3",
     "ni": 3899000000.0,
     "revenue": 211000000000.0
    },
    {
     "disc_date": "2025-04-10",
-    "eps": 59.352,
+    "eps": 59.3521,
     "fiscal_quarter": "2024Q4",
     "ni": 5135000000.0,
     "revenue": 217611000000.0
@@ -98054,9 +98089,16 @@
     "fiscal_quarter": "2025Q4",
     "ni": 5910000000.0,
     "revenue": 221893000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 58.7279,
+    "fiscal_quarter": "2026Q1",
+    "ni": 5081000000.0,
+    "revenue": 223296000000.0
    }
   ],
-  "shares": 86517652.0,
+  "shares": 86517624.0,
   "source": "jquants"
  },
  "8200": {
@@ -118167,15 +118209,15 @@
   "source": "jquants"
  },
  "9861": {
-  "checked_date": "2026-04-09",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-09",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 75.71,
-   "nx_fsales": 242000000000.0,
-   "per_n": 4,
+   "disc_date": "2026-07-08",
+   "feps": 75.71,
+   "fsales": 242000000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
    "shares_fy": 65129558.0
   },
   "quarters": [
@@ -118195,7 +118237,7 @@
    },
    {
     "disc_date": "2025-01-10",
-    "eps": 17.2726,
+    "eps": 17.2727,
     "fiscal_quarter": "2024Q3",
     "ni": 1118000000.0,
     "revenue": 52438000000.0
@@ -118216,7 +118258,7 @@
    },
    {
     "disc_date": "2025-10-09",
-    "eps": 29.3851,
+    "eps": 29.3852,
     "fiscal_quarter": "2025Q2",
     "ni": 1902000000.0,
     "revenue": 58228000000.0
@@ -118234,9 +118276,16 @@
     "fiscal_quarter": "2025Q4",
     "ni": 1319000000.0,
     "revenue": 59039000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": 28.0256,
+    "fiscal_quarter": "2026Q1",
+    "ni": 1814000000.0,
+    "revenue": 58771000000.0
    }
   ],
-  "shares": 64726665.0,
+  "shares": 64726525.0,
   "source": "jquants"
  },
  "9869": {
@@ -118995,15 +119044,15 @@
   "source": "jquants"
  },
  "9946": {
-  "checked_date": "2026-04-08",
+  "checked_date": "2026-07-08",
   "guidance": {
-   "disc_date": "2026-04-08",
-   "feps": null,
-   "fsales": null,
-   "fy_start": "2025-03-01",
-   "nx_feps": 3.45,
-   "nx_fsales": 97000000000.0,
-   "per_n": 4,
+   "disc_date": "2026-07-08",
+   "feps": 3.45,
+   "fsales": 97000000000.0,
+   "fy_start": "2026-03-01",
+   "nx_feps": null,
+   "nx_fsales": null,
+   "per_n": 1,
    "shares_fy": 29372774.0
   },
   "quarters": [
@@ -119030,7 +119079,7 @@
    },
    {
     "disc_date": "2025-04-10",
-    "eps": -169.6091,
+    "eps": -169.6092,
     "fiscal_quarter": "2024Q4",
     "ni": -4920000000.0,
     "revenue": 20897000000.0
@@ -119058,13 +119107,20 @@
    },
    {
     "disc_date": "2026-04-08",
-    "eps": -121.0361,
+    "eps": -121.0362,
     "fiscal_quarter": "2025Q4",
     "ni": -3511000000.0,
     "revenue": 21754000000.0
+   },
+   {
+    "disc_date": "2026-07-08",
+    "eps": -79.5646,
+    "fiscal_quarter": "2026Q1",
+    "ni": -2308000000.0,
+    "revenue": 24913000000.0
    }
   ],
-  "shares": 29007882.0,
+  "shares": 29007859.0,
   "source": "jquants"
  },
  "9948": {
