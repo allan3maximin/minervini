@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>銘柄詳細 | ミネルヴィニ式スクリーナー</title>
+<!-- index.htmlのSPA化(view-stock)に伴い、このページは旧URL(?code=...)からの
+     リダイレクトスタブのみを残す。実体はindex.html#stock/CODEに統合済み。
+     ?code=をhashに引き継ぐ必要があるためmeta refreshではなくJSでリダイレクトする。 -->
+<script>
+  var code = new URLSearchParams(window.location.search).get("code");
+  window.location.replace("index.html" + (code ? "#stock/" + encodeURIComponent(code) : "#dashboard"));
+</script>
+</head>
+<body>
+<p>銘柄詳細は<a id="fallback-link" href="index.html#dashboard">ダッシュボード</a>に統合されました。自動的に移動しない場合はリンクをクリックしてください。</p>
+<script>
+  var link = document.getElementById("fallback-link");
+  if (code) link.href = "index.html#stock/" + encodeURIComponent(code);
+</script>
+</body>
+</html>
