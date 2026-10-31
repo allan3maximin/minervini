@@ -1,0 +1,3196 @@
+/* 2026-07-27 UI: 背景は完全な黒(#000)。パネル階調は黒の上でも段差が読める
+   よう少しだけ持ち上げ、Dock/タブバーは「黒い箱」ではなく背景が透ける
+   すりガラス(--glass / --glass-strong)で浮かせる。 */
+:root {
+  --bg: #000000;
+  --panel: #0e1118;
+  --panel-2: #161b25;
+  --border: #222835;
+  --border-strong: #303849;
+  /* 浮いているUI(Dock・タブバー・ナビボタン)の共通ガラス。背景色は敷かず、
+     わずかな白のティント + blur だけで奥が透ける。 */
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-strong: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --text: #e8eaf0;
+  --text-dim: #98a2b3;
+  --accent: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --link: #60a5fa;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --dock-h: 54px; /* メインDockの実高さ(ボタン42+padding10+border2)。mainの下余白計算用 */
+  --dock-w: 300px; /* メインDockの実幅(ボタン56×5 + gap2×4 + padding5×2 + border2)。個別株タブバーの幅をこれに合わせる */
+  /* Dock(浮いたすりガラス)の下に隠れないための予約量。以前はmain全体の
+     padding-bottomでこれを一括確保していたが、それだとどの画面もDockの
+     手前でコンテンツが途切れ、Dockの向こうに何も無い(=素の黒背景)状態になる。
+     2026-07-28: 予約先をmainから各ビューの「実際にスクロールする要素」に
+     移し、mainはtrueな画面下端まで伸ばすことで、スクロールし切ると
+     コンテンツがDockの下(すりガラス越し)まで見えるようにした。 */
+  --dock-clear: calc(var(--dock-h) + max(12px, env(safe-area-inset-bottom) + 8px));
+  /* 2026-07-28 続き: 市況/リスト/個別株のタブバー(.market-tabs/.list-tabs-bar/
+     .stock-tabs-bar)・設定のサブタブ(.settings-subtabs-bottom)は、メインDockと
+     場所を変えずに固定表示させたい("タブドックもFIXEDで出す"要望)ため、
+     position:fixedにしてメインDockの上に浮かせる。その分、スクロール本文側の
+     余白は「メインDock分」だけでなく「タブバー分(実測最大50px)+その上マージン
+     の名残8px」も足す。 */
+  --tabs-clear: calc(var(--dock-clear) + 58px);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; height: 100%; }
+
+/* App shell: bodyは一切スクロールしない。ヘッダー+main(flex:1)+固定Dockの
+   縦flexで画面にぴったり収め、スクロールが必要なビューだけが自分の内側で
+   スクロールする(縦スクロール可: リスト/バッチ/保有/個別サマリー等)。 */
+body {
+  margin: 0;
+  padding: 12px 16px 0;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Dock分の余白はここでは予約しない(2026-07-28)。各ビューの実スクロール
+     コンテナが --dock-clear 分を自分のpadding-bottomとして持つ形に変更、
+     mainは画面の本当の下端まで伸びる。 */
+}
+
+h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: 0.01em; }
+h2 { font-size: 15px; margin: 0 0 8px; letter-spacing: 0.02em; }
+h3 { font-size: 13px; margin: 16px 0 6px; }
+h4 { font-size: 12px; margin: 8px 0 4px; color: var(--text-dim); letter-spacing: 0.05em; }
+
+a { color: var(--link); }
+
+/* ---------------------------------------------------------------- header */
+
+.page-header { flex: 0 0 auto; margin-bottom: 10px; }
+.page-header[hidden] { display: none; }
+.meta-line { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; }
+.meta-line[hidden] { display: none; }
+
+/* データ断面(大引/前場)の切り替え。ヘッダの最終更新行の下に置く小さな一行。
+   銘柄の絞り込みフィルタと見間違えないよう、控えめだが操作できると分かる見た目にする。 */
+.snapshot-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.snapshot-switch[hidden] { display: none; }
+.snapshot-switch label {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.snapshot-switch select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  max-width: 100%;
+}
+
+/* 2026-07-30: 全ビューで常時表示になったので、折り返さない1行に固定する
+   (flex-wrap があるとタイトルと件数が段違いになりヘッダの高さが跳ねる)。 */
+.page-header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.page-header-top h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* リスト画面の件数。右上に置く「今何件見ているか」の手掛かり。 */
+.page-header-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.page-header-count[hidden] { display: none; }
+/* 市況分析タブの2枚目「いま候補は何銘柄か」。1枚目(.market-signal-card)と
+   見た目を揃える: padding 12px 16px / margin-bottom 14px / タイトル13px 700 */
+.breadth-meter {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.breadth-meter-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.breadth-meter-stats {
+  display: flex;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+}
+/* 数値だけ強調して視線が値に落ちるようにする(ラベルはdimのまま) */
+.breadth-meter-stats b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* カード内の小見出し。「絞り込みをどこまで通ったか」/「その候補が今どの段階か」の
+   2グループを1枚のカードに並べるために使う(旧VCPファネルカードの統合先)。 */
+.breadth-meter-group + .breadth-meter-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.breadth-meter-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+/* --------------------------------------------------------------- buttons */
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  min-height: 34px;
+  transition: border-color 0.15s, background 0.15s;
+}
+button:hover { border-color: var(--link); }
+button.secondary { background: transparent; }
+button.primary {
+  background: var(--link);
+  border-color: var(--link);
+  color: #0b0e14;
+  font-weight: 600;
+}
+button.primary:hover { filter: brightness(1.1); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 表/グラフ・期間などの切替(segmented)。Dock/タブと同じ「ピル+アクセント」言語に統一。 */
+.segmented {
+  display: inline-flex;
+  /* 選択肢が増えた時(並び替え4項目など)に横へはみ出さず折り返す */
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  /* スライド切替(wireTabSlide)用: ボタン起点のドラッグをスクロールに取られない */
+  touch-action: none;
+}
+.segmented button.active {
+  background: rgba(52, 211, 153, 0.16);
+  color: var(--accent);
+  font-weight: 600;
+}
+/* スライド中に指の下にあるボタンのプレビュー */
+.segmented button.slide-target {
+  background: rgba(52, 211, 153, 0.22);
+  color: var(--text);
+}
+
+/* リスト画面のツールバー。2026-07-29に本命/候補/監視タブを廃止したので、
+   中身は「件数表示 + フィルタ/並び替えボタン」だけになった。 */
+.list-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
+.list-tabs-bar .list-tabs { margin: 0; }
+.list-tools { display: flex; gap: 6px; }
+.list-tool-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 0 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  touch-action: manipulation;
+}
+.list-tool-btn:active { color: var(--text); }
+.list-tool-btn .bi { font-size: 15px; }
+.list-sort-label { font-size: 12px; }
+/* フィルタ件数バッジは、フィルタボタンの右上に小さく重ねる。 */
+.list-tool-btn .adhoc-filter-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+/* ボトムシート(フィルタ/並び替え)。下からスライドインするモーダル。 */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 60;
+}
+.sheet-backdrop[hidden] { display: none; }
+.bottom-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  background: var(--panel);
+  border-top: 1px solid var(--border-strong);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  max-height: 80vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  transform: translateY(100%);
+  transition: transform 0.22s ease;
+}
+.bottom-sheet[hidden] { display: none; }
+.bottom-sheet.open { transform: translateY(0); }
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sheet-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.sheet-title small { color: var(--text-dim); font-weight: 400; font-size: 11px; }
+.sheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.sheet-close:hover, .sheet-close:focus-visible { background: var(--panel-2); color: var(--text); }
+.sheet-hint { color: var(--text-dim); font-size: 12px; margin: 0 0 10px; }
+.sort-options { display: flex; width: 100%; }
+.sort-options button { flex: 1; padding: 10px 12px; font-size: 13px; }
+
+/* --------------------------------------------------------------- tiers */
+
+.tier-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+  margin-bottom: 16px;
+}
+.tier-note { color: var(--text-dim); font-size: 12px; margin: 0 0 12px; }
+
+/* 本命/候補タブ: ステータス(監視A/ブレイクアウト等)ごとに背景枠で分離。
+   監視タブの stage-section と同じ見た目に揃える。 */
+.status-section {
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+}
+.status-section:last-child { margin-bottom: 0; }
+.status-BREAKOUT, .status-BREAKOUT_WEAK { border-color: var(--accent); }
+
+/* 監視タブ: セットアップ進行度グループ(2026-07-17)。<details>で折りたたみ可。
+   あと一歩/ベース形成中/… の単位ごとに背景枠を持たせて視覚的に分ける。 */
+.stage-section {
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+}
+.stage-section:last-child { margin-bottom: 0; }
+.stage-near { border-color: var(--accent); }
+.stage-section > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.stage-section > summary::-webkit-details-marker { display: none; }
+.stage-section > summary::before {
+  content: "▸";
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.stage-section[open] > summary::before { content: "▾"; }
+.stage-label {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+  font-size: 13px;
+}
+.stage-near .stage-label { border-color: var(--accent); color: var(--accent); }
+.stage-desc { color: var(--text-dim); font-size: 11px; }
+
+/* カード3段目(.sc-row-stage)は 2026-07-30 に .sc-row-meta へ置き換えた。
+   規則は .stock-card 側にまとめてある。 */
+
+.status-section h3 {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+}
+.status-BREAKOUT h3, .status-BREAKOUT_WEAK h3 { border-color: var(--accent); color: var(--accent); }
+.status-WATCH_A h3 { border-color: var(--link); color: var(--link); }
+.status-WATCH_B h3 { color: var(--text-dim); }
+.status-EXTENDED h3 { border-color: var(--danger); color: var(--danger); }
+/* STALE(ブレイク鮮度切れ、2026-07-21): EXTENDEDと同じ追いかけ禁止枠の配色 */
+.status-STALE h3 { border-color: var(--danger); color: var(--danger); }
+
+/* --------------------------------------------------------------- tables */
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 760px;
+  font-size: 13px;
+}
+
+th, td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+tbody tr:last-child td { border-bottom: none; }
+th:nth-child(1), td:nth-child(1),
+th:nth-child(2), td:nth-child(2) {
+  text-align: left;
+}
+
+th {
+  cursor: pointer;
+  color: var(--text-dim);
+  user-select: none;
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  font-weight: 600;
+  font-size: 12px;
+}
+th:hover { color: var(--text); }
+
+tbody tr { cursor: pointer; transition: background 0.1s; }
+tbody tr:hover { background: rgba(96, 165, 250, 0.06); }
+tbody tr.fund-stale { background: rgba(251, 191, 36, 0.08); }
+/* has_chart===false 等、詳細ページへ遷移できない行(クリック無効) */
+tbody tr.row-static { cursor: default; }
+tbody tr.row-static:hover { background: transparent; }
+
+/* セクター(強度)列: 強度の文字だけ色付け */
+.sector-strength-strong { color: var(--accent); font-weight: 700; }
+.sector-strength-mid { color: var(--text-dim); font-weight: 700; }
+.sector-strength-weak { color: var(--danger); font-weight: 700; }
+
+/* ---------------------------------------------------------------- chips */
+
+.meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.stock-actions { margin: 6px 0 10px; }
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.chip-label { color: var(--text-dim); }
+.chip-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.pending-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: normal;
+}
+
+/* ------------------------------------------------------- market overview */
+
+.market-overview { margin-bottom: 16px; }
+.market-overview h2 { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.live-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.market-live-meta { color: var(--text-dim); font-size: 10px; margin-top: 6px; }
+
+.market-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.market-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 8px;
+  min-width: 0;
+}
+.market-card.is-stale { opacity: 0.75; }
+.market-card[role="button"] { cursor: pointer; transition: border-color 0.12s, transform 0.12s; }
+.market-card[role="button"]:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.market-card[role="button"]:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.market-card-name {
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stale-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+.market-card-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.market-card-change { font-size: 11px; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+.chg-up { color: var(--accent); }
+.chg-down { color: var(--danger); }
+/* スパークライン + 目盛 (2026-07-27)。折れ線SVGは preserveAspectRatio="none" で
+   横に伸ばすため、文字を入れると潰れる。そこで軸ラベルはSVGの外にHTMLで置き、
+   grid で「左=縦軸ラベル / 下=横軸ラベル」に配置する。 */
+.spark-box {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 3px;
+  min-width: 0;
+}
+.spark-yaxis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.spark-xaxis {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.sparkline { grid-column: 2; grid-row: 1; display: block; width: 100%; height: 32px; }
+/* セクター履歴ポップアップ用の大きめ版 (heatmap.js histSparkline)。 */
+.spark-box-lg .sparkline { height: 64px; }
+.spark-box-lg .spark-yaxis,
+.spark-box-lg .spark-xaxis { font-size: 10px; }
+.spark-axis { stroke: var(--border-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.market-card-date { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
+
+/* --------------------------------------------------------------- charts */
+
+.back-link { color: var(--link); text-decoration: none; font-size: 13px; }
+
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 8px;
+}
+
+.line-toggles { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.line-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  min-height: 34px;
+}
+.line-toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+.line-toggle:has(input:checked) { color: var(--text); }
+.line-toggle.disabled { opacity: 0.4; cursor: not-allowed; }
+
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.chart-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.chart-card-head h2 { margin: 0; font-size: 13px; color: var(--text-dim); }
+
+.ohlc-legend {
+  display: flex;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ohlc-legend b { font-weight: 600; }
+.ohlc-legend .lg-date { color: var(--text); font-weight: 600; }
+
+.chart-box { height: 400px; position: relative; }
+.chart-box-small { height: 140px; }
+
+/* 自前の日付軸ストリップ。ライブラリの時間軸(visible:false)の代わりに、
+   目盛・ホバー・最新日の全日付をDOMで描く。縦位置は .cda-label の top で制御でき、
+   ライブラリ内部の固定オフセット(テキストが上寄りに見える原因)に縛られない。
+   ラベルは JS が timeToCoordinate の x を left にセットし、ここで translateX(-50%)
+   で中央寄せする。x=0 がチャート描画域の左端(価格軸72pxを除く)に一致する。 */
+.chart-date-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.chart-date-axis .cda-label {
+  position: absolute;
+  top: 52%; /* 若干下げて中央〜やや下に。上寄りだった従来の見え方を補正 */
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  line-height: 1;
+  pointer-events: none;
+}
+/* ホバー中の日付は前面・強調。静的ラベルと重なっても上に乗るよう背景を敷く。 */
+.chart-date-axis .cda-hover {
+  color: var(--text);
+  font-weight: 600;
+  background: #131720;
+  padding: 0 3px;
+  border-radius: 2px;
+  z-index: 2;
+}
+
+.detail-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.detail-card h2 { margin-bottom: 6px; }
+
+/* --------------------------------------------------------- must checklist */
+
+#must-checklist ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 16px;
+}
+#must-checklist li { padding: 2px 0; font-size: 13px; }
+.flag-pass { color: var(--accent); }
+.flag-fail { color: var(--danger); }
+
+/* ------------------------------------------------------------ score bars */
+
+.score-bar-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+/* 1列目(ラベル+ヘルプ「?」)は1行固定・上下中央。SPの狭い列でも折り返さない */
+.score-bar-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.score-bar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+.score-bar-fill {
+  background: linear-gradient(90deg, var(--link), var(--accent));
+  height: 100%;
+  border-radius: 999px;
+}
+
+.page-footer { margin-top: 24px; color: var(--text-dim); font-size: 11px; }
+
+/* ---------------------------------------------------------------- modal */
+
+/* Set by JS while a modal is open: pins the page behind the overlay so iOS
+   Safari can't rubber-band/scroll it (the modal jitter bug). */
+body.modal-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  max-width: 640px;
+  width: 100%;
+  max-height: 90vh;
+  max-height: 90dvh; /* dvh: stable under mobile URL-bar show/hide */
+  overflow-y: auto;
+  overflow-x: hidden; /* the modal must never scroll sideways */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-content h2 { margin-top: 0; font-size: 16px; }
+.modal-note { color: var(--text-dim); font-size: 12px; line-height: 1.7; margin-bottom: 12px; }
+.field-label { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 4px; }
+.modal-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.modal-input.has-error { border-color: var(--danger); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.form-error { color: var(--danger); font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
+.field-error { color: var(--danger); font-size: 11px; margin: 2px 0 0; }
+
+/* table-layout: fixed + min-width: 0 inputs keep the quarter-input table
+   inside the modal width on narrow screens (no horizontal overflow). */
+.fund-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; min-width: 0; table-layout: fixed; }
+.fund-table th, .fund-table td { padding: 4px 4px; text-align: left; border-bottom: none; white-space: normal; overflow-wrap: break-word; }
+.fund-table th { position: static; background: transparent; cursor: default; }
+.fund-table input {
+  width: 100%;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 14px;
+}
+.fund-table input.has-error { border-color: var(--danger); }
+/* Rows prefilled from the J-Quants batch (not yet a manual/fundamentals.csv
+   row) get a subtle tint + dashed input border so it's clear the value is
+   an unconfirmed baseline, not something already committed. */
+.fund-table tr.auto-prefill-row { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fund-table tr.auto-prefill-row input { border-style: dashed; }
+
+/* 個別株画面のファンダ表(読み取り専用): モーダル用の固定幅レイアウトではなく
+   通常の可変幅にし、th/tdに下線を戻して見やすくする。 */
+.fund-detail-table { table-layout: auto; margin-top: 8px; }
+.fund-detail-table th, .fund-detail-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.fund-detail-table th { color: var(--text-dim); font-weight: 600; }
+/* 収縮の内訳表(個別株サマリー)。グローバルの table{min-width:760px} だと
+   detail-card の中で常に横スクロールが出るので、8列ぶんに絞る。 */
+.contraction-table { min-width: 560px; }
+.contraction-table th { color: var(--text-dim); font-weight: 600; }
+.contraction-table th:nth-child(2), .contraction-table td:nth-child(2) { text-align: right; }
+.contraction-table tr.contraction-provisional { color: var(--text-dim); }
+.contraction-table .tag-provisional { font-size: 11px; color: var(--text-dim); }
+
+.yoy-positive { color: var(--accent); }
+.yoy-negative { color: var(--danger); }
+
+/* ------------------------------------------------- 機能A: プライオリティ */
+
+a.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-size: 13px;
+  min-height: 34px;
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+a.nav-btn:hover { border-color: var(--link); }
+
+.p1-warning {
+  margin: 0 0 12px; /* 上はbreadth-meterのmargin-bottomに任せ、下にシグナルカードとの間隔 */
+  padding: 10px 14px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: rgba(251, 191, 36, 0.08);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.warning-banner {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------- 地合いシグナルカード */
+
+.market-signal-card {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.market-signal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.market-score-badge {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.market-signal-label {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 700;
+  padding: 2px 14px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.market-signal-reasons {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.market-signal-stats {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+/* 「で、どうするか」の一言。3段階すべてで出すようになったので、ラベル直下に置いて
+   理由リストより先に目に入るようにする。色は守りのときだけ下で danger に上書きする。 */
+.market-signal-caution {
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+/* 地合い(攻め/中立/守り)の過去推移ストリップ。1ティック=1営業日、色は現行
+   シグナルカードと同じ緑/黄/赤。データ欠損日は出さない(filter済み)ため
+   ティックの本数=実データ日数。 */
+.market-signal-history { margin-top: 10px; }
+.market-signal-history-label { font-size: 11px; color: var(--text-dim); }
+.market-signal-history-track {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  align-items: stretch;
+}
+.msh-tick {
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.msh-tick.signal-green { background: var(--accent); }
+.msh-tick.signal-yellow { background: var(--warn); }
+.msh-tick.signal-red { background: var(--danger); }
+.market-signal-card.signal-green {
+  border-color: var(--accent);
+  background: rgba(52, 211, 153, 0.08);
+}
+.market-signal-card.signal-green .market-signal-label {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--accent);
+}
+.market-signal-card.signal-yellow {
+  border-color: var(--warn);
+  background: rgba(251, 191, 36, 0.08);
+}
+.market-signal-card.signal-yellow .market-signal-label {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warn);
+}
+.market-signal-card.signal-red {
+  border-color: var(--danger);
+  background: rgba(248, 113, 113, 0.08);
+}
+.market-signal-card.signal-red .market-signal-label {
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--danger);
+}
+.market-signal-card.signal-red .market-signal-caution {
+  color: var(--danger);
+}
+
+/* 地合い詳細パネル(2026-07-18 タスク4)。表示専用、常時折りたたみ初期状態。
+   summaryはデフォルトの三角マーカーを消し、代わりに右端の矢印アイコンで
+   開閉可能であることを明示する(2026-07-19 タスク3: 発見しやすさ改善)。 */
+.market-detail { margin-top: 10px; }
+.market-detail > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  user-select: none;
+  list-style: none;
+  transition: border-color 0.15s, color 0.15s;
+}
+.market-detail > summary::-webkit-details-marker { display: none; }
+.market-detail > summary::after {
+  content: "\f282"; /* bootstrap-icons: chevron-down */
+  font-family: "bootstrap-icons";
+  font-size: 11px;
+  transition: transform 0.15s;
+}
+.market-detail > summary:hover { color: var(--text); border-color: var(--border-strong); }
+.market-detail[open] > summary { color: var(--text); border-color: var(--border-strong); }
+.market-detail[open] > summary::after { transform: rotate(180deg); }
+.market-detail-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* 地合い詳細の4セクション(スコア内訳/主要指標/指数トレンド/推移)。
+   見出しで役割の切れ目を明示する(2026-07-20 UI再構成)。 */
+.market-detail-section { min-width: 0; }
+.market-detail-heading {
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.market-detail-heading-sub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.market-detail-scores { display: flex; flex-direction: column; min-width: 0; }
+/* 値列は「16.5/40pt」形式が入るため共有の48pxより広くする */
+.market-detail-scores .score-bar-row {
+  grid-template-columns: 96px 1fr 72px;
+}
+.market-detail-scores .score-bar-row > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 寄与ptの合計行。4本のバーの寄与を足すと総合スコアになる対応を明示 */
+.score-bar-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* score-bar-rowは元々120px固定ラベル列(短い和名想定)を他画面と共有しているが、
+   「指数トレンド(30%)」等の長いラベルはgridアイテムのmin-width:auto既定によって
+   列を突き破って右にはみ出す。ここだけ折返し可能にして防ぐ。 */
+.market-detail-scores .score-bar-row > span:first-child {
+  min-width: 0;
+  overflow-wrap: break-word;
+  white-space: normal;
+  line-height: 1.3;
+}
+.market-detail-indicators { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.market-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  min-width: 0;
+}
+.market-detail-row span:first-child { flex: 1 1 auto; min-width: 0; }
+.market-detail-row span:last-child {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-align: right;
+}
+.market-detail-sub {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: 4px;
+  display: inline-block;
+}
+.market-detail-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.market-detail-table {
+  width: 100%;
+  min-width: 260px;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.market-detail-table th, .market-detail-table td {
+  padding: 4px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: break-word;
+}
+.market-detail-table th:first-child, .market-detail-table td:first-child {
+  text-align: left;
+  width: 34%;
+}
+.market-detail-sparklines {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-width: 0;
+}
+.market-detail-spark { min-width: 0; }
+.market-detail-spark-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+
+/* ベースの段階(旧VCPファネル)の TOO_RECENT 推移。カード自体は
+   「いま候補は何銘柄か」(.breadth-meter)に統合したので、残っているのは折れ線部分だけ。 */
+.vcp-funnel-spark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.vcp-funnel-spark-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------- 保有ポジション (view-positions) */
+
+.sell-signal-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 1px 2px;
+  white-space: nowrap;
+}
+.signal-badge-danger {
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--danger);
+}
+.signal-badge-warn {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warn);
+}
+.signal-badge-accent {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--accent);
+}
+
+/* 枯れ度(DRY-UP)バッジ。VCP MUST/vcp_scoreとは独立の表示専用。2段階(枯れ気味/激枯れ)。 */
+.dryup-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dryup-badge-dry {
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+}
+.dryup-badge-extreme {
+  background: rgba(56, 189, 248, 0.34);
+  color: #e0f2fe;
+}
+/* 2026-07-30: 閾値未達(枯れていない)も `DU x.xx` として同じ形で出す。
+   ただし注目させたくないので無彩色・枠なしの控えめ表示にする。 */
+.dryup-badge-flat {
+  background: transparent;
+  color: var(--text-dim);
+  font-weight: 400;
+  padding: 2px 0;
+}
+
+/* ファンダのサイズ係数バッジ(2026-07-22)。表示専用(ランキング非算入)。
+   カード一覧に出すのは fail=取り止め(danger系)のみ。unknown用スタイルは
+   2026-07-23 に削除(該当銘柄が多すぎて一覧がバッジだらけになるため非表示化)。 */
+.fund-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fund-badge-fail {
+  background: rgba(248, 113, 113, 0.18);
+  color: #f87171;
+}
+
+/* 需給(信用取引週末残高)カード。表示専用(総合スコアには一切使わない)。 */
+.margin-detail { display: flex; flex-direction: column; gap: 6px; }
+.margin-ratio-big {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.margin-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.margin-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* 信用倍率の推移カード: 見出し右にグラフ/表トグル、その下に時間軸トグル。 */
+.margin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.margin-card-head h2 { margin: 0; }
+.margin-tf-toggle { margin-bottom: 8px; }
+.margin-view[hidden] { display: none; }
+
+/* 推移テーブル: 上が最新・下ほど過去。2列(日付/倍率)または4列(+買残/売残)。 */
+.margin-table { display: flex; flex-direction: column; }
+.margin-trow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 7px 4px;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.margin-table-4col .margin-trow { grid-template-columns: 1.1fr 1fr 1fr 1fr; }
+.margin-trow span:not(:first-child) { text-align: right; }
+.margin-thead {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.margin-more-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.margin-more-btn:hover { background: rgba(52, 211, 153, 0.1); color: var(--accent); }
+
+/* ---------------------------------------------- ポジションサイジング計算機 */
+
+.sizing-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.sizing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sizing-field input[type="number"] {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 14px;
+  width: 200px;
+}
+.sizing-output {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  font-size: 13px;
+}
+.sizing-output > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sizing-output span { color: var(--text-dim); font-size: 11px; }
+.sizing-output strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.sizing-warn {
+  margin-top: 8px;
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sizing-warn-strong { color: var(--danger); }
+
+/* ---------------------------------------------- 機能B: セクターヒートマップ */
+
+.hm-section { margin-top: 22px; }
+.hm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  margin: 14px 0 10px;
+}
+
+/* ヒートマップ: 詳細/簡易を横スワイプ(ループ)で切替、トグルは画面下部の固定バーへ。
+   パネルは単一表示(.active のみ display)。横スワイプは前後ビューへのループ切替に割当。 */
+.hm-view { display: flex; flex-direction: column; }
+.hm-view[hidden] { display: none; }
+
+/* ヒートマップ上部のメタ情報(データ基準日など)。flexの子なので潰れないよう固定。 */
+.hm-meta { flex: 0 0 auto; color: var(--text-dim); font-size: 12px; margin: 0 0 6px; }
+.hm-meta:empty { display: none; }
+.hm-head { flex: 0 0 auto; }
+.hm-head h2 { margin: 0 0 4px; }
+.hm-panels {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 8px;
+  /* 横スワイプ(詳細/簡易のループ切替)をpointerで拾う。treemapは縦スクロール不要。 */
+  touch-action: pan-y;
+}
+.hm-panel {
+  display: none;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.hm-panel.active { display: block; }
+.hm-bottom-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.hm-bottom-bar .segmented { flex-wrap: nowrap; }
+.hm-bottom-bar .segmented button { padding: 6px 12px; white-space: nowrap; }
+.hm-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.hm-legend-bar {
+  display: inline-block;
+  width: 110px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(to right, rgb(190, 44, 54), rgb(58, 64, 78), rgb(13, 148, 88));
+  border: 1px solid var(--border-strong);
+}
+.hm-legend-note { font-size: 11px; }
+
+.hm-container {
+  position: relative;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.hm-container .tier-note { padding: 20px; }
+
+.hm-sector {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--bg);
+  box-sizing: border-box;
+  background: var(--panel);
+}
+.hm-sector-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+.hm-sector-name { font-weight: 700; color: var(--text); }
+.hm-sector-info { color: var(--text-dim); }
+/* セクター見出しはタップで拡大/縮小するため、この行だけクリックを受け取る */
+.hm-sector-head-zoom {
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hm-sector-head-zoom:hover { background: rgba(0, 0, 0, 0.62); }
+.hm-zoom-head .hm-sector-name { color: var(--accent); }
+.hm-rs-pos { color: var(--accent); font-weight: 700; }
+.hm-rs-neg { color: #f87171; font-weight: 700; }
+
+/* 簡易表示: セクター1枚ボックス(騰落率で塗り、中央にラベル) */
+.hm-sector-simple {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px;
+  text-align: center;
+}
+.hm-sector-clickable { cursor: pointer; }
+.hm-hist-spark {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: 2px 0 4px;
+}
+.hm-hist-sub { color: var(--text-dim); font-weight: 400; font-size: 11px; }
+.hm-simple-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.hm-simple-ret {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.hm-simple-rs { font-size: 11px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+
+.hm-tile {
+  position: absolute;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  transition: filter 0.1s;
+}
+.hm-tile:hover { filter: brightness(1.25); z-index: 3; }
+.hm-tile-code {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+.hm-tile-code-sm { font-size: 9px; font-weight: 600; }
+.hm-tile-ret {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+.hm-popup-box { max-width: 480px; width: 100%; }
+.hm-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.hm-popup-head h3 { margin: 0; font-size: 16px; }
+.hm-popup-box h4 {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.hm-unmet {
+  margin: 0;
+  padding-left: 2px;
+  list-style: none;
+  font-size: 13px;
+  color: var(--danger);
+}
+.hm-unmet li { padding: 2px 0; }
+.hm-none { margin: 0; font-size: 13px; color: var(--text-dim); }
+.hm-detail-link { margin-top: 14px; }
+
+/* -------------------------------------------------------- SPA / Dockナビ */
+
+/* 下部固定メニュー(Dock風)。アイコン+小ラベルでビュー切り替え。
+   横スワイプで画面切替: ジェスチャがページスクロール/ズームに化けないよう touch-action:none。 */
+.dock-nav {
+  position: fixed;
+  left: 50%;
+  bottom: max(4px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  /* 黒い箱にせず、背景が透けるすりガラス。塗りは白のごく薄いティントだけで、
+     形は縁のハイライト(--glass-border)と内側1pxの白線で見せる。 */
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  padding: 5px;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  z-index: 50;
+  touch-action: none;
+}
+.dock-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 56px; /* 横幅は据え置き(高さのみ約0.8倍に縮小) */
+  height: 42px;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  border-radius: 19px;
+  padding: 0;
+  color: var(--text-dim);
+  transition: background 0.18s, color 0.18s;
+}
+.dock-btn .dock-icon { font-size: 16px; line-height: 1; }
+.dock-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
+.dock-btn:hover { color: var(--text); }
+.dock-btn.active { background: rgba(52, 211, 153, 0.14); color: var(--accent); }
+/* スライド中(wireTabSlide)に指の下にあるボタンのプレビュー(離すとそのビューへ) */
+.dock-btn.slide-target { background: rgba(52, 211, 153, 0.22); color: var(--text); }
+.dock-btn.active .dock-label { font-weight: 600; }
+
+/* SPAビュー本体: mainの残り高さを使い切り、必要なビューだけ内部で縦スクロール。
+   直接ここでスクロールするビュー(投資法/保有)は、スクロール終端がDockの下まで
+   見えるよう --dock-clear をpadding-bottomとして持つ。 */
+.view-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--dock-clear);
+}
+.view-section[hidden] { display: none; }
+/* 2026-07-30: 横揺れ(指で横に振れる)対策。CSSの規定で、overflow-y だけを
+   auto/scroll にした要素は overflow-x の visible が auto に化ける。つまり
+   「縦にスクロールさせたいだけ」の指定が、中身が1pxでもはみ出した瞬間に
+   横スクロールを生む。リスト/保有/設定で報告された横揺れの正体はこれ。
+   横スクロールを意図している要素(.table-scroll / .invest-table-wrap /
+   ヒートマップ / .stock-panels 等)はここに入れないこと。
+   touch-action は触らない(個別株・市況の横スワイプ操作を殺すため)。 */
+.view-section,
+.bottom-sheet,
+.batch-view .settings-subpanels {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+/* 横スワイプパネルを持つビューは自前でレイアウトするため外側はスクロールさせない。
+   実スクロールは内側のパネル/本文要素に任せるので、外側のこのpadding-bottomは
+   ここでは不要 → 0に戻す(パネル側で個別にdock-clearを持たせる)。 */
+.hm-view, .stock-view, .list-view, .market-view, .batch-view { overflow: hidden; padding-bottom: 0; }
+/* ヒートマップだけは中身(treemap)が自前でスクロールしないため、Dockに
+   隠れないようここ(ビュー本体)でdock-clearを予約したままにする(従来通り)。 */
+.hm-view { padding-bottom: var(--dock-clear); }
+
+/* ---------------------------------------------- 個別画面 横スワイプパネル */
+/* 画面全体は縦スクロールせず、5パネル(サマリー/グラフ/ファンダ/MUST/
+   サイジング)を横スクロールスナップで切り替える。上部タブとも双方向同期。 */
+.stock-view { display: flex; flex-direction: column; }
+.stock-view[hidden] { display: none; }
+.stock-header { flex: 0 0 auto; }
+.stock-header h1 { margin: 0 0 6px; }
+
+/* パネル切替タブは画面下部(パネルの下)。メインDockと同じ「浮いたピル型バー」で統一。 */
+.stock-tabs, .list-tabs, .market-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  align-self: center;
+  max-width: 100%;
+  margin: 8px 0 2px;
+  padding: 4px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.stock-tabs::-webkit-scrollbar, .list-tabs::-webkit-scrollbar, .market-tabs::-webkit-scrollbar { display: none; }
+/* 市況タブ(データ/分析)はラッパーを持たないので、これ自体をメインDockの真上に
+   固定表示する(2026-07-28)。場所はこれまでflowで収まっていた位置(main paddingの
+   境界=--dock-clear)と同じに合わせてあるので、見た目の位置は変わらない。
+   スクロールで動くのはコンテンツ側だけ。 */
+.market-tabs {
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
+
+/* 個別株のタブバー: ＜(次へ) タブ群 ＞(前へ) を横一列に。タブ群は中央維持。
+   market-tabsと同じ理由でメインDockの真上にposition:fixed(2026-07-28)。 */
+.stock-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
+/* タブ群(ドック本体)だけをメインDockと同じ幅に固定。＜＞はこの外側に並ぶ。
+   前後銘柄の切替は＜＞ボタンとパネル全体の横スワイプ(wireStockSwipe)の両方で可能。
+   各タブは flex:1 1 0 なので300px内で均等割りされ、メインDockと横幅が揃う。 */
+.stock-tabs-bar .stock-tabs { margin: 0; width: var(--dock-w); max-width: 100%; flex: 0 0 auto; }
+.stock-nav-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  transition: color 0.18s, opacity 0.18s;
+}
+.stock-nav-btn:active { color: var(--text); }
+.stock-nav-btn:disabled { opacity: 0.3; cursor: default; }
+/* 参照先が無いナビは、右詰めにならないようスペースを保ったまま不可視化する
+   (display:none だと片方欠けたとき残りが端に寄ってしまうため) */
+.stock-nav-btn.is-empty { visibility: hidden; }
+.stock-nav-btn .bi { line-height: 1; }
+.stock-tab, .list-tab, .market-tab {
+  flex: 1 0 auto;
+  min-height: 30px;
+  padding: 5px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+  /* スライド切替(wireTabSlide)用: ボタン起点のドラッグをブラウザのスクロールに
+     取られずpointermoveとして受け取る。バーの余白起点なら従来どおりスクロール可。 */
+  touch-action: none;
+}
+.stock-tab.active, .list-tab.active, .market-tab.active {
+  background: var(--accent);
+  color: #05130b;
+  font-weight: 600;
+}
+
+/* 個別株タブはメインDock(.dock-btn)と同じアイコン+文字の縦積みにする。
+   タブが5枚に増えても横幅が肥大しないよう、各タブは等幅・小さめに。 */
+.stock-tabs .stock-tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+}
+.stock-tabs .stock-tab .st-icon { font-size: 15px; line-height: 1; }
+.stock-tabs .stock-tab .st-label { font-size: 9px; line-height: 1; letter-spacing: 0.02em; }
+.stock-tabs .stock-tab.active .st-label { font-weight: 600; }
+
+/* 信用倍率の推移グラフ枠(LightweightChartsが幅/高さを実測して描画する) */
+.margin-chart-box { width: 100%; height: 168px; }
+/* スライド中に指の下にあるタブのプレビュー(離すとここに切り替わる合図) */
+.stock-tab.slide-target, .list-tab.slide-target, .market-tab.slide-target {
+  background: rgba(52, 211, 153, 0.22);
+  color: var(--text);
+}
+
+/* パネルは単一表示。横スクロールスナップは廃止し、.active のパネルだけ表示する。
+   パネル全体の横スワイプは前後銘柄への切替(wireStockSwipe)に割り当てた。 */
+.stock-panels {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 10px;
+}
+.stock-panel {
+  display: none;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* 下paddingをdock-clearに: スクロール終端でDockの下までコンテンツが見える */
+  padding: 2px 2px var(--tabs-clear);
+  /* 縦スクロール中でも横スワイプ(前後銘柄切替)をpointerイベントで拾えるよう、
+     縦パンだけをブラウザ任せにする。これでサマリー等でも横判定が効きやすい。 */
+  touch-action: pan-y;
+}
+.stock-panel.active { display: block; }
+/* パネル切替時のスライドイン。個別株の前後銘柄・市況データ/分析・セクター
+   詳細/簡易で共通利用する。slide-next=次(右から) / slide-prev=前(左から)。
+   個別株の指追従ドラッグ(app.js wireStockSwipe)は「指の勢いのまま画面外へ抜ける」
+   ので、その続きとして反対側から入ってくるよう開始位置を深く(28%)取り、
+   減速主体のイージング(cubic-bezier)で受け止める。 */
+@keyframes panel-slide-next { from { transform: translate3d(28%, 0, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes panel-slide-prev { from { transform: translate3d(-28%, 0, 0); opacity: 0; } to { transform: none; opacity: 1; } }
+.stock-panels.slide-next, .market-panels.slide-next, .hm-panels.slide-next {
+  animation: panel-slide-next 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stock-panels.slide-prev, .market-panels.slide-prev, .hm-panels.slide-prev {
+  animation: panel-slide-prev 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* ドラッグ中の transform を合成レイヤーで処理させ、テキストのにじみを防ぐ */
+.stock-panels { backface-visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .stock-panels.slide-next, .stock-panels.slide-prev,
+  .market-panels.slide-next, .market-panels.slide-prev,
+  .hm-panels.slide-next, .hm-panels.slide-prev { animation: none; }
+}
+/* グラフパネル: 株価/出来高/RSを1枚のカード(.chart-stack)に統合し、
+   flex比率(5:2:2)で残り高さにぴったり配分する(=縦スクロール無し)。
+   チャートインスタンスは3つ別々(JSがclientHeightで生成)。 */
+.stock-panel.active[data-panel="chart"] {
+  display: flex;
+  flex-direction: column;
+}
+.stock-panel .chart-toolbar { flex: 0 0 auto; margin-top: 0; margin-bottom: 6px; }
+/* 期間ボタンをチャート下部へ移設した版。上マージンだけ確保して下は詰める。 */
+.stock-panel .chart-toolbar.chart-toolbar-bottom {
+  margin-top: 6px;
+  margin-bottom: 0;
+  justify-content: center;
+}
+.stock-panel .chart-card.chart-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+}
+.stock-panel .chart-card-head { flex: 0 0 auto; padding: 4px 10px; }
+.stock-panel .chart-stack > #chart-container { flex: 5 1 0; min-height: 120px; }
+.chart-sub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 2 1 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.chart-sub[hidden] { display: none; }
+.chart-sub .chart-box-small { flex: 1 1 auto; height: auto; min-height: 56px; }
+/* 出来高/RSの見出しはチャート左上オーバーレイ(高さを消費しない) */
+.chart-sub-label {
+  position: absolute;
+  top: 3px;
+  left: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(19, 23, 32, 0.7);
+  padding: 1px 7px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+/* ラベル(pointer-events:none)の中でもヘルプの「?」はタップできるように */
+.chart-sub-label .help-btn { pointer-events: auto; }
+.stock-panel .chart-box { flex: 1 1 auto; height: auto; }
+/* カード頭に移したピボット/損切りトグルはコンパクトに */
+.chart-card-head .line-toggles { gap: 10px; }
+.chart-card-head .line-toggle { min-height: 0; font-size: 12px; }
+
+.yahoo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--link);
+  font-size: 13px;
+  text-decoration: none;
+}
+.yahoo-link:hover { border-color: var(--border-strong); }
+
+/* ---------------------------------------------- リスト画面 横スワイプパネル */
+/* 本命/候補/監視を横スワイプ+上部タブで切替。各パネルは縦スクロールOK。 */
+.list-view { display: flex; flex-direction: column; }
+.list-view[hidden] { display: none; }
+/* タブの見た目は .stock-tabs と共通(上のピル型バー定義)。本命/候補/監視は3つ
+   だけなのでタップ面積を広めに。 */
+.list-tab { padding: 6px 22px; font-size: 13px; }
+/* パネルは横スワイプで切り替えない。activeなパネルだけ表示し、切替はタブのみ。 */
+.list-panels {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 10px;
+}
+.list-panel { display: none; height: 100%; box-sizing: border-box; }
+.list-panel.active { display: flex; flex-direction: column; }
+/* tier-sectionを縦flex化: 見出し・注記は固定、本文だけがスクロールする
+   (=横スクロールしても見出しが揺れない)。 */
+.list-panel .tier-section {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.list-panel .tier-section > h2,
+.list-panel .tier-section > .tier-head,
+.list-panel .tier-note { flex: 0 0 auto; }
+/* コンパクトなティア見出し(短い名称+ヘルプ「?」のみ)。説明文はヘルプに集約し
+   リストの表示スペースを最大化する。 */
+.tier-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 8px;
+}
+.tier-head-title { font-size: 16px; font-weight: 700; color: var(--text); }
+/* 外側の tier-section は二重枠を避けるため背景・枠なしの透明コンテナ。 */
+.list-panel .tier-section {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+/* 本文(カードの入る領域)がこのパネルの唯一のスクロールコンテナ。
+   2026-07-29のリスト統合で、以前あった tier ごとの本文(#confirmed-tier-body
+   など)と監視タブ専用の2分割ラッパー(.watchlist-tier-scroll)は消え、
+   コンテナは #stock-list-body 1つだけになった。 */
+.list-panel .tier-section > #stock-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
+}
+
+/* -------------------------------------------- 市況画面(市況データ/市況分析) */
+/* リスト画面と同じ「タブ切替、パネルは各自縦スクロール」パターン。
+   警告バナー(p1/保有/鮮度)はタブの外(この要素より前)に置き、どちらのタブでも見える。 */
+.market-view { display: flex; flex-direction: column; }
+.market-view[hidden] { display: none; }
+.market-tab { padding: 6px 22px; font-size: 13px; }
+.market-panels {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 10px;
+}
+.market-panel {
+  display: none;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
+  /* 縦スクロール中でも横スワイプ(データ/分析のループ切替)を拾えるよう縦パンのみ委譲。 */
+  touch-action: pan-y;
+}
+.market-panel.active { display: block; }
+
+/* ------------------------------------------ 市況「レビュー」タブ (2026-07-31) */
+/* 大引バッチの review.json を並べるだけのタブ。面の階調・角丸・文字サイズは
+   市況分析タブのカード(.market-signal-card / .breadth-meter / 地合いの中身)に
+   合わせてある。色は既存変数だけを使い、新しい色は足していない
+   (増えた=--accent / 減った=--danger / 変わらず=--text-dim)。 */
+.review-head { margin-bottom: 12px; }
+.review-head-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.review-head-meta { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.review-head-note { margin: 4px 0 0; }
+.review-placeholder { margin: 16px 0; }
+
+/* 前場が落ちた日など「なぜ一部が出ていないのか」の断り書き。警告バナーほど
+   強くは出したくないので、左の1本線だけ警告色にする。 */
+.review-notes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.review-note {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.review-block {
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.review-block-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.review-block-sub { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+/* ブロック内の小見出しは2つ目以降だけ上に間を空ける(先頭は詰めたまま)。 */
+.review-block .market-detail-heading { margin-top: 14px; }
+.review-block .market-detail-heading:first-of-type { margin-top: 0; }
+
+/* 既定で畳んでおくブロック(「なぜそうなったか」)。開閉はブラウザの <details> に
+   任せているので JS を持たせない。見出し行の右端に開閉の向きを出す。 */
+.review-block-fold > summary {
+  cursor: pointer;
+  margin: 0;
+  list-style: none;
+}
+.review-block-fold > summary::-webkit-details-marker { display: none; }
+.review-block-fold > summary::after {
+  content: "▾";
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.review-block-fold[open] > summary::after { content: "▴"; }
+.review-block-fold[open] > summary { margin-bottom: 10px; }
+
+/* 前日終値 → 前場 → 大引 の3点。前場が来ていない日は2点になる。 */
+.review-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.review-step {
+  flex: 1 1 84px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+.review-step-label { font-size: 11px; color: var(--text-dim); }
+.review-step-score { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.review-step-arrow { color: var(--text-dim); font-size: 12px; }
+.review-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+/* 攻め/中立/守りは市況分析タブと同じ3色。 */
+.review-chip.signal-green { color: var(--accent); border-color: var(--accent); }
+.review-chip.signal-yellow { color: var(--warn); border-color: var(--warn); }
+.review-chip.signal-red { color: var(--danger); border-color: var(--danger); }
+
+/* 増減の色付け(表のセル・数値セル共通)。 */
+.review-up { color: var(--accent); }
+.review-down { color: var(--danger); }
+.review-flat { color: var(--text-dim); }
+
+.review-points { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-dim); }
+.review-points li { margin-bottom: 3px; }
+
+/* 後場の判定(伸長/失速/横ばい)。1語だけなので枠付きのラベルにする。 */
+.review-verdict {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 3px 14px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.review-shape {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.review-shape-label { font-size: 14px; font-weight: 700; color: var(--text); }
+.review-shape-detail { font-size: 12px; color: var(--text-dim); }
+
+.review-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.review-counts b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* だまし/引け際のブレイク/新しく候補入り/候補から外れた の4群。 */
+.review-group { margin-top: 12px; }
+.review-group:first-child { margin-top: 0; }
+.review-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.review-group-title { font-size: 12px; font-weight: 700; color: var(--text); }
+.review-group-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.review-group-desc { margin: 4px 0 6px; font-size: 11px; color: var(--text-dim); }
+
+/* 銘柄1行。タップで個別銘柄画面へ飛ぶので、押せることが分かる面にしておく。 */
+.review-stock-row {
+  padding: 7px 10px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.review-stock-row:hover { border-color: var(--border-strong); }
+.review-stock-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.review-stock-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.review-stock-code { margin-left: 5px; font-size: 11px; color: var(--text-dim); }
+.review-stock-nums {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.review-stock-note { margin-top: 2px; font-size: 11px; color: var(--text-dim); }
+
+/* 6件目以降の折りたたみ。地合い詳細(.market-detail)と同じトーンの summary。 */
+.review-more > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 12px;
+  list-style: none;
+}
+.review-more > summary::-webkit-details-marker { display: none; }
+.review-more[open] > summary { margin-bottom: 4px; }
+
+.review-followup-table tbody tr { cursor: pointer; }
+/* 社名は長いものが普通に来る。table-layout:fixed のまま折り返させると1列目だけ
+   2〜3行になって行の高さが揃わず表が崩れるので、1列目を少し広げたうえで社名は
+   1行に収めて溢れた分を…で切る(全文は title 属性で出す)。コードは次の行に置く。 */
+.review-followup-table th:first-child,
+.review-followup-table td:first-child { text-align: left; width: 40%; }
+.review-followup-table .review-followup-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-followup-table .review-stock-code { display: block; margin-left: 0; }
+
+/* 件数が足りない集計(reliable:false)。行は消さずに薄くするだけ。消すと
+   「その帯にはまだサンプルが無い」ことに気付けず、残った帯だけで全体を語ってしまう。
+   新しい色は足さず、既存の淡色(--text-dim)をそのまま使う。 */
+.review-unreliable,
+.review-unreliable td,
+.review-unreliable .market-detail-row span:last-child { color: var(--text-dim); }
+.review-weak-note { margin-left: 6px; font-size: 11px; color: var(--text-dim); }
+
+/* ------------------------------------------ リスト画面 銘柄カード(薄型2段) */
+/* 1銘柄=カード1枚。スマホ幅に収まるよう項目を7つに絞り、上段=銘柄名/コード/
+   スコア/RS、下段=終値(前日比%)/セクター(強度)/枯れ度 の2行で構成する
+   (2026-07-19見直し: SC/RSをチップ化して視覚的な優先度を上げ、前日比を太字化、
+   下段はflex-wrapでバッジが潰れず折り返せるようにし、fund-staleを左ボーダー
+   でも示すようにした。表示項目・クリック/キーボード操作は変更なし)。 */
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stock-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  /* 万一中身がはみ出しても親(#stock-list-body)に横スクロールを作らせない */
+  overflow: hidden;
+}
+.stock-card:hover { background: rgba(96, 165, 250, 0.06); }
+/* キーボードフォーカス(tabindex=0のカード/保有行)の可視化 */
+.stock-card:focus-visible,
+.positions-table tr[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* ファンダ古いカード: 背景の薄い黄色に加え、左ボーダーでも一目で分かるようにする */
+/* 2026-07-27: ファンダ未入力(fund-stale)の黄色背景は撤廃(app.js側でクラスも
+   付けていない)。エントリー時に必ず確認する項目なので、一覧では表示ノイズ。 */
+.stock-card.row-static { cursor: default; }
+.stock-card.row-static:hover { background: var(--panel); }
+
+/* 2026-07-30 カード作り直し。「1つの行で伸縮するのは1要素だけ」を徹底する。
+     1段目 = 銘柄名(伸縮・省略) ......... SC/RSチップ(固定・絶対に縮めない)
+     2段目 = 状態バッジ + 終値(左詰め) ... DU(右端)
+     3段目 = 業種・進行度(1行に省略)
+   以前は1段目に名前もバッジもSC/RSも全部積んでいたため、iPhone実機(幅390px)で
+   名前が長い銘柄のRSチップが右端で切れていた。可変長(名前)と固定幅(チップ)を
+   同じ行で競わせたのが原因。 */
+.sc-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+/* 2段目は折り返さない。以前は flex-wrap + セクターの text-align:right だったので、
+   DUの有無で右端の位置が行ごとに動き「崩れて見える」原因になっていた。 */
+.sc-row-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+/* 3段目(業種・セットアップ進行度)。「未達: A / B / C / D」が3行に折り返して
+   カードの大半を占めていたので1行固定にした。全文は title 属性で読める。 */
+.sc-row-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc-row-meta.sc-stage-near { color: var(--accent); }
+
+/* 銘柄名だけ伸縮させ、あふれたら省略。他は成り行き幅 */
+.sc-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.sc-code { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+/* SC/RSは毎行必ず読む固定幅の情報なので、絶対に縮めない・切らない。
+   同じ行で伸縮するのは名前だけ(flex:1 1 auto + min-width:0)なので、
+   幅が足りなければ必ず名前の方が省略される。 */
+.sc-chips { flex: 0 0 auto; display: flex; align-items: baseline; gap: 5px; }
+
+/* 状態(ブレイク/待機/あと一歩/形成中)・F不・買重のバッジ。2026-07-30に1段目から
+   2段目の先頭へ移した。幅が足りないときはここが最初に縮む。 */
+.sc-flags {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+}
+.sc-flags:empty { display: none; }
+.sc-flags .sell-signal-badge,
+.sc-flags .fund-badge {
+  padding: 1px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* SC/RSチップ: 総合スコアは順位付け用の数値であって合否判定ではないため
+   (help_key: total_score参照)、緑/赤などの色は付けず、太さ・濃さの差だけで
+   「SCがまず目に入り、RSは補助情報」という視覚階層を作る。 */
+.sc-score-chip,
+.sc-rs-chip {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sc-score-chip { font-weight: 700; color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.sc-rs-chip { font-weight: 600; color: var(--text-dim); background: transparent; }
+
+.sc-close { flex: 0 0 auto; color: var(--text); font-variant-numeric: tabular-nums; }
+/* 前日比は毎日のスキャンで最初に見る強弱シグナルなので太字で強調する */
+.sc-chg { font-variant-numeric: tabular-nums; font-weight: 700; }
+.chg-pos { color: var(--accent); }
+.chg-neg { color: var(--danger); }
+.chg-flat { color: var(--text-dim); }
+/* DUは2段目の右端に固定する(margin-left:auto)。値が無い銘柄は要素ごと消えるが、
+   右端が空くだけなので他の要素の位置は動かない。 */
+.sc-dryup { flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
+.sc-dryup:empty { display: none; }
+/* .sc-margin / .sc-fund は 2026-07-27 に .sc-flags へ移動して廃止。
+   .sc-sector は 2026-07-30 に3段目(.sc-row-meta)へ統合して廃止。 */
+
+/* ------------------------------------------------------- 投資法ページ */
+
+/* ページャ方式。initInvestView が data-section の並び順に1枚ずつ表示し、
+   下部の前に/次にで送る(#invest / #invest/<id>)。
+   ナビは fixed にせず本文の末尾に流す。スクロールはビュー全体
+   (.view-section の overflow-y:auto)に任せ、内側で二重スクロールしない。
+   読み物として読みやすいよう、本文は中央寄せで横幅を制限する。 */
+.invest-content {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 4px 4px 8px;
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--text);
+}
+/* 外枠は付けない。各セクションは余白で区切る。 */
+.invest-section { margin: 0 0 28px; }
+.invest-content h3 {
+  margin: 0 0 12px;
+  font-size: 21px;
+  line-height: 1.4;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+.invest-content h4 {
+  margin: 22px 0 8px;
+  font-size: 16px;
+  color: var(--text);
+}
+.invest-content p { margin: 0 0 14px; color: var(--text); }
+.invest-content ul, .invest-content ol { margin: 0 0 14px; padding-left: 22px; }
+.invest-content li { margin: 6px 0; color: var(--text); }
+.invest-content strong { color: var(--text); }
+.invest-content .invest-note {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.08);
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 「このツールの閾値と、実測したエッジ」で使う数値表。狭い端末では
+   横スクロールに逃がす(本文の横幅を崩さないため)。 */
+.invest-table-wrap { margin: 0 0 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.invest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.invest-table th,
+.invest-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.invest-table thead th {
+  color: var(--text-dim);
+  font-weight: 600;
+  border-bottom-color: var(--border-strong);
+}
+.invest-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.invest-table td.pos { color: var(--accent); }
+.invest-table td.neg { color: var(--warn); }
+.invest-table tbody tr:last-child td { border-bottom: none; }
+
+/* 本文末尾に流す前後ナビ。矢印が無い端でも visibility:hidden で場所を保つ。 */
+.invest-pager-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: 760px;
+  margin: 24px auto 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.invest-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+.invest-pager-btn:hover,
+.invest-pager-btn:focus-visible { border-color: var(--border-strong); }
+.invest-pager-btn.is-hidden { visibility: hidden; }
+.invest-pager-pos { color: var(--text-dim); font-size: 12px; flex: 0 0 auto; }
+
+/* 解説図(インラインSVG)。テーマトークンで配色し、幅は本文いっぱいに。 */
+.invest-fig { margin: 14px 0 6px; }
+.invest-fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-sizing: border-box;
+}
+.invest-fig figcaption { margin-top: 6px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+.invest-fig .fig-price { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.invest-fig .fig-ma { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.invest-fig .fig-ma50 { stroke: var(--accent); stroke-dasharray: none; }
+.invest-fig .fig-zone { fill: var(--accent); opacity: 0.12; }
+.invest-fig .fig-div { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.invest-fig .fig-pivot { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 3; }
+.invest-fig .fig-vol rect { fill: var(--text-dim); opacity: 0.55; }
+.invest-fig .fig-vol-spike { fill: var(--accent); opacity: 0.7; }
+.invest-fig .fig-up { fill: var(--accent); }
+.invest-fig .fig-up-wick { stroke: var(--accent); stroke-width: 2; }
+.invest-fig .fig-label { fill: var(--text-dim); font-size: 12px; }
+.invest-fig .fig-label-buy { fill: var(--accent); }
+.invest-fig .fig-label-warn { fill: var(--warn); }
+
+/* 設定→投資法のトピック一覧(リンクカードを縦に並べる)。 */
+.settings-link-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.settings-link-card > i:first-child { font-size: 18px; color: var(--text-dim); flex: 0 0 auto; }
+
+/* --------------------------------------------------------- 設定画面 */
+
+/* 設定のサブタブ(バッチ実行/履歴・フィルター設定・投資法)。ピル型セグメント。 */
+.settings-subtabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.settings-subtab {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.settings-subtab.active {
+  background: var(--accent);
+  color: #05130b;
+  font-weight: 600;
+}
+/* 下部配置版: 各サブパネルの下に置くので上に余白を取り、下余白は詰める。 */
+/* 設定ビューを縦flex化し、サブタブ(バッチ/フィルター/投資法)を株リストの
+   本命/候補/監視ドックと同様に画面下部へ固定。パネル群だけが内側スクロールする。 */
+.batch-view { display: flex; flex-direction: column; overflow: hidden; }
+.batch-view > h2 { flex: 0 0 auto; }
+.batch-view .settings-subpanels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* スクロール終端でメインDock&タブバーの下(すりガラス越し)までコンテンツが見えるように */
+  padding-bottom: var(--tabs-clear);
+}
+.settings-subtabs-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-clear);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  z-index: 45;
+}
+.settings-subpanel { display: none; }
+.settings-subpanel.active { display: block; }
+
+.settings-section { margin-bottom: 24px; }
+.settings-section h3 {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.settings-link-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  text-decoration: none;
+}
+.settings-link-card:hover, .settings-link-card:focus-visible { border-color: var(--border-strong); }
+.settings-link-card > .bi-journal-text { font-size: 18px; color: var(--text-dim); }
+.settings-link-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.settings-link-text .tier-note { margin: 0; }
+.settings-link-chevron { color: var(--text-dim); font-size: 14px; }
+
+/* --------------------------------------------- 銘柄リストの永続フィルタ */
+
+.list-filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+/* ボトムシート内のフィルタは、シート自体が枠と余白を持つので、内側フォームの
+   二重の背景/枠/内側パディングを消してタイトに。 */
+#adhoc-filter-form.list-filter-form {
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 16px;
+}
+.lf-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.lf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+/* .lf-field は .lf-row(横flex)の子として flex-basis=幅 で使う前提の指定。
+   縦flexである .list-filter-form の直下に置くと flex-basis が「高さ」として
+   効いてしまい、中身より遥かに高い箱になって下に大きな空白ができる
+   (「表示している市場」の下に空いていた余白の正体)。直下では固定にする。 */
+.list-filter-form > .lf-field { flex: 0 0 auto; }
+.lf-field-wide { flex-basis: 100%; }
+.lf-label { font-size: 12px; color: var(--text-dim); }
+.lf-label small { color: var(--text-dim); opacity: 0.75; font-size: 11px; }
+.lf-field input[type="number"] {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 9px 10px;
+  font-size: 15px; /* iOSで16px未満だとフォーカス時にズームするが、他入力と揃える */
+  width: 100%;
+}
+.lf-field input[type="number"]:focus-visible,
+.lf-range input[type="number"]:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 見出し + 中身 の小さなまとまり。項目を「株価」「時価総額」「市場」…と
+   グルーピングして、ラベル行の情報量を減らす。 */
+.lf-group { display: flex; flex-direction: column; gap: 7px; }
+.lf-group-head { display: flex; align-items: center; gap: 8px; }
+.lf-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+/* 「全て / 解除」トグル。チップ群の右端に小さく置く。 */
+.lf-toggle-all {
+  margin-left: auto;
+  min-height: 0;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lf-toggle-all:hover, .lf-toggle-all:focus-visible { color: var(--text); border-color: var(--accent); }
+
+/* 下限〜上限を1行に。ラベルは .lf-group-title 側に1つだけ持たせる。 */
+.lf-range { display: flex; align-items: center; gap: 8px; }
+.lf-range input[type="number"] {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 9px 10px;
+  font-size: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.lf-range-sep { flex: 0 0 auto; color: var(--text-dim); font-size: 13px; }
+.lf-unit { flex: 0 0 auto; color: var(--text-dim); font-size: 12px; min-width: 2.4em; }
+
+/* チップ型の表示トグル。チェックボックスは視覚的に隠し、ラベル全体を
+   タップターゲットにする(指で押しやすく、on/offが面で読める)。 */
+.lf-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* ステータスは11項目あるので、詰めて2〜3列に流し込む。 */
+.lf-chips-status .lf-chip { font-size: 12px; padding: 6px 11px; }
+.lf-chip {
+  position: relative; /* 中の input を absolute で隠すため */
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.lf-chip input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.lf-chip:has(input:checked) {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: var(--accent);
+  font-weight: 600;
+}
+.lf-chip:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 2px; }
+.lf-chip:active { transform: scale(0.96); }
+/* :has() 非対応ブラウザ向けの保険。JSで .is-on を同期する(app.js syncChipStates)。 */
+.lf-chip.is-on {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.lf-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+/* ボトムシートは縦に長くなるので、操作(リセット/適用)は下端に貼り付けて
+   スクロール位置に関わらず届くようにする。 */
+#adhoc-filter-form .lf-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: -4px;
+  padding: 12px 0 2px;
+  background: linear-gradient(to bottom, rgba(14, 17, 24, 0), var(--panel) 22%);
+  border-top: 1px solid var(--border);
+}
+#adhoc-filter-form .lf-actions button { flex: 1 1 0; min-height: 42px; }
+/* 適用ボタンは常に右端へ寄せる(クリア/ステータスは左寄せのまま) */
+.lf-actions .lf-apply { margin-left: auto; }
+.lf-status { font-size: 12px; color: var(--text-dim); }
+.lf-status.lf-status-active { color: var(--accent, #4ea1ff); }
+/* 恒久フィルタ下の「ステータスはリスト画面側」案内 */
+.lf-foot-note { margin: 10px 2px 0; line-height: 1.7; }
+.lf-foot-note strong { color: var(--text); font-weight: 600; }
+
+/* リスト画面の「N件除外中」小バナー */
+.list-filter-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-filter-note .bi-funnel-fill { font-size: 11px; }
+.list-filter-edit { color: var(--accent, #4ea1ff); text-decoration: none; margin-left: auto; }
+.list-filter-edit:hover, .list-filter-edit:focus-visible { text-decoration: underline; }
+
+/* リスト画面の一時フィルタバー(その時用・リロードで解除)。折りたたみ式で、
+   閉じている時は1行だけ。開くと本文はスクロール可能にしてリストを潰しすぎない。 */
+.adhoc-filter {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.adhoc-filter-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+}
+.adhoc-filter-summary::-webkit-details-marker { display: none; }
+.adhoc-filter-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.adhoc-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #06210f;
+  font-size: 11px;
+  font-weight: 700;
+}
+.adhoc-filter-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.adhoc-filter-chevron { color: var(--text-dim); font-size: 12px; transition: transform 0.15s; }
+.adhoc-filter[open] .adhoc-filter-chevron { transform: rotate(180deg); }
+.adhoc-filter-body {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.adhoc-filter-permlink { color: var(--accent, #4ea1ff); text-decoration: none; font-size: 12px; margin-left: auto; }
+.adhoc-filter-permlink:hover, .adhoc-filter-permlink:focus-visible { text-decoration: underline; }
+
+/* --------------------------------------------------------- バッチ実行 */
+
+.batch-cards { display: grid; gap: 10px; margin-bottom: 16px; }
+.batch-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.batch-card-info { min-width: 0; }
+.batch-card-title { font-weight: 600; }
+.batch-card-desc { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.batch-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.run-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+}
+.run-status-success { border-color: var(--accent); color: var(--accent); }
+.run-status-failure { border-color: var(--danger); color: var(--danger); }
+.run-status-in_progress, .run-status-queued { border-color: var(--warn); color: var(--warn); }
+
+.run-history-table { min-width: 0; }
+.run-history-table td, .run-history-table th { font-size: 12px; }
+
+/* --------------------------------------------------------------- mobile */
+
+@media (max-width: 600px) {
+  :root { --dock-h: 47px; --dock-w: 258px; } /* 高さ:ボタン37+padding8+border2 / 幅:ボタン48×5+gap2×4+padding4×2+border2 */
+  body { padding: 8px 10px 0; }
+  h1 { font-size: 17px; }
+  .page-header { margin-bottom: 6px; }
+  .tier-section { padding: 12px 10px; }
+  .breadth-meter { padding: 10px 12px; }
+  .breadth-meter-stats { gap: 6px 14px; }
+  /* 16px inputs prevent iOS Safari's focus auto-zoom */
+  .modal-input, .fund-table input { font-size: 16px; }
+  /* モーダルは縦中央寄せ。下に大きめの余白(=閉じる用のタップ領域)を作り、
+     スマホでも親指が届く位置に置く。余白部分タップでオーバーレイのcloseが効く。 */
+  .modal-overlay { padding: 10px 10px 18vh; align-items: center; }
+  .modal-box { padding: 14px; max-height: 74dvh; border-radius: 14px; }
+  /* ラベル+「?」が2行に折れないよう1列目を確保しnowrap(テクニカルスコア=8字+?) */
+  .score-bar-row { grid-template-columns: 116px 1fr 36px; }
+
+  /* market overview: 2-up cards, tighter */
+  .market-cards { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .market-card { padding: 8px 10px 6px; }
+  .market-card-value { font-size: 15px; }
+
+  /* stock page: stack the toolbar, full-width segmented control */
+  .chart-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .segmented { display: flex; }
+  .segmented button { flex: 1; }
+  .chart-card-head { padding: 6px 10px; }
+  .ohlc-legend { font-size: 11px; gap: 2px 8px; }
+  .detail-card { padding: 10px 10px; }
+  #must-checklist ul { grid-template-columns: 1fr; }
+
+  /* heatmap page */
+  .hm-toolbar { flex-direction: column; align-items: stretch; }
+  .hm-legend { justify-content: center; }
+  .hm-sector-head { font-size: 10px; padding: 0 4px; gap: 4px; }
+  .hm-popup-box { max-width: none; }
+
+  /* dock nav: slightly smaller icon+label buttons */
+  .dock-nav { padding: 4px; border-radius: 21px; }
+  .dock-btn { width: 48px; height: 37px; gap: 2px; border-radius: 15px; }
+  .dock-btn .dock-icon { font-size: 14px; }
+  .dock-label { font-size: 8.5px; }
+  /* 下部ピルタブも少し詰める */
+  .stock-tab { padding: 5px 9px; font-size: 12px; }
+  .list-tab { padding: 5px 16px; font-size: 12.5px; }
+  .batch-card { flex-direction: column; align-items: stretch; }
+  .batch-card-actions { justify-content: flex-start; }
+
+  /* 地合い詳細パネル: スパークラインを2カラム→縦積みに */
+  .market-detail-sparklines { grid-template-columns: 1fr; }
+}
+
+/* 個別銘柄のルールベースサマリー (src/report/summary.py が生成、renderStockSummaryが描画) */
+.stock-summary {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin: 0 0 12px;
+}
+.summary-headline { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.55; }
+.summary-points { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-dim); }
+.summary-points li { margin: 2px 0; line-height: 1.5; }
+.summary-cautions { margin: 8px 0 0; padding-left: 2px; font-size: 12.5px; color: var(--warn); list-style: none; }
+.summary-cautions li { margin: 2px 0; line-height: 1.5; }
+/* ポジ/ネガ/中立の色分け(li.className で付与。既定のリスト色を上書き) */
+.summary-item-positive { color: var(--accent); }
+.summary-item-negative { color: var(--danger); }
+.summary-item-neutral { color: var(--text-dim); }
+
+/* ファンダ 表/グラフ 切替 (app.js renderStockFundamentals) */
+/* 入力/編集ボタンとグラフ｜表トグルを同一行に並べる */
+.fund-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.fund-detail-head .fund-view-toggle { margin: 0; flex: 0 0 auto; }
+.fund-view-toggle { margin: 10px 0; max-width: 200px; }
+.fund-view-panel[hidden] { display: none; }
+.fund-chart-wrap { display: flex; flex-direction: column; gap: 16px; }
+.fund-chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 8px 4px; }
+.fund-chart-title { font-size: 12px; color: var(--text-dim); margin: 0 0 4px 6px; }
+.fund-bar-svg { display: block; width: 100%; height: auto; }
+.fund-bar-yoy { font-size: 9px; font-weight: 600; }
+.fund-bar-x { font-size: 9px; fill: var(--text-dim); }
+.fund-chart-legend { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; }
+.fund-chart-legend .lg-up { color: var(--accent); }
+.fund-chart-legend .lg-down { color: var(--danger); }
+.fund-chart-legend .lg-neutral { color: var(--text-dim); }
+
+/* 市況カード詳細モーダル (app.js openMarketModal) */
+.market-modal-box { text-align: left; }
+.market-modal-value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+.market-modal-spark { display: block; width: 100%; height: auto; margin: 12px 0; }
+.market-modal-range { font-size: 12.5px; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.market-modal-date { font-size: 11px; color: var(--text-dim); margin: 12px 0 0; }
+
+/* 起動時パスキーゲート (app.js ensureDataAccess / index.html #lock-screen)
+   ネイティブアプリの起動スプラッシュ相当。真っ黒の全画面にマークとワードマーク
+   だけを置き、操作の合図は "TAP TO UNLOCK" の1行に集約する。画面のどこを
+   タップしても解錠が走る(app.js側でoverlayにclickを配線)ので、ボタンは
+   「押せる場所の目印」であって唯一の導線ではない。 */
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 中央にごく淡いグリーンのグローだけ乗せた黒。周囲は完全な #000。 */
+  background:
+    radial-gradient(60vmin 60vmin at 50% 44%, rgba(52, 211, 153, 0.07), transparent 70%),
+    #000;
+  padding: 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+/* display:flex が hidden属性のUAスタイル(display:none)より強いため明示的に消す */
+.lock-screen[hidden] { display: none; }
+
+.lock-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  /* 起動直後にふわっと立ち上がる。要素ごとに遅延をずらして順に現れる。 */
+  animation: lock-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes lock-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.lock-mark { width: 84px; height: 84px; margin-bottom: 22px; }
+.lock-mark-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* 折れ線を左から描いていく(起動アニメ)。dasharray長は経路長より十分長く取る。 */
+.lock-mark-line {
+  stroke-dasharray: 140;
+  stroke-dashoffset: 140;
+  animation: lock-draw 900ms cubic-bezier(0.4, 0, 0.2, 1) 120ms forwards;
+  filter: drop-shadow(0 0 10px rgba(52, 211, 153, 0.35));
+}
+@keyframes lock-draw { to { stroke-dashoffset: 0; } }
+/* 線が引き終わってから先端のドットが点灯し、以後ゆっくり脈打つ。 */
+.lock-mark-dot {
+  opacity: 0;
+  transform-origin: 58px 12px;
+  animation:
+    lock-dot-in 320ms ease-out 900ms forwards,
+    lock-dot-pulse 2.6s ease-in-out 1220ms infinite;
+  filter: drop-shadow(0 0 8px rgba(74, 222, 159, 0.8));
+}
+@keyframes lock-dot-in { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes lock-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.lock-wordmark {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  white-space: nowrap;
+}
+.lock-wordmark span { font-weight: 700; }
+
+/* 解錠の合図。判定中はLOADING、暗号化+未解錠になったらボタンに差し替わる。
+   高さを固定しておき、差し替わってもワードマークの位置がズレないようにする。 */
+.lock-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  margin-top: 30px;
+}
+.lock-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  min-height: 0;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em; /* letter-spacingで右に付く余白ぶん、見た目の中央を戻す */
+  cursor: pointer;
+}
+/* display:inline-flex は hidden属性のUAスタイル(display:none)より強いので明示的に消す
+   (LOADING⇄TAP TO UNLOCK の出し分けは hidden 属性で行っている) */
+.lock-cta[hidden] { display: none; }
+.lock-cta .bi { font-size: 16px; letter-spacing: normal; color: var(--accent); }
+/* タップを促すため、ゆっくり明滅させる */
+.lock-cta-btn { animation: lock-breathe 2.4s ease-in-out infinite; }
+.lock-cta-btn:hover { border: none; color: var(--text); }
+.lock-cta-btn:disabled { opacity: 1; cursor: default; animation: none; }
+@keyframes lock-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* LOADING 表示の小さいリング */
+.lock-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: lock-spin 700ms linear infinite;
+}
+@keyframes lock-spin { to { transform: rotate(360deg); } }
+
+.lock-err {
+  max-width: 300px;
+  margin-top: 18px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.lock-err[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lock-stage, .lock-mark-line, .lock-mark-dot, .lock-cta-btn, .lock-spinner { animation: none; }
+  .lock-mark-line { stroke-dashoffset: 0; }
+  .lock-mark-dot { opacity: 1; }
+}
+
+/* 用語ヘルプ(？ボタン→ポップアップ説明。2026-07-19タスク)。表示専用。 */
+.help-btn {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  aspect-ratio: 1 / 1;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.help-btn:hover, .help-btn:focus-visible { color: var(--text); border-color: var(--text-dim); }
+/* タップ領域が15pxでは狭いため、::before で見えない当たり判定を広げる(モバイル主体)。 */
+.help-btn::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  bottom: -8px;
+  left: -8px;
+}
+
+.help-popover-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+.help-popover {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  max-width: 360px;
+  width: 100%;
+  max-height: 80vh;
+  max-height: 80dvh;
+  overflow-y: auto;
+  padding: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.help-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.help-popover-title { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.4; }
+.help-popover-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.help-popover-close:hover { color: var(--text); }
+.help-popover-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  white-space: pre-line;
+}
+
+@media (max-width: 600px) {
+  .help-popover-overlay { padding: 10px 10px 18vh; align-items: center; }
+  .help-popover { padding: 14px; max-height: 74dvh; border-radius: 14px; }
+}
+
+/* ダッシュボード: 前場/後場 振り返りデータのコピー(session-review) */
+/* 振り返り・作戦データ (2026-07-27 刷新)。説明パラグラフ+平坦な3ボタンから、
+   セッション名を主役にしたタイル型に。各タイルは「見出し(いつの断面か)」と
+   「補足(何に使うか)」の2行構成で、押す前に判断できるようにしている。 */
+.session-review {
+  margin-top: 16px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.session-review-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 10px;
+}
+.session-review h2 { margin: 0; font-size: 16px; }
+.session-review h2 .bi { color: var(--accent); margin-right: 4px; }
+.session-review-hint { font-size: 11.5px; color: var(--text-dim); }
+.session-review-btns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+.session-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.session-btn:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.session-btn:active { transform: translateY(1px); }
+.session-btn-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.session-btn-title { font-size: 14px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+.session-btn-sub { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+.session-btn-icon { flex: 0 0 auto; font-size: 15px; color: var(--text-dim); }
+.session-review-foot { margin: 10px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+.session-review-status { margin-top: 6px; min-height: 16px; font-size: 12px; color: var(--text-dim); }
+
+/* -------------------------------------------- リスト統合 (2026-07-29) ------ */
+/* 追いかけ禁止 (cooled = EXTENDED/STALE)。以前は専用セクション(#cooled-tier-body)に
+   隔離していたが、1リスト統合で本文に混ぜた。スコアには一切ペナルティを課さず
+   (実測エッジのない減点は指標の意味を濁らせる)、行を淡色にして「見えるが目立たない」
+   状態にするだけにしている。既定では一時フィルタのステータスチェックで非表示。 */
+.stock-card.sc-cooled {
+  opacity: 0.55;
+}
+.stock-card.sc-cooled:hover,
+.stock-card.sc-cooled:focus-visible {
+  opacity: 1;
+}
+
+/* 状態バッジ(ブレイク/待機/追禁/あと一歩/形成中)。スコアに入らない情報を
+   順位ではなくバッジで示すための行内ラベル。 */
+.sc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.sc-badge-breakout {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.sc-badge-breakout-weak {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.sc-badge-watch,
+.sc-badge-near {
+  background: rgba(250, 204, 21, 0.16);
+  color: #facc15;
+  border-color: rgba(250, 204, 21, 0.38);
+}
+.sc-badge-forming {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-dim);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+/* 決算が近い(2026-07-31)。合否ではなく「別のリスクがある日」の注意喚起なので、
+   既存の警告色(--warn)をそのまま使い、新しい色は足していない。 */
+.sc-badge-earnings {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.sc-badge-cooled {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+/* 件数表示。2026-07-30 にツールバー左からページヘッダ右上へ移した
+   (.page-header-count を参照)。旧クラス .list-summary の規則は廃止。 */
+
+/* 個別画面のスコア内訳: 合成スコアの下に tech_score の3成分を並べる。 */
+.score-subhead {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.score-subhead small { font-weight: 400; font-size: 11px; }
+.score-bar-row.score-bar-sub { opacity: 0.85; font-size: 12px; }

@@ -1,0 +1,5956 @@
+// エントリーステータスの日本語ラベル (src/report/summary.py の STATUS_LABELS_JA と対で保守)。
+// 2026-08-13: WATCH_B を廃止(ピボットが付かず発注できないのに「待機B」と出ていた)。
+// 落ちた銘柄は REJECTED に寄り、落ちた条件が名前で出るようになった。A/B の区別が
+// 無くなったので WATCH_A のラベルからも「A」を外す。
+const STATUS_LABELS = {
+  BREAKOUT: "本日のブレイクアウト",
+  BREAKOUT_WEAK: "ブレイクアウト(出来高不足)",
+  WATCH_A: "待機(ピボット待ち)",
+  EXTENDED: "伸びすぎ(追いかけ禁止)",
+  STALE: "ブレイク鮮度切れ(追いかけ禁止)",
+  REJECTED: "ベース不合格",
+  IMMATURE: "ベース形成中(日数不足)",
+  TOO_RECENT: "高値更新中(ベース未形成)",
+  TOO_VOLATILE: "ボラ過大(VCP評価対象外)",
+  NO_BASE: "ベース未検出",
+};
+// 同着のときの並び順。src/report/build_site.py の STATUS_ORDER と対で保守する。
+const STATUS_ORDER = [
+  "BREAKOUT",
+  "BREAKOUT_WEAK",
+  "WATCH_A",
+  "EXTENDED",
+  "STALE",
+  "REJECTED",
+  "IMMATURE",
+  "TOO_RECENT",
+  "TOO_VOLATILE",
+  "NO_BASE",
+];
+
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------------------------------------------------------------------------
+// 用語ヘルプ(？ボタン→ポップアップ説明)。2026-07-19タスク。表示専用機能で、
+// スコア計算・判定ロジック・データ構造には一切影響しない
+// (HANDOFF_TASKS_20260719.txt)。
+// ---------------------------------------------------------------------------
+const TERM_HELP = {
+  market_signal: {
+    title: "地合いシグナル(攻め/中立/守り)",
+    body:
+      "市場全体の環境を3段階で判定したもの。攻め=新規エントリー積極可、\n" +
+      "中立=サイズ・銘柄数を控えめに、守り=新規エントリーは原則見送り。\n" +
+      "MA200上回り率や新高値・新安値銘柄数などの内部指標から機械的に判定される。\n" +
+      "個別銘柄がどれだけ良くても、地合いが悪い時に買うと勝率が大きく落ちる、\n" +
+      "というのがミネルヴィニの基本姿勢。",
+  },
+  market_score: {
+    title: "地合いの点数(市場スコア)",
+    body:
+      "地合いを0〜100点で数値化した参考値。値上がり銘柄の広がり40%・指数の向き30%・\n" +
+      "勢い20%・リスクの取りやすさ10%の加重平均。矢印は点数の方向\n" +
+      "(↗改善 / →横ばい / ↘悪化)。攻め/中立/守りの色判定とは独立した\n" +
+      "表示専用の補助指標で、色と食い違うこともある(その時は色が優先)。",
+  },
+  breadth: {
+    title: "値上がり銘柄の広がり(ブレッドス)",
+    body:
+      "上昇に参加している銘柄がどれだけ多いかを見る指標群。指数だけが一部の\n" +
+      "大型株で吊り上げられ、中身(個別銘柄)が付いてきていない相場を見分ける。\n" +
+      "ブレッドスが弱い上昇はブレイクアウトの成功率が落ちる。",
+  },
+  index_trend_score: {
+    title: "指数の向き(指数トレンド)",
+    body:
+      "TOPIX・日経225・グロース250の3指数が50日線・200日線の上にあるか、\n" +
+      "200日線が上向きかをスコア化したもの。主要指数が揃って上向きなら\n" +
+      "追い風、割れていれば逆風。",
+  },
+  momentum_score: {
+    title: "勢い(モメンタム)",
+    body: "値上がり／値下がりの比や上昇・下落銘柄数など、市場の直近の勢いをスコア化したもの。",
+  },
+  risk_appetite: {
+    title: "リスクの取りやすさ(リスク選好)",
+    body:
+      "グロース250のTOPIXに対する相対的な強さから、市場がリスクを取りに\n" +
+      "行っているかを見る。小型グロースに資金が入る局面は、この手法が狙う\n" +
+      "成長株ブレイクアウトの成功率が上がりやすい。",
+  },
+  pct_above_ma200: {
+    title: "200日線の上にいる銘柄(MA200上回り率)",
+    body:
+      "スクリーニング対象銘柄のうち、終値が200日移動平均線より上にある割合。\n" +
+      "過半数が上なら市場の長期トレンドは健全。カッコ内の20日前との差は\n" +
+      "20営業日前からの変化幅で、プラスなら地合いが改善方向。",
+  },
+  pct_above_ma50: {
+    title: "50日線の上にいる銘柄(MA50上回り率)",
+    body: "終値が50日移動平均線より上にある銘柄の割合。中期トレンドへの参加率で、\n200日線版より敏感に動く。",
+  },
+  up_down_ratio_25: {
+    title: "値上がり／値下がりの比(騰落レシオ25)",
+    body:
+      "過去25営業日の値上がり銘柄数合計÷値下がり銘柄数合計。\n" +
+      "一般に120%(1.2)超は過熱気味、70%(0.7)近辺は売られすぎの目安。\n" +
+      "データが25日分貯まるまでは「蓄積中」と表示される。",
+  },
+  nh_nl: {
+    title: "新高値-新安値(NH-NL)",
+    body:
+      "新高値を付けた銘柄数から新安値を付けた銘柄数を引いた値。当日値と、\n" +
+      "それを毎日積み上げた累積値を表示。累積線が右肩上がりなら市場の中身は\n" +
+      "健全、指数が高値でもこの線が下がり始めたら内部悪化のサイン。",
+  },
+  growth_rel_20d: {
+    title: "グロース株の強さ(グロース-TOPIX 20日相対)",
+    body:
+      "グロース250指数のTOPIXに対する直近20営業日の相対リターン。\n" +
+      "プラスなら小型グロース優位(リスク選好が強い)、マイナスなら大型・\n" +
+      "ディフェンシブ優位。",
+  },
+  index_trend_table: {
+    title: "主な指数の位置(表の見方)",
+    body:
+      "○=その指数が当該移動平均線(50日/200日)の上にある。×=下にある。\n" +
+      "「200日線が上向き」は200日線自体が上を向いているかどうか。\n" +
+      "3指数が揃って○なら強い地合い。",
+  },
+  vcp_funnel: {
+    title: "候補の段階(VCPファネル)",
+    body:
+      "上昇トレンドの形が出ている銘柄が、値固め(ベース)判定のどの段階にいるかの内訳。\n" +
+      "・値固めまで進んだ: 値固めが検出され、形の良し悪しの判定まで進んだ銘柄\n" +
+      "・まだ高値を走っている: 高値圏を走っていてまだ値固め(調整)を作っていない銘柄\n" +
+      "・値固めを作り始めた: 作り始めたが日数不足でまだ判定できない銘柄\n" +
+      "・値動きが荒すぎる: 振れ幅が大きすぎて判定の対象外になった銘柄\n" +
+      "「まだ高値を走っている」の減少は、主力銘柄が調整入り=数週間後に買い場待ちが\n" +
+      "増える先行サインとして折れ線で監視している。",
+  },
+  tech_score: {
+    title: "テクニカルスコア",
+    body:
+      "その日のトレンドテンプレート通過銘柄の中での相対順位(0-100)。\n" +
+      "使う変数は3つだけで、等ウェイトの平均:\n" +
+      "・200日線の21日上昇率(トレンドの角度)\n" +
+      "・52週安値からの倍率(上昇の伸びしろ/実績)\n" +
+      "・出来高の枯れ度(小さいほど高得点)\n" +
+      "2026-07-29改定。RSと52週高値からの近さは通過条件(MUST)としては残すが、\n" +
+      "点数には一切効かない。2000-2026年の検証で、この2つは通過銘柄の中では\n" +
+      "順位付けの役に立たない(足すとむしろ期待値が下がる)ことが分かったため。",
+  },
+  // --- 投資法ページ「このツールの閾値と実測エッジ」で使う用語 (2026-07-29) ---
+  expectancy_r: {
+    title: "期待値(R)",
+    body:
+      "1トレードあたりの平均損益を、リスク幅Rの倍数で表したもの。\n" +
+      "R=エントリー価格-損切り価格。+0.20Rなら「1回あたり平均でリスクの\n" +
+      "0.2倍が儲かる」という意味。勝率ではなくこれで比較する。\n" +
+      "勝率が低くても、勝ちが大きければ期待値はプラスになりうるため。",
+  },
+  edge_baseline: {
+    title: "ベースライン(+0.126R)",
+    body:
+      "MUST条件を通った銘柄のブレイクアウトを、スコアで一切絞り込まずに\n" +
+      "全部取った場合の期待値。2000-2026年の日本株、約51,000件の\n" +
+      "ブレイクアウトで実測した値。\n" +
+      "スコアや閾値の良し悪しは、この数字を超えるかどうかで判断する。\n" +
+      "ベースラインを下回る絞り込みは、絞り込まないほうがマシということ。",
+  },
+  regime_stability: {
+    title: "局面安定性(◯勝◯敗)",
+    body:
+      "2000-2026年を11の局面(ITバブル崩壊/リーマン/アベノミクス/コロナなど、\n" +
+      "事前に分かるマクロイベントだけで区切ったもの)に分け、その変数の効き方が\n" +
+      "何局面でプラスに出たかを数えたもの。\n" +
+      "全期間で良く見えても特定の数年だけで稼いでいる変数は使えないため、\n" +
+      "全体の数字よりこちらを重視する。",
+  },
+  cross_section_rank: {
+    title: "断面パーセンタイル",
+    body:
+      "「その日のMUST通過銘柄の中で上から何%か」という相対順位(0-100)。\n" +
+      "絶対値に固定の閾値を置かないので、相場全体が強い日も弱い日も\n" +
+      "同じ意味で比較できる。閾値を人手で決める必要がない=\n" +
+      "過去データに合わせ込む余地がゼロになるのが最大の利点。",
+  },
+  ma200_slope_21d: {
+    title: "200日線の21日上昇率",
+    body:
+      "200日移動平均線が直近21営業日(≒1ヶ月)で何%上がったか。\n" +
+      "トレンドの「角度(強度)」を見る変数。\n" +
+      "26年の検証で上位/下位の期待値差は+0.277R、11局面中8勝1敗と\n" +
+      "最も安定して効いた。\n" +
+      "※「200日線が何日連続で上向きか(持続)」とは別物。持続のほうは\n" +
+      "+0.025R・5勝5敗でほとんど効かなかった。",
+  },
+  low52w_ratio: {
+    title: "52週安値からの倍率",
+    body:
+      "終値÷52週安値。底値から何倍に上がってきたか。\n" +
+      "「もう上がってしまった」ではなく「上がれる銘柄だと既に証明済み」と\n" +
+      "解釈する変数。26年の検証で期待値差+0.216R、11局面中6勝4敗。\n" +
+      "MUST条件では最低1.25倍(+25%)を要求している。",
+  },
+  dryup: {
+    title: "枯れ度(出来高ドライアップ)",
+    body:
+      "直近10日の出来高の中央値 ÷ 50日平均出来高。小さいほど売り物が\n" +
+      "枯れている=わずかな買いで飛びやすい状態。\n" +
+      "26年の検証で、枯れている側の期待値が高い方向に-0.142Rの差が出て、\n" +
+      "11局面中9勝2敗と3変数で最も局面をまたいで安定していた。\n" +
+      "スコアでは符号を反転して「小さいほど高得点」として扱う。",
+  },
+  curve_fitting: {
+    title: "カーブフィッティング",
+    body:
+      "過去データにたまたま合う閾値や重みを見つけてしまい、\n" +
+      "そのぶん将来には効かなくなること。\n" +
+      "「一番成績が良くなる数字を探す」行為そのものが原因になるため、\n" +
+      "このツールでは閾値の最適値探索を行わない。\n" +
+      "見るのは分布上の位置・単調性・局面をまたいだ符号の安定性だけ。",
+  },
+  equal_weight: {
+    title: "等ウェイト",
+    body:
+      "各変数に同じ重みを与えること(3変数なら1/3ずつ)。\n" +
+      "過去データから最適な重みを推定した方が当てはまりは良くなるが、\n" +
+      "将来のデータでは等ウェイトの方が成績が安定することが\n" +
+      "古くから知られている(Dawes 1979)。\n" +
+      "このツールが重みを最適化しないのはこのため。自由パラメータが\n" +
+      "ゼロなら、そこから壊れようがない。",
+  },
+  must_condition: {
+    title: "MUST条件",
+    body:
+      "トレンドテンプレート8条件のように、1つでも欠けたら対象外にする\n" +
+      "「合否」の条件。点数を付ける前の足切りに使う。\n" +
+      "MUST条件と点数付けは役割が違い、足切りに有効な変数が\n" +
+      "順位付けにも有効とは限らない(RSと52週高値への近さがまさにこれ)。",
+  },
+  full_score: {
+    title: "フルスコア(表示専用)",
+    body:
+      "テクニカルスコアの要素に加え、EPS成長率・売上成長率など業績の伸びも\n" +
+      "加味した点数(0-100)。ファンダデータが一部欠けている場合は、\n" +
+      "取得できた要素だけで100点満点に再計算される。\n" +
+      "※順位付けには使われない参考値。ランキングはテクニカル+VCPの\n" +
+      "純セットアップ品質で決まり、ファンダはサイズ係数(エントリー可否と\n" +
+      "ロット)に反映される。",
+  },
+  vcp_score: {
+    title: "VCPスコア",
+    body:
+      "VCP(収縮パターン)の質の点数(0-100)。収縮のタイトさ・出来高の枯れ具合・\n" +
+      "ベースの形などを評価。高いほど「教科書的な」セットアップ。",
+  },
+  total_score: {
+    title: "総合スコア",
+    body:
+      "テクニカルスコアとVCPスコアを合成した順位付け用の点数(純セットアップ\n" +
+      "品質)。エントリー可否の判定そのものではなく、リスト内の並び順を\n" +
+      "決めるためのもの(判定はMUST条件が担う)。ファンダは含まれない\n" +
+      "(ファンダはサイズ係数として発注株数の計算に反映)。",
+  },
+  fund_multiplier: {
+    title: "サイズ係数(ファンダ)",
+    body:
+      "ファンダ強度に応じた発注株数の乗数。合格(EPS YoY+25%かつ売上YoY+20%\n" +
+      "以上)=1.0でフルサイズ、データ不足で判定不能=0.5でハーフサイズ、\n" +
+      "明確に基準未達=0でエントリー取り止め(セットアップが完成しても見送り)。\n" +
+      "RSは業績を織り込むためスコアにファンダを足すと二重計上になる。\n" +
+      "そこで順位はテクニカルに任せ、ファンダは「どれだけ張るか」に使う設計。",
+  },
+  margin_ratio: {
+    title: "信用倍率",
+    body:
+      "信用買い残高÷信用売り残高。高いほど将来の売り圧力(利確・投げ売り)が\n" +
+      "溜まっている状態で、一般に5倍超は重い。1倍未満は売り方優勢で、\n" +
+      "買い戻しによる踏み上げが期待できる形。週次データのため最大5営業日遅れる。",
+  },
+  margin_buy: {
+    title: "買残(信用買い残高)",
+    body:
+      "信用取引で買われてまだ決済されていない株数。将来必ず売り決済される\n" +
+      "「予約された売り」でもあるため、多すぎると上値が重くなる。\n" +
+      "カッコ内は前週比の増減率。",
+  },
+  margin_sell: {
+    title: "売残(信用売り残高)",
+    body: "空売りされてまだ買い戻されていない株数。将来必ず買い戻されるため、\n多いと踏み上げ(買い戻しによる急騰)の燃料になる。",
+  },
+  days_to_cover: {
+    title: "買残回転日数",
+    body:
+      "信用買残÷平均出来高。溜まった買残を消化するのに何日分の出来高が\n" +
+      "必要かの目安。大きいほど需給が重く、ブレイクアウトの上値が抑えられやすい。",
+  },
+  vcp_line: {
+    title: "VCPライン",
+    body:
+      "検出されたVCP(ボラティリティ収縮パターン)の各収縮の高値→安値を\n" +
+      "結んだジグザグ線。T1,T2…は収縮番号(山の上/谷の下に表示)。右へ行く\n" +
+      "ほど振れ幅が狭くなっていれば、売り物が枯れてブレイクアウトの準備が\n" +
+      "整いつつあることを意味する。\n" +
+      "破線はベース熟成中(日数不足)の形成途中ライン。収縮の形が\n" +
+      "できつつあるかの経過観察用で、VCP判定はまだ行われていない。\n" +
+      "チェック状態は銘柄を切り替えても維持される(データなし銘柄では\n" +
+      "選択不可のまま保持)。日足表示のみ。",
+  },
+  pivot: {
+    title: "ピボット",
+    body:
+      "ベース(値固め)の上端にあたる抵抗ライン。ここを平時より多い出来高を\n" +
+      "伴って上抜けた瞬間が本来のエントリーポイント。ピボットから+5%超\n" +
+      "離れて追いかけるのは禁止(伸びすぎ)。",
+  },
+  stop: {
+    title: "損切り(ストップ)",
+    body: "エントリー時に決めておく撤退価格。買値から-7〜8%が機械的な上限。\nポジションサイズはこの損切り幅から逆算する。",
+  },
+  rs_line: {
+    title: "RS(対TOPIX)",
+    body:
+      "株価をTOPIXで割った相対強さの推移。右肩上がりなら市場平均より強い。\n" +
+      "株価が横ばいでもRS線が上がっていれば相対的に強い(市場が下げる中で\n" +
+      "耐えている)ことを意味し、先行指標になる。",
+  },
+  rs_rating: {
+    title: "RSレーティング",
+    body: "全銘柄の株価パフォーマンスを相対順位化して1〜99で表した値。\n70以上がトレンドテンプレートの必須条件、80〜90以上が理想。",
+  },
+  risk_pct: {
+    title: "1トレードあたりリスク(%)",
+    body:
+      "そのトレードで失ってよい金額の、総資金に対する割合。\n" +
+      "ポジションサイズ=許容損失額÷(エントリー価格-損切り価格)で逆算する。\n" +
+      "ミネルヴィニの推奨は0.5〜1.25%程度。",
+  },
+  r_multiple: {
+    title: "R(アール)と2R",
+    body:
+      "R=エントリー価格-損切り価格(1トレードの想定リスク幅)。\n" +
+      "2R到達=リスクの2倍の含み益。一部利確や損切りラインの引き上げを\n" +
+      "検討する目安。",
+  },
+  breakeven_sl: {
+    title: "建値SL",
+    body: "損切りラインを買値(建値)まで引き上げること。以後そのポジションは\n最悪でも損失ゼロになり、無リスクで利を伸ばせる。",
+  },
+  tier_confirmed: {
+    title: "〔本命〕ファンダ強度確認済み",
+    body:
+      "VCPセットアップ完成に加え、直近EPS YoY+25%以上かつ売上YoY+20%以上\n" +
+      "(Minervini Code 33準拠)を満たした銘柄。",
+  },
+  tier_pool: {
+    title: "〔候補〕セットアップ完成・エントリー可能",
+    body:
+      "VCPベース完成済み(ピボット・ストップあり)だが、ファンダが未確認または\n" +
+      "昇格基準(EPS YoY+25%/売上YoY+20%)未達。純テクニカル評価によるランキング。\n" +
+      "「ファンダ弱」はデータはあるが基準未達の銘柄。",
+  },
+  tier_watchlist: {
+    title: "〔監視〕8条件合格・セットアップ形成待ち",
+    body:
+      "トレンドテンプレート8条件をすべて満たしたが、VCPベースが未完成でまだ\n" +
+      "エントリーできない銘柄。ベースが検出されると〔候補〕/〔本命〕に昇格する。\n" +
+      "全件RS降順。",
+  },
+};
+
+function helpBtnHtml(key) {
+  const t = TERM_HELP[key];
+  if (!t) return ""; // 未定義キーは静かに何も出さない(壊さない)
+  return `<button type="button" class="help-btn" data-help="${key}" aria-label="用語説明: ${escapeHtml(t.title)}">?</button>`;
+}
+
+let savedHelpScrollY = 0;
+
+function closeHelpPopover() {
+  const el = document.getElementById("help-popover-overlay");
+  if (!el) return;
+  el.remove();
+  // 他のモーダル(fundamentals-modal.js等)が同時に開いていなければロック解除。
+  if (!document.getElementById("minervini-modal-overlay") && !document.getElementById("market-modal")) {
+    document.body.classList.remove("modal-open");
+    document.body.style.top = "";
+    window.scrollTo(0, savedHelpScrollY);
+  }
+}
+
+function openHelpPopover(key) {
+  const t = TERM_HELP[key];
+  if (!t) return;
+  closeHelpPopover();
+
+  const overlay = document.createElement("div");
+  overlay.className = "help-popover-overlay";
+  overlay.id = "help-popover-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeHelpPopover();
+  });
+
+  const box = document.createElement("div");
+  box.className = "help-popover";
+
+  const titleEl = document.createElement("h3");
+  titleEl.className = "help-popover-title";
+  titleEl.textContent = t.title;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "help-popover-close";
+  closeBtn.setAttribute("aria-label", "閉じる");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeHelpPopover);
+
+  const head = document.createElement("div");
+  head.className = "help-popover-head";
+  head.appendChild(titleEl);
+  head.appendChild(closeBtn);
+
+  const bodyEl = document.createElement("p");
+  bodyEl.className = "help-popover-body";
+  bodyEl.textContent = t.body; // innerHTML不可(エスケープ問題を構造的に消す)。改行はCSSのwhite-space:pre-lineで表現。
+
+  box.appendChild(head);
+  box.appendChild(bodyEl);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  savedHelpScrollY = window.scrollY || 0;
+  document.body.style.top = `-${savedHelpScrollY}px`;
+  document.body.classList.add("modal-open");
+}
+
+// イベント委任(document に1つだけ)。カード類のクリックナビゲーションや
+// <details>のトグルより先に止める(stopPropagation必須)。
+document.addEventListener("click", (e) => {
+  const helpBtn = e.target.closest(".help-btn");
+  if (!helpBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openHelpPopover(helpBtn.dataset.help);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("help-popover-overlay")) closeHelpPopover();
+});
+
+const SECTOR_STRENGTH_CLASS = { 強: "sector-strength-strong", 中: "sector-strength-mid", 弱: "sector-strength-weak" };
+
+// セクター(強度)列: 強度の文字だけ色付けする(緑=強/グレー=中/赤=弱)。
+function sectorStrengthHtml(s) {
+  if (!s.sector33) return "-";
+  const strength = s.sector_strength;
+  const cls = SECTOR_STRENGTH_CLASS[strength] || "";
+  const badge = strength ? `<span class="${cls}">${escapeHtml(strength)}${escapeHtml(s.sector_direction || "")}</span>` : "";
+  return `${escapeHtml(s.sector33)} ${badge}`;
+}
+
+// 枯れ度列: dryup_med_10_50 の値を `DU 0.50` 形式で表示する。
+// 2026-07-30: 「激枯れ/枯れ気味」の日本語ラベルは廃止し、指標名+数値の
+// 一貫表記(SC/RSチップと同じ読み方)に統一。強さは文字ではなく色の濃さで出す。
+// バッジ種別(dryup.badge)はサーバ側(build_site._build_dryup_badge)がconfig閾値で確定済み。
+// 値が無い銘柄は "-" ではなく空文字を返す(.sc-dryup:empty で要素ごと消える)。
+function dryupBadgeHtml(s) {
+  const d = s.dryup;
+  if (!d || d.value == null) return "";
+  const v = `DU ${Number(d.value).toFixed(2)}`;
+  if (d.badge === "extreme") return `<span class="dryup-badge dryup-badge-extreme" title="激枯れ">${v}</span>`;
+  if (d.badge === "dryup") return `<span class="dryup-badge dryup-badge-dry" title="枯れ気味">${v}</span>`;
+  return `<span class="dryup-badge dryup-badge-flat" title="枯れていない">${v}</span>`;
+}
+
+// 需給(信用取引週末残高)バッジ。表示専用(総合スコアには一切使わない)。
+// バッジ種別(margin.badge)はサーバ側(build_site.margin_badge)がconfig閾値で確定済み。
+// カード(一覧)では「買残重い」のみ表示し、「売り長」は個別銘柄詳細ページの
+// 需給カードでのみ表示する(3段目のバッジ行が混み合うのを避けるため)。
+// short: カード一覧用の短縮表記(2026-07-27)。フル表記だとカードの1段目が
+// 折り返してレイアウトが崩れるため、一覧では2文字に詰める(詳細画面はフル表記)。
+const MARGIN_BADGE_LABELS = {
+  heavy_buy: { label: "買残重い", short: "買重", className: "signal-badge-warn" },
+  short: { label: "売り長", short: "売長", className: "signal-badge-accent" },
+};
+function marginBadgeHtml(m, { detail = false } = {}) {
+  if (!m || !m.badge) return "";
+  if (!detail && m.badge !== "heavy_buy") return "";
+  const meta = MARGIN_BADGE_LABELS[m.badge];
+  if (!meta) return "";
+  const text = detail ? meta.label : meta.short;
+  return `<span class="sell-signal-badge ${meta.className}" title="${meta.label}">${text}</span>`;
+}
+
+// ファンダのサイズ係数バッジ (2026-07-22)。表示専用(ランキングには一切使わない)。
+// カード一覧に出すのは fail=エントリー取り止め(係数0) のみ。
+// unknown(0.5)はユニバースの大半が該当してバッジだらけになるため一覧では非表示
+// (2026-07-23 ユーザー要望)。ハーフサイズの情報は個別画面の株数計算機・
+// ヘルプ・分析用コピーで引き続き表示される。
+// 2026-07-27: カード一覧では「F不」に短縮(スコアチップの左に置くため)。
+// title属性でフル表記を残す。
+function fundVerdictBadgeHtml(s, { detail = false } = {}) {
+  if (s.fund_verdict !== "fail") return "";
+  const text = detail ? "F不合格 取止" : "F不";
+  return `<span class="fund-badge fund-badge-fail" title="ファンダ不合格 (エントリー取り止め)">${text}</span>`;
+}
+
+// リスト画面カードのソートキー定義。横スクロール表を廃止したため、表示項目は
+// カード側(renderCardList)に直書きし、ここには並び順の定義だけ残す。
+// 並びは全キー共通で「値の降順」。枯れ度(dryup.value)だけは小さいほど枯れて
+// いる=良いという向きなので、ここで符号を反転して「枯れている順」にする
+// (tech_score内の dryup 成分は score_variables の時点で反転済みだが、
+//  report.json の dryup.value は生値なのでフロント側で反転が要る)。
+const CARD_SORTS = {
+  // 2026-08-13(A-1): ピボットまでの距離が近い順。既定。
+  // dist_to_pivot は (ピボット − 終値)/ピボット×100 なので、**すでに抜けた銘柄は
+  // マイナス**。素直に並べると一番伸びきった追いかけ禁止(EXTENDED)が先頭に来る
+  // ので 0 で止めて同着にし、その中は下の同点処理(ブレイク > 待機 > 形成中)に任せる。
+  // ここは共通で降順に並ぶ枠なので、符号を反転して「小さい距離ほど上」にしている。
+  // ピボットが立っていない銘柄は距離が無いので必ず最後尾へ回し、その中だけは
+  // 従来どおり総合スコア降順にする(build_site._sort_key と同じ扱い)。
+  pivot_distance: (s) => {
+    const d = Number(s.dist_to_pivot);
+    if (s.dist_to_pivot == null || !Number.isFinite(d)) return -1e9 + (s.total_score ?? 0);
+    return -Math.max(d, 0);
+  },
+  total_score: (s) => s.total_score ?? -Infinity,
+  rs: (s) => s.rs ?? -Infinity,
+  change_pct: (s) => s.change_pct ?? -Infinity,
+  dryup: (s) => (s.dryup && s.dryup.value != null ? -Number(s.dryup.value) : -Infinity),
+};
+
+// 並び替えチップ(リスト画面)。選択をlocalStorageに保存し、リロード後も維持する。
+// 2026-07-29: 本命/候補/監視タブを廃止して単一リストにしたので、ティアごとの
+// 選択も廃止し1つのキー("list")に集約した。既定は総合スコア。
+// 旧既定は監視タブだけ "rs" だったが、RSはスコア寄与ゼロ(MUSTフィルタ専用)に
+// 作り替えたので既定ソートに残す理由がない。log.md (143)。
+//
+// 2026-08-13(A-1): 既定を総合スコア降順から「ピボットに近い順」へ変更。
+// 枠8本で回した25年の実測で、並べ方だけを取り替えたときの期待Rが
+// 傾き順0.105 / RS順0.106 / ランダム0.095 に対しピボット近い順0.119
+// (2015年以降だけなら 0.083 / 0.074 / 0.081 に対し 0.145)。log.md (174)(176)。
+// なお report.json 側も build_site.rank_key() で同じ順に並べてあるが、この画面は
+// 読み込み後にフロントで並べ直すので、**両方直さないと画面には出ない**。
+const CARD_SORT_STORAGE_KEY = "minervini-card-sort";
+const CARD_SORT_PREF_KEY = "list";
+const CARD_SORT_DEFAULT = "pivot_distance";
+const CARD_SORT_LABELS = {
+  pivot_distance: "ピボット",
+  total_score: "スコア",
+  rs: "RS",
+  change_pct: "前日比",
+  dryup: "枯れ度",
+};
+
+function getCardSortKey() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
+    const key = prefs[CARD_SORT_PREF_KEY];
+    if (key && CARD_SORTS[key]) return key;
+  } catch (e) {
+    /* 破損データ・プライベートブラウズ等は既定値へフォールバック */
+  }
+  return CARD_SORT_DEFAULT;
+}
+
+function setCardSortKey(key) {
+  let prefs = {};
+  try {
+    prefs = JSON.parse(localStorage.getItem(CARD_SORT_STORAGE_KEY) || "{}") || {};
+  } catch (e) {
+    prefs = {};
+  }
+  prefs[CARD_SORT_PREF_KEY] = key;
+  try {
+    localStorage.setItem(CARD_SORT_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (e) {
+    /* 保存できなくても表示上の並び替えは機能する */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard (index.html)
+// ---------------------------------------------------------------------------
+
+let pendingFund = {};
+
+// report.json の取得+復号結果のキャッシュ。initStockPage(銘柄詳細)が遷移の
+// たびにfetch+復号し直すのを避ける。データは日次更新なのでTTLは持たず、
+// initDashboard(ダッシュボード再訪)が常に再fetchして上書きする。
+let reportCache = null;
+
+// 個別株チャートJSONのメモリキャッシュ(code→Promise)。前後1銘柄を先読みして
+// スワイプ/＜＞での銘柄切替を待ち時間なく表示するため。同一コードの多重fetchも防ぐ。
+// データは日次更新なのでTTLは持たず(セッション内は据え置き)、リロードで最新化する。
+const chartCache = new Map();
+const CHART_CACHE_MAX = 12; // メモリ肥大を防ぐ上限(超えたら古い順=Map挿入順に破棄)
+// 先読みが「完了済み」のコード。chartCache.has() は fetch 発行直後から true に
+// なるため、それを即描画可能の判定に使うと未解決なのに「読み込み中...」を出さず
+// 前の銘柄の画面が据え置かれて見える。解決済みかどうかはこちらで持つ。
+const chartCacheReady = new Set();
+
+// チャートJSONを取得(キャッシュ優先)。失敗(null)はキャッシュに残さず再取得できるようにする。
+function loadChart(code) {
+  if (!code) return Promise.resolve(null);
+  const hit = chartCache.get(code);
+  if (hit) {
+    // LRU: 参照したものを末尾へ回し、直近利用ぶんが上限で消えにくくする。
+    chartCache.delete(code);
+    chartCache.set(code, hit);
+    return hit;
+  }
+  const p = window.MinerviniData
+    .fetchJson(`data/charts/${encodeURIComponent(code)}.json`, { optional: true })
+    .catch(() => null);
+  chartCache.set(code, p);
+  // 取得失敗(null)は据え置かず破棄して、次回アクセスで再取得できるようにする。
+  p.then((v) => {
+    if (v == null) chartCache.delete(code);
+    else chartCacheReady.add(code);
+  });
+  while (chartCache.size > CHART_CACHE_MAX) {
+    const oldest = chartCache.keys().next().value;
+    chartCache.delete(oldest);
+    chartCacheReady.delete(oldest);
+  }
+  return p;
+}
+
+// 現在銘柄の前後(idx-1/idx+1)のチャートを先読みしてキャッシュへ。fire-and-forget。
+// updateStockNav(code) 後に呼ぶこと(stockNavPrevCode/NextCode が確定している必要がある)。
+function prefetchAdjacentCharts() {
+  [stockNavPrevCode, stockNavNextCode].forEach((c) => {
+    if (c) loadChart(c);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// データ断面(大引 / 前場)の切り替え (2026-07-30)
+//
+// 日次バッチ(daily.yml, 16時以降)が canonical の report/breadth/positions を、
+// 前場バッチ(maezyou.yml, 11:35 JST)が同じ形の *_maezyou.json を吐いている。
+// これまでフロントは canonical しか描画せず、前場断面は「前場情報をコピー」
+// ボタンからしか触れなかったので、画面でも切り替えられるようにした。
+//
+// 既定の断面は「時計」ではなく report の generated_at 同士の比較で決める。
+// 前場バッチの cron は落ちることがある(だから 11:35 と 12:05 の2回投げている)
+// ので、時計で「今は前場だから前場データ」と決めると、落ちた日に前日の古い前場
+// 断面を黙って出してしまう。generated_at で比べれば落ちた日は自動的に大引へ
+// フォールバックする。時計は「前場を取りに行くか」の事前判定にだけ使う
+// (canonical が当日11:35以降のものなら前場より新しいと確定するので取りに行かない)。
+//
+// 指数(indices.json)は断面を切り替えない。市場概況は intraday-indices.yml が
+// 15分間隔で更新するライブ表示("● 自動更新中")で、断面より新しい値を見たい
+// 場所だから。前場断面の indices_maezyou.json はコピーボタン用に残る。
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_LABELS = { "": "大引", _maezyou: "前場" };
+const MAEZYOU_READY_JST_MIN = 11 * 60 + 35; // 前場バッチの最速発火時刻 11:35 JST
+
+let snapshotSuffix = ""; // 現在描画中の断面 ("" = 大引 / "_maezyou" = 前場)
+// suffix -> generated_at。ヘッダの選択肢に「7/30 11:41時点」を出すために持つ。
+// まだ取りに行っていない断面は undefined のまま(ラベルは時刻なしになる)。
+const snapshotGeneratedAt = {};
+
+// 前場スナップショットが canonical より新しい可能性があるか。false なら取りに
+// 行かない(前場の report は約870KBあるので、無駄打ちすると回線を焼く)。
+function maezyouCouldBeNewer(canonicalGeneratedAt, now) {
+  now = now || new Date();
+  const nowJst = new Date(now.getTime() + JST_OFFSET_MS);
+  const nowMin = nowJst.getUTCHours() * 60 + nowJst.getUTCMinutes();
+  if (nowMin < MAEZYOU_READY_JST_MIN) return false; // まだ前場バッチが走る時刻ではない
+  if (!canonicalGeneratedAt) return true;
+  const genMs = new Date(canonicalGeneratedAt).getTime();
+  if (!Number.isFinite(genMs)) return true;
+  const genJst = new Date(genMs + JST_OFFSET_MS);
+  const sameDay =
+    genJst.getUTCFullYear() === nowJst.getUTCFullYear() &&
+    genJst.getUTCMonth() === nowJst.getUTCMonth() &&
+    genJst.getUTCDate() === nowJst.getUTCDate();
+  if (!sameDay) return true; // canonical は前営業日 → 当日の前場が新しいかもしれない
+  const genMin = genJst.getUTCHours() * 60 + genJst.getUTCMinutes();
+  return genMin < MAEZYOU_READY_JST_MIN; // 当日11:35以降の canonical なら前場より新しい
+}
+
+// 既定断面を決める。canonical は必ず要るので先に取り、必要なときだけ前場も取って
+// generated_at の新しい方を採用する。戻り値の report は再フェッチを避けるため同梱。
+async function resolveDefaultSnapshot() {
+  const report = await window.MinerviniData.fetchJson("data/report.json");
+  snapshotGeneratedAt[""] = (report && report.generated_at) || null;
+  if (!maezyouCouldBeNewer(snapshotGeneratedAt[""])) return { suffix: "", report };
+
+  const mz = await window.MinerviniData.fetchJson("data/report_maezyou.json", { optional: true });
+  if (!mz) return { suffix: "", report }; // 前場バッチ未実行 → 大引のまま
+  snapshotGeneratedAt._maezyou = mz.generated_at || null;
+  const mzMs = new Date(mz.generated_at || "").getTime();
+  const canMs = new Date(snapshotGeneratedAt[""] || "").getTime();
+  if (Number.isFinite(mzMs) && (!Number.isFinite(canMs) || mzMs > canMs)) {
+    return { suffix: "_maezyou", report: mz };
+  }
+  return { suffix: "", report };
+}
+
+// initDashboard(forcedSuffix) から呼ぶ、明示指定された断面のロード。
+// 前場を選んだのにファイルが無い場合は大引へ落とす(選択も戻す)。
+async function loadForcedSnapshot(suffix) {
+  if (!suffix) {
+    const report = await window.MinerviniData.fetchJson("data/report.json");
+    snapshotGeneratedAt[""] = (report && report.generated_at) || null;
+    return { suffix: "", report };
+  }
+  const report = await window.MinerviniData.fetchJson(`data/report${suffix}.json`, { optional: true });
+  if (!report) return loadForcedSnapshot("");
+  snapshotGeneratedAt[suffix] = report.generated_at || null;
+  return { suffix, report };
+}
+
+function formatSnapshotTime(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleString("ja-JP", {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+// ヘッダの断面セレクタ。選択はページ内だけの状態にして localStorage に残さない
+// (残すと翌朝も前場に張り付いたまま大引データを見逃す)。
+let snapshotSwitchReady = false; // 選択肢を組み終わったか(組む前に出すと空欄が見える)
+let currentViewName = "dashboard";
+
+// 断面セレクタはダッシュボードと銘柄リストにだけ出す。どちらも report を直接
+// 描画する画面で、切り替えると initDashboard が両方まとめて描き直すため。
+function applySnapshotSwitchVisibility() {
+  const wrap = document.getElementById("snapshot-switch");
+  if (!wrap) return;
+  const onDataView = currentViewName === "dashboard" || currentViewName === "stocklist";
+  wrap.hidden = !(snapshotSwitchReady && onDataView);
+}
+
+function renderSnapshotSwitch() {
+  const sel = document.getElementById("snapshot-select");
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const when = formatSnapshotTime(snapshotGeneratedAt[opt.value]);
+    opt.textContent = when
+      ? `${SNAPSHOT_LABELS[opt.value]} (${when}時点)`
+      : SNAPSHOT_LABELS[opt.value];
+  }
+  sel.value = snapshotSuffix;
+  if (!sel.dataset.wired) {
+    sel.dataset.wired = "1";
+    sel.addEventListener("change", () => { initDashboard(sel.value); });
+  }
+  snapshotSwitchReady = true;
+  applySnapshotSwitchVisibility();
+}
+
+// 前場断面で「途中足なので正しくない」ものをまとめて1本で警告する。
+// 個別チャート(docs/data/charts/)はスナップショット実行では生成しないので
+// 大引時点のまま。エントリー判定・追撃禁止などの状態も前場では確定していない。
+function renderSnapshotWarning() {
+  const el = document.getElementById("snapshot-warning");
+  if (!el) return;
+  if (snapshotSuffix !== "_maezyou") {
+    el.hidden = true;
+    return;
+  }
+  const when = formatSnapshotTime(snapshotGeneratedAt._maezyou);
+  el.textContent =
+    `⚠ 前場断面${when ? `(${when}時点)` : ""}を表示中です。値は前場終了時点の途中の値なので、` +
+    "エントリー判定は大引で変わることがあります。個別チャートと、追撃禁止など前日の結果を" +
+    "引き継ぐ状態は大引時点のままです。";
+  el.hidden = false;
+}
+
+async function initDashboard(forcedSuffix) {
+  if (!window.MINERVINI_CONFIG.passkeyAuthEnabled) {
+    hidePasskeyAuthUi();
+  } else {
+    if (window.MinerviniFundamentalsUI) {
+      window.MinerviniFundamentalsUI.onSaved = initDashboard;
+    }
+    await initVaultUi();
+  }
+
+  // no-store: the daily bot commit refreshes these files; a heuristically
+  // cached copy is exactly the "dashboard shows two-day-old data" failure.
+  // fetchJson: 暗号化封筒(パスキー解錠後のデータ鍵で復号)/平文の両対応。
+  // forcedSuffix は断面セレクタからの明示指定。省略時は generated_at 比較で決める。
+  // (onSaved = initDashboard 経由の再実行では Event が渡り得るので文字列だけ受ける)
+  const forced = typeof forcedSuffix === "string" ? forcedSuffix : undefined;
+  const resolved = forced === undefined
+    ? await resolveDefaultSnapshot()
+    : await loadForcedSnapshot(forced);
+  snapshotSuffix = resolved.suffix;
+  const report = resolved.report;
+
+  const [breadth, indices, positionsData] = await Promise.all([
+    window.MinerviniData.fetchJson(`data/breadth${snapshotSuffix}.json`, { optional: true }).then((b) => b || { history: [] }),
+    // indices.json only exists after the first pipeline run with the market
+    // overview feature; render nothing (section stays hidden) until then.
+    // 断面は切り替えない(上のコメント参照 — ここはライブ表示)。
+    window.MinerviniData.fetchJson("data/indices.json", { optional: true }),
+    // positions.json only exists once manual/positions.csv has at least one row.
+    window.MinerviniData.fetchJson(`data/positions${snapshotSuffix}.json`, { optional: true }),
+  ]);
+  reportCache = { data: report, fetchedAt: Date.now() };
+
+  pendingFund = window.MinerviniFundamentalsUI
+    ? window.MinerviniFundamentalsUI.reconcilePending(report.generated_at)
+    : {};
+
+  renderHeader(report);
+  renderSnapshotSwitch();
+  renderSnapshotWarning();
+  initMarketTabs();
+  renderMarketSignal(breadth);
+  renderPositionsWarningBanner(positionsData);
+  renderStalenessWarning(report);
+  renderMarketOverview(indices);
+  renderBreadth(breadth, report);
+  renderP1Warning(report);
+  renderStockList(report);
+  wireSessionReview(report, indices, breadth, positionsData);
+  startLiveIndices();
+}
+
+// Kill switch: hides every passkey/write-related control so the dashboard
+// reads as plain read-only while the feature is still being tuned. Uses a
+// class (".passkey-gated") rather than a fixed id list, since write-gated
+// buttons are now spread across the dashboard header AND the batch view.
+function hidePasskeyAuthUi() {
+  document.querySelectorAll(".passkey-gated").forEach((el) => {
+    el.style.display = "none";
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Vault (passkey unlock) state -- controls whether write actions are enabled.
+// ---------------------------------------------------------------------------
+
+async function initVaultUi() {
+  const unlockBtn = document.getElementById("vault-unlock-btn");
+  if (!unlockBtn || unlockBtn.dataset.wired) {
+    applyLockState(window.MinerviniGitHub.hasToken());
+    return;
+  }
+  unlockBtn.dataset.wired = "1";
+
+  let vault = null;
+  try {
+    vault = await window.MinerviniVault.fetchVault();
+  } catch (e) {
+    unlockBtn.textContent = "🔓 解錠 (エラー)";
+    unlockBtn.title = e.message || String(e);
+  }
+
+  if (!vault) {
+    unlockBtn.textContent = "🔐 初回セットアップ";
+    unlockBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openVaultSetupModal({ isRotation: false }));
+    applyLockState(false);
+    return;
+  }
+
+  unlockBtn.textContent = "🔓 解錠";
+  unlockBtn.addEventListener("click", async () => {
+    unlockBtn.disabled = true;
+    const original = unlockBtn.textContent;
+    unlockBtn.textContent = "認証中...";
+    try {
+      await window.MinerviniVault.unlock(vault);
+      unlockBtn.textContent = "🔒 解錠済み";
+      applyLockState(true);
+    } catch (e) {
+      unlockBtn.textContent = original;
+      alert(`解錠に失敗しました: ${e.message || e}`);
+    } finally {
+      unlockBtn.disabled = window.MinerviniGitHub.hasToken(); // stays disabled once unlocked (nothing more to do)
+    }
+  });
+
+  applyLockState(window.MinerviniGitHub.hasToken());
+}
+
+// Enables/disables every write-capable button (fund edit, manual rerun)
+// based on whether the vault is currently unlocked.
+function applyLockState(unlocked) {
+  document.querySelectorAll(".write-btn").forEach((btn) => {
+    if (btn.id === "vault-unlock-btn") return; // has its own state, not a plain toggle
+    btn.disabled = !unlocked;
+  });
+  document.querySelectorAll(".fund-edit-btn").forEach((btn) => {
+    btn.disabled = !unlocked;
+    btn.title = unlocked ? "" : "先に🔓解錠してください";
+  });
+}
+
+function renderHeader(report) {
+  const el = document.getElementById("generated-at");
+  if (!el) return;
+  const when = report.generated_at ? new Date(report.generated_at).toLocaleString("ja-JP") : "-";
+  el.textContent = `最終更新: ${when} / ユニバース: ${report.universe_size}銘柄 / テンプレート通過: ${report.template_pass}銘柄`;
+}
+
+// ---------------------------------------------------------------------------
+// Market overview (indices.json): one card per index with last value,
+// day-over-day change, and an inline SVG sparkline of the recent series.
+// ---------------------------------------------------------------------------
+
+function formatIndexValue(entry) {
+  const v = entry.last;
+  if (v == null) return "-";
+  if (entry.unit === "%") return v.toFixed(3) + "%";
+  return v.toLocaleString("ja-JP", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatIndexChange(entry) {
+  if (entry.change == null) return "-";
+  const sign = entry.change > 0 ? "+" : "";
+  // Yields move in points, not percent-of-themselves; everything else in %.
+  if (entry.unit === "%") return `${sign}${entry.change.toFixed(3)}pt`;
+  const pct = entry.change_pct != null ? ` (${sign}${entry.change_pct.toFixed(2)}%)` : "";
+  return `${sign}${entry.change.toLocaleString("ja-JP")}${pct}`;
+}
+
+// 前営業日比の騰落率に応じてカード枠色を連続グラデーションで返す。
+// 上げ=緑・下げ=赤で、変動が大きいほど濃く(彩度↑・明度↓)なる。±CAP%で最大濃度。
+// 金利(unit=="%")は騰落率が無いのでpt差を小さめのCAPで代用。ぱっと見で
+// 指数の動きの大きさを掴めるようにするのが狙い。無風(≈0)は既定枠色のまま。
+function indexEdgeStyle(entry) {
+  let t; // -1..+1 に正規化した変動の強さ(符号=方向)
+  if (entry.change_pct != null) {
+    t = entry.change_pct / 2.5; // ±2.5%で最大濃度
+  } else if (entry.unit === "%" && entry.change != null) {
+    t = entry.change / 0.08; // 金利は±0.08ptで最大濃度
+  } else {
+    return "";
+  }
+  t = Math.max(-1, Math.min(1, t));
+  const mag = Math.abs(t);
+  if (mag < 0.03) return ""; // ほぼ無風は既定の枠色を維持
+  const hue = t > 0 ? 145 : 2; // 緑 / 赤
+  const sat = Math.round(38 + mag * 50); // 38%→88%
+  const light = Math.round(60 - mag * 26); // 60%→34%(大きいほど濃く暗く)
+  const edge = `hsl(${hue} ${sat}% ${light}%)`;
+  const glow = `hsla(${hue}, ${sat}%, ${light}%, 0.16)`;
+  // 枠(border) + 1px内側リングで実質2px化しつつ、淡いグローで面としても視認。
+  return `border-color:${edge};box-shadow:inset 0 0 0 1px ${edge},0 0 10px ${glow};`;
+}
+
+// スパークライン用のコンパクトな数値表記。桁数が銘柄/指標ごとにバラバラ
+// (指数=数千、比率=0〜1、件数=数十)なので、絶対値の大きさで小数桁を切り替える。
+function sparkNum(v) {
+  if (v == null || !isFinite(v)) return "-";
+  const a = Math.abs(v);
+  if (a >= 10000) return (v / 10000).toFixed(1) + "万";
+  if (a >= 100) return String(Math.round(v));
+  if (a >= 10) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+
+// 依存なしSVGスパークライン + 目盛(2026-07-27)。
+// 折れ線本体は preserveAspectRatio="none" で横に引き伸ばすため、SVG内に文字を
+// 置くと縦横比が崩れて読めない。そこで軸ラベルはSVGの外にHTML(.spark-yaxis /
+// .spark-xaxis)として置き、SVGには軸線と中央のガイド線だけを描く。線幅は
+// vector-effect="non-scaling-stroke" で引き伸ばしの影響を受けないようにする。
+function sparklineSvg(series, isUp, opts = {}) {
+  const points = (series || []).slice(-60).map((p) => p.v).filter((v) => v != null && isFinite(v));
+  if (points.length < 2) return "";
+  const w = 120;
+  const h = 32;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const mid = (min + max) / 2;
+  const step = w / (points.length - 1);
+  const yAt = (v) => h - 1 - ((v - min) / span) * (h - 2);
+  const coords = points.map((v, i) => `${(i * step).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
+  const color = isUp ? "var(--accent)" : "var(--danger)";
+  const midY = yAt(mid).toFixed(1);
+  const fmt = opts.format || sparkNum;
+  const xLeft = opts.xLeft != null ? opts.xLeft : `${points.length}日前`;
+  const xRight = opts.xRight != null ? opts.xRight : "最新";
+  const svg =
+    `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">` +
+    `<line class="spark-grid" x1="0" y1="${midY}" x2="${w}" y2="${midY}"/>` +
+    `<line class="spark-axis" x1="0.5" y1="0" x2="0.5" y2="${h}"/>` +
+    `<line class="spark-axis" x1="0" y1="${h - 0.5}" x2="${w}" y2="${h - 0.5}"/>` +
+    `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` +
+    `</svg>`;
+  return (
+    `<div class="spark-box">` +
+    `<div class="spark-yaxis"><span>${escapeHtml(fmt(max))}</span><span>${escapeHtml(fmt(mid))}</span><span>${escapeHtml(fmt(min))}</span></div>` +
+    svg +
+    `<div class="spark-xaxis"><span>${escapeHtml(xLeft)}</span><span>${escapeHtml(xRight)}</span></div>` +
+    `</div>`
+  );
+}
+
+// "YYYY-MM-DD" -> "M/D" (年なし)。不正値はそのまま返す。
+function shortDate(dateStr) {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length !== 3) return dateStr;
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+}
+
+// 指数カードのクリック時に詳細モーダルへ渡すためのkey→entryマップ(描画毎に再構築)。
+let MARKET_ENTRIES = {};
+
+function renderMarketOverview(indices) {
+  const section = document.getElementById("market-overview");
+  const cards = document.getElementById("market-cards");
+  if (!section || !cards) return;
+  if (!indices || !indices.indices || !indices.indices.length) return; // stays hidden
+
+  const staleKeys = new Set(indices.stale_keys || []);
+  // クリック時にモーダルへ渡すため、key→entry を保持しておく。
+  MARKET_ENTRIES = {};
+  cards.innerHTML = indices.indices
+    .map((entry) => {
+      MARKET_ENTRIES[entry.key] = entry;
+      const isUp = (entry.change ?? 0) >= 0;
+      const stale = staleKeys.has(entry.key);
+      const edge = stale ? "" : indexEdgeStyle(entry);
+      return `
+        <div class="market-card${stale ? " is-stale" : ""}" role="button" tabindex="0" data-market-key="${escapeHtml(entry.key)}"${edge ? ` style="${edge}"` : ""}>
+          <div class="market-card-name">${entry.name}${stale ? '<span class="stale-badge" title="最新データの取得に失敗（キャッシュ表示）">stale</span>' : ""}</div>
+          <div class="market-card-value">${formatIndexValue(entry)}</div>
+          <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
+          ${sparklineSvg(entry.series, isUp)}
+          <div class="market-card-date">${shortDate(entry.last_date)}</div>
+        </div>`;
+    })
+    .join("");
+  section.hidden = false;
+
+  // カードクリック/Enterで指数の詳細モーダルを開く(イベント委譲で一度だけ登録)。
+  if (!cards.dataset.wired) {
+    cards.dataset.wired = "1";
+    cards.addEventListener("click", (e) => {
+      const card = e.target.closest(".market-card[data-market-key]");
+      if (card) openMarketModal(card.dataset.marketKey);
+    });
+    cards.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const card = e.target.closest(".market-card[data-market-key]");
+      if (card) { e.preventDefault(); openMarketModal(card.dataset.marketKey); }
+    });
+  }
+
+  const meta = document.getElementById("market-live-meta");
+  if (meta && indices.generated_at) {
+    const when = new Date(indices.generated_at).toLocaleTimeString("ja-JP");
+    meta.textContent = `指数データ取得: ${when} 時点`;
+  }
+}
+
+// series(={t,v}[])から n営業日前比の騰落を算出。unit=="%"(金利)はpt差、それ以外は%。
+function periodChange(entry, days) {
+  const s = entry.series || [];
+  if (s.length < days + 1) return null;
+  const last = s[s.length - 1].v;
+  const past = s[s.length - 1 - days].v;
+  if (last == null || past == null) return null;
+  if (entry.unit === "%") return { txt: (last - past >= 0 ? "+" : "") + (last - past).toFixed(3) + "pt", up: last - past >= 0 };
+  const pct = past !== 0 ? (last / past - 1) * 100 : 0;
+  return { txt: (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%", up: pct >= 0 };
+}
+
+function closeMarketModal() {
+  const el = document.getElementById("market-modal");
+  if (el) el.remove();
+}
+
+// 指数カードのクリックで詳細(現在値/前日比/大きめスパークライン/期間別騰落/レンジ)を表示。
+function openMarketModal(key) {
+  const entry = MARKET_ENTRIES[key];
+  if (!entry) return;
+  closeMarketModal();
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "market-modal";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeMarketModal();
+  });
+
+  const isUp = (entry.change ?? 0) >= 0;
+  const periods = [
+    { d: 1, label: "1日" },
+    { d: 5, label: "1週" },
+    { d: 20, label: "1ヶ月" },
+    { d: 60, label: "3ヶ月" },
+  ];
+  const chips = periods
+    .map((p) => {
+      const c = periodChange(entry, p.d);
+      const val = c ? c.txt : "-";
+      const cls = c ? (c.up ? "chg-up" : "chg-down") : "";
+      return `<span class="chip"><span class="chip-label">${p.label}</span><span class="chip-value ${cls}">${val}</span></span>`;
+    })
+    .join("");
+
+  const vals = (entry.series || []).map((p) => p.v).filter((v) => v != null);
+  let rangeHtml = "";
+  if (vals.length) {
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const fmt = (v) => (entry.unit === "%" ? v.toFixed(3) + "%" : v.toLocaleString("ja-JP", { maximumFractionDigits: 2 }));
+    rangeHtml = `<h4>期間レンジ(直近${vals.length}営業日)</h4><p class="market-modal-range">安値 ${fmt(lo)} 〜 高値 ${fmt(hi)}</p>`;
+  }
+
+  // 大きめスパークライン(カードの120x32より大)。
+  const bigSpark = marketBigSparkline(entry.series, isUp);
+
+  overlay.innerHTML = `
+    <div class="modal-box market-modal-box">
+      <div class="hm-popup-head">
+        <h3>${escapeHtml(entry.name)}</h3>
+        <button type="button" class="secondary" id="market-modal-close">閉じる</button>
+      </div>
+      <div class="market-modal-value">${formatIndexValue(entry)}</div>
+      <div class="market-card-change ${isUp ? "chg-up" : "chg-down"}">${formatIndexChange(entry)}</div>
+      ${bigSpark}
+      <h4>期間別騰落</h4>
+      <div class="meta-chips">${chips}</div>
+      ${rangeHtml}
+      <p class="market-modal-date">最終データ: ${entry.last_date || "-"}</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("market-modal-close").addEventListener("click", closeMarketModal);
+}
+
+function marketBigSparkline(series, isUp) {
+  const points = (series || []).map((p) => p.v).filter((v) => v != null);
+  if (points.length < 2) return "";
+  const w = 320;
+  const h = 96;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const step = w / (points.length - 1);
+  const coords = points
+    .map((v, i) => `${(i * step).toFixed(1)},${(h - 4 - ((v - min) / span) * (h - 8)).toFixed(1)}`)
+    .join(" ");
+  const color = isUp ? "var(--accent)" : "var(--danger)";
+  return `<svg class="market-modal-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// 指数カードの擬似リアルタイム更新。
+// このサイトは静的GitHub Pages(バックエンドサーバーなし)のため、ティック
+// 単位の真のリアルタイム配信はできない。その代わり、市場時間中はGitHub
+// Actions側(intraday-indices.yml)が indices.json を15分間隔で更新する
+// 運用にし、フロント側はこの間隔でポーリングして再描画することで、ページを
+// 開きっぱなしでも手動リロードなしに追従できるようにする。
+// ---------------------------------------------------------------------------
+const LIVE_INDICES_POLL_MS = 60_000; // ポーリング自体は60秒毎(データの更新頻度自体は15分毎)
+
+// initDashboardはダッシュボード再訪のたびに呼ばれるため、interval IDを保持して
+// 開始前に必ず止める(多重登録するとポーリングが呼ばれた回数分だけ増殖する)。
+let liveIndicesTimer = null;
+
+function startLiveIndices() {
+  const section = document.getElementById("market-overview");
+  const badge = document.getElementById("market-live-badge");
+  if (!section) return;
+  if (badge) badge.hidden = false;
+
+  if (liveIndicesTimer) clearInterval(liveIndicesTimer);
+  liveIndicesTimer = setInterval(async () => {
+    if (document.hidden) return; // バックグラウンドタブでは無駄にフェッチしない
+    try {
+      const indices = await window.MinerviniData.fetchJson("data/indices.json", { optional: true });
+      if (indices) renderMarketOverview(indices);
+    } catch (e) {
+      // 通信エラーは無視し、既存表示を維持したまま次回ポーリングに任せる。
+    }
+  }, LIVE_INDICES_POLL_MS);
+}
+
+// 「いま候補は何銘柄か」。以前は絞り込みの件数(スクリーニング状況)とベースの段階
+// (VCPファネル)が別カードに分かれていて、同じ「銘柄が何件いるか」の話が2枚に散って
+// いた。1枚にまとめ、上から「絞り込みを何件通ったか」→「その候補がどの段階か」に並べる。
+// 引数の report は p1_count を持たない古い breadth 履歴のフォールバック用。
+function renderBreadth(breadth, report) {
+  const el = document.getElementById("breadth-meter");
+  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
+  if (!history.length) {
+    el.textContent = "地合いデータなし";
+    return;
+  }
+  const latest = history[history.length - 1];
+  const passRate = latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-";
+  // breakout_success_rate はレビュータブの「ブレイクがそのまま伸びた割合」と同じ数字。
+  // 別名で出すと2つの指標があるように見えるので、呼び方を揃えてある。
+  const successRate =
+    latest.breakout_success_rate != null ? (latest.breakout_success_rate * 100).toFixed(0) + "%" : "-";
+  // 8条件完全一致(priority 1)の件数。breadth履歴優先、なければreport.jsonから。
+  const pc = (report && report.priority_counts) || null;
+  const p1 = latest.p1_count ?? (pc ? pc.p1 : null);
+  const prioLine = p1 != null ? `<span>条件を全部満たした銘柄: <b>${p1}件</b></span>` : "";
+
+  el.innerHTML = `
+    <div class="breadth-meter-title">いま候補は何銘柄か</div>
+    <div class="breadth-meter-group">
+      <div class="breadth-meter-subtitle">絞り込みをどこまで通ったか</div>
+      <div class="breadth-meter-stats">
+        <span>上昇トレンドの形が出ている割合: <b>${passRate}</b></span>
+        <span>買い場を待っている銘柄: <b>${latest.watch_count ?? "-"}件</b></span>
+        ${prioLine}
+        <span>ブレイクがそのまま伸びた割合: <b>${successRate}</b></span>
+      </div>
+    </div>
+    ${vcpFunnelHtml(history)}
+  `;
+}
+
+// 候補がベース(値固め)のどの段階にいるかの内訳。breadth.json history の各エントリの
+// vcp_funnel(pipeline -> update_breadth)に依存。origin=ok は V判定に到達した銘柄
+// (WATCH_A+REJECTED)。WATCH_B は2026-08-13に廃止したが、過去の breadth.json には
+// 残っているので足し込む(消すと過去日の件数だけ減って折れ線が段差になる)。
+// TOO_RECENT は「リーダーが新高値近辺でベース未形成」で、
+// 高値追い局面→調整入りでセットアップが増える先行指標として直近60日を折れ線表示する。
+function vcpFunnelHtml(history) {
+  const withFunnel = history.filter((h) => h && h.vcp_funnel);
+  if (!withFunnel.length) return "";
+  const latest = withFunnel[withFunnel.length - 1].vcp_funnel;
+  const originOk = (latest.WATCH_A || 0) + (latest.WATCH_B || 0) + (latest.REJECTED || 0);
+
+  // TOO_RECENT の直近60日推移。減少(高値追い→調整入り)を accent、増加を danger 表示。
+  const series = withFunnel.slice(-60).map((h) => ({ v: h.vcp_funnel.TOO_RECENT || 0 }));
+  const declining = series.length >= 2 && series[series.length - 1].v <= series[0].v;
+  const spark = sparklineSvg(series, declining, { format: (v) => String(Math.round(v)) + "件" });
+
+  return `
+    <div class="breadth-meter-group">
+      <div class="breadth-meter-subtitle">その候補が今どの段階か${helpBtnHtml("vcp_funnel")}</div>
+      <div class="breadth-meter-stats">
+        <span>値固めまで進んだ: <b>${originOk}件</b></span>
+        <span>まだ高値を走っている: <b>${latest.TOO_RECENT || 0}件</b></span>
+        <span>値固めを作り始めた: <b>${latest.IMMATURE || 0}件</b></span>
+        <span>値動きが荒すぎる: <b>${latest.TOO_VOLATILE || 0}件</b></span>
+      </div>
+      <div class="vcp-funnel-spark">
+        <span class="vcp-funnel-spark-label">「まだ高値を走っている」の直近60日(減ると数週間後に候補が増えやすい)</span>
+        ${spark}
+      </div>
+    </div>
+  `;
+}
+
+// 地合いシグナル(市場ブレッドス + TOPIXトレンド合成の攻め/中立/守り3段階)。
+// breadth.json の history最新エントリに signal/reasons/pct_above_ma200等が
+// 載っている前提(src/report/market_signal.py -> update_breadth)。旧データで
+// signalが無い場合はカード自体を隠す。
+// note は「で、どうすればいいのか」を1行で言い切るための文言。以前は守りのときだけ
+// 注意書きを出していたが、攻め・中立のときに何も出ないと結論が伝わらないので3段階すべてに置く。
+const MARKET_SIGNAL_META = {
+  green: { label: "攻め", className: "signal-green", note: "新しく買いを入れてよい局面。候補が出たら通常の枚数で取る。" },
+  yellow: { label: "中立", className: "signal-yellow", note: "買ってもよいが、枚数を落として厳選する。" },
+  red: { label: "守り", className: "signal-red", note: "⚠ 新規の買いは原則見送り。持っている分の管理に徹する。" },
+};
+
+// 地合い詳細パネル(2026-07-18 タスク4)。以下はすべて表示専用の補助指標
+// (src/report/market_signal.py タスク3で追加)であり、上の green/yellow/red
+// 判定・カード色分けには一切影響しない。旧history(これらのフィールドが無い
+// エントリ)でも壊れないよう、値は必ずnullガードしてから表示する。
+const MARKET_SCORE_TREND_ARROW = {
+  improving: "↗改善",
+  flat: "→横ばい",
+  deteriorating: "↘悪化",
+};
+
+// weight は src/report/market_signal.py DEFAULTS["detail_weights"] と一致させた
+// 表示用の固定値(バックエンドから配点自体は送られてこないため)。
+// 表示は「寄与度方式」: 各項目の生スコア(0-100)×配点で寄与ptを出し、
+// 「16.0/40pt」のように配点満点に対する寄与で見せる。4項目の寄与合計が
+// 総合スコア(market_score)と一致するので、%表記(40%等)の混在より辻褄が追いやすい。
+// ラベルはレビュータブの REVIEW_BREAKDOWN_LABEL と同じ日本語に揃えてある。
+// 同じ数字がタブごとに「モメンタム」「勢い」と別名で出ていて混乱の元だったため。
+const MARKET_DETAIL_SCORE_ITEMS = [
+  { key: "breadth", label: "値上がり銘柄の広がり", weight: 40, helpKey: "breadth" },
+  { key: "index_trend", label: "指数の向き", weight: 30, helpKey: "index_trend_score" },
+  { key: "momentum", label: "勢い", weight: 20, helpKey: "momentum_score" },
+  { key: "risk_appetite", label: "リスクの取りやすさ", weight: 10, helpKey: "risk_appetite" },
+];
+
+// 寄与pt(生スコア×配点/100)。丸めは0.1pt単位で行い、合計行との誤差を抑える。
+function contributionPt(rawScore, weight) {
+  return Math.round(rawScore * weight) / 100;
+}
+
+// 「16.5pt」「16pt」のように、小数が不要なら省いて表示する。
+function formatPt(v) {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+// up_down_ratio_25 は history 24件+当日で計25件、breadth_trend_20d(20日差分)は
+// 20日前history+当日で計21件が必要(src/report/market_signal.py の
+// _UP_DOWN_WINDOW=25 / _N_DAY_RETURN=20 に対応)。蓄積不足の間は「蓄積中」を出す。
+function accumulationNote(historyLen, requiredLen) {
+  const remain = requiredLen - historyLen;
+  return remain > 0 ? `蓄積中(あと${remain}日)` : null;
+}
+
+function okx(v) {
+  if (v === true) return "○";
+  if (v === false) return "×";
+  return "-";
+}
+
+function formatPct1(v, digits = 1) {
+  return v != null ? `${(v * 100).toFixed(digits)}%` : "-";
+}
+
+function formatSignedPctPoints(v, digits = 1) {
+  if (v == null) return "-";
+  const pts = v * 100;
+  return `${pts > 0 ? "+" : ""}${pts.toFixed(digits)}pt`;
+}
+
+function formatSignedPct(v, digits = 1) {
+  if (v == null) return "-";
+  return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`;
+}
+
+function indexTrendRowHtml(label, t) {
+  if (!t) return `<tr><td>${label}</td><td colspan="3">データ不足</td></tr>`;
+  return `<tr><td>${label}</td><td>${okx(t.index_above_ma50)}</td><td>${okx(t.index_above_ma200)}</td><td>${okx(t.index_ma200_slope_up)}</td></tr>`;
+}
+
+function renderMarketDetailHtml(latest, history) {
+  const sb = latest.score_breakdown || {};
+  // 寄与度方式: バーの塗りは生スコア(0-100)のまま、右の数値は「寄与pt/配点pt」。
+  // 4行の寄与ptを足すと下の合計行(=総合スコア)になる。
+  let contribSum = 0;
+  let hasAnyScore = false;
+  const scoreBarsHtml = MARKET_DETAIL_SCORE_ITEMS.map((item) => {
+    const v = sb[item.key];
+    const pct = v != null ? Math.max(0, Math.min(100, v)) : 0;
+    let valueText = `-/${item.weight}pt`;
+    if (v != null) {
+      hasAnyScore = true;
+      const pt = contributionPt(Math.max(0, Math.min(100, v)), item.weight);
+      contribSum += pt;
+      valueText = `${formatPt(pt)}/${item.weight}pt`;
+    }
+    return `<div class="score-bar-row"><span>${item.label}${helpBtnHtml(item.helpKey)}</span><div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div><span>${valueText}</span></div>`;
+  }).join("");
+  const scoreTotalHtml = hasAnyScore
+    ? `<div class="score-bar-total"><span>合計</span><span>${formatPt(Math.round(contribSum * 10) / 10)}/100pt</span></div>`
+    : "";
+
+  const historyLen = history.length;
+  const udNote = accumulationNote(historyLen, 25);
+  const udText = latest.up_down_ratio_25 != null ? latest.up_down_ratio_25.toFixed(2) : (udNote || "-");
+
+  const btNote = accumulationNote(historyLen, 21);
+  const btText = latest.breadth_trend_20d != null ? formatSignedPctPoints(latest.breadth_trend_20d) : (btNote || "-");
+
+  const trends = latest.index_trends || {};
+
+  // 詳細パネルの数値指標はいずれも当日値だけでなく直近最大60日の推移を出す
+  // (breadth.json history が keep_days=60 で持っている分をそのまま可視化)。
+  // 各フィールドは追加時期がバラバラで旧entryでは欠けるため、系列ごとに null を
+  // filter で除外し、2点未満なら sparklineSvg が空文字→「データ蓄積中」に落とす。
+  // format: 縦軸ラベルの表記(未指定は sparkNum の自動桁数)。比率(0〜1)の指標は
+  // %表記にしないと縦軸が "0.550" のようになって読み取りづらい。
+  const pctFmt = (v) => (v * 100).toFixed(0) + "%";
+  const MARKET_SPARK_ITEMS = [
+    { key: "market_score", label: "地合いの点数" },
+    { key: "pct_above_ma200", label: "200日線の上にいる銘柄", format: pctFmt },
+    { key: "pct_above_ma50", label: "50日線の上にいる銘柄", format: pctFmt },
+    { key: "up_down_ratio_25", label: "値上がり／値下がりの比" },
+    { key: "nh_nl_cumulative", label: "新高値-新安値の積み上げ" },
+    { key: "growth_rel_20d", label: "グロース株の強さ", format: pctFmt },
+  ];
+  const sparklinesHtml = MARKET_SPARK_ITEMS.map((item) => {
+    const series = history.filter((h) => h && h[item.key] != null).slice(-60).map((h) => ({ v: h[item.key] }));
+    const isUp = series.length >= 2 && series[series.length - 1].v >= series[0].v;
+    const spark = sparklineSvg(series, isUp, { format: item.format }) || '<p class="tier-note">データ蓄積中</p>';
+    return `<div class="market-detail-spark"><div class="market-detail-spark-label">${item.label}</div>${spark}</div>`;
+  }).join("");
+
+  // 4セクション構成: 点数の内訳 → 主な指標 → 主な指数の位置 → 推移。
+  // 見出しを付けて役割の切れ目を明示する(2026-07-20 UI再構成)。
+  // 2026-08-03: 中身は変えず、見出しとラベルだけ日本語の言い回しに直した。
+  return `
+    <div class="market-detail-body">
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">点数の内訳<span class="market-detail-heading-sub">4つを足すと地合いの点数</span></h4>
+        <div class="market-detail-scores">${scoreBarsHtml}${scoreTotalHtml}</div>
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">主な指標<span class="market-detail-heading-sub">今日の値</span></h4>
+        <div class="market-detail-indicators">
+          <div class="market-detail-row"><span>200日線の上にいる銘柄${helpBtnHtml("pct_above_ma200")}</span><span>${formatPct1(latest.pct_above_ma200)}<span class="market-detail-sub">(20日前との差 ${btText})</span></span></div>
+          <div class="market-detail-row"><span>50日線の上にいる銘柄${helpBtnHtml("pct_above_ma50")}</span><span>${formatPct1(latest.pct_above_ma50)}</span></div>
+          <div class="market-detail-row"><span>値上がり／値下がりの比(25日)${helpBtnHtml("up_down_ratio_25")}</span><span>${udText}</span></div>
+          <div class="market-detail-row"><span>新高値-新安値(今日/積み上げ)${helpBtnHtml("nh_nl")}</span><span>${latest.net_new_highs ?? "-"} / ${latest.nh_nl_cumulative ?? "-"}</span></div>
+          <div class="market-detail-row"><span>グロース株の強さ(TOPIX比・20日)${helpBtnHtml("growth_rel_20d")}</span><span>${formatSignedPct(latest.growth_rel_20d)}</span></div>
+        </div>
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">主な指数の位置${helpBtnHtml("index_trend_table")}</h4>
+        <div class="market-detail-table-wrap">
+          <table class="market-detail-table">
+            <thead><tr><th></th><th>50日線の上</th><th>200日線の上</th><th>200日線が上向き</th></tr></thead>
+            <tbody>
+              ${indexTrendRowHtml("TOPIX", trends.topix)}
+              ${indexTrendRowHtml("日経225", trends.nikkei225)}
+              ${indexTrendRowHtml("グロース250", trends.growth250)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="market-detail-section">
+        <h4 class="market-detail-heading">推移<span class="market-detail-heading-sub">直近最大60日</span></h4>
+        <div class="market-detail-sparklines">${sparklinesHtml}</div>
+      </section>
+    </div>
+  `;
+}
+
+function renderMarketSignal(breadth) {
+  const el = document.getElementById("market-signal-card");
+  if (!el) return;
+  const history = breadth && Array.isArray(breadth.history) ? breadth.history : [];
+  const latest = history.length ? history[history.length - 1] : null;
+  if (!latest || !latest.signal) {
+    el.hidden = true;
+    return;
+  }
+
+  const meta = MARKET_SIGNAL_META[latest.signal] || MARKET_SIGNAL_META.yellow;
+  el.hidden = false;
+  el.className = "market-signal-card " + meta.className;
+
+  const pct200 = latest.pct_above_ma200 != null ? (latest.pct_above_ma200 * 100).toFixed(1) + "%" : "-";
+  const newHigh = latest.new_high_count ?? "-";
+  const newLow = latest.new_low_count ?? "-";
+  const reasons = (latest.reasons || []).map((r) => `<li>${escapeHtml(r)}</li>`).join("");
+  // 3段階すべてで「で、どうするか」を1行出す。色分けは card の signal-* クラス側に任せる。
+  const caution = meta.note
+    ? `<p class="market-signal-caution">${escapeHtml(meta.note)}</p>`
+    : "";
+
+  // market_score/score_trendはタスク3で追加された表示専用の補助指標。旧history
+  // (これらが無いエントリ)ではバッジ自体を出さない。
+  const scoreBadge = latest.market_score != null
+    ? `<span class="market-score-badge">地合いの点数 ${Math.round(latest.market_score)}${latest.score_trend && MARKET_SCORE_TREND_ARROW[latest.score_trend] ? " " + MARKET_SCORE_TREND_ARROW[latest.score_trend] : ""}${helpBtnHtml("market_score")}</span>`
+    : "";
+
+  // 地合い(攻め/中立/守り)の過去推移。signalを持つ履歴を色付きティックで並べ、
+  // レジームがいつ切り替わったかを一目で追えるようにする。signal欠損の旧entryは除外。
+  // 2点未満(=当日のみ)なら意味がないのでストリップ自体を出さない。
+  const signalHist = history.filter((h) => h && h.signal).slice(-60);
+  const signalStripHtml = signalHist.length >= 2
+    ? `<div class="market-signal-history">
+        <span class="market-signal-history-label">地合い推移(直近${signalHist.length}日)</span>
+        <div class="market-signal-history-track">${signalHist.map((h) => {
+          const m = MARKET_SIGNAL_META[h.signal] || MARKET_SIGNAL_META.yellow;
+          return `<span class="msh-tick ${m.className}" title="${escapeHtml(h.date || "")}: ${m.label}"></span>`;
+        }).join("")}</div>
+      </div>`
+    : "";
+
+  // 並びは「結論 → 根拠」。攻め/中立/守り → どうするかの一言 → そう出た理由 →
+  // 数字 → 過去の推移、最後に細かい数字を畳んだブロック。レビュータブと同じ考え方。
+  el.innerHTML = `
+    <div class="market-signal-top">
+      <div class="market-signal-label">${meta.label}${helpBtnHtml("market_signal")}</div>
+      ${scoreBadge}
+    </div>
+    ${caution}
+    <ul class="market-signal-reasons">${reasons}</ul>
+    <div class="market-signal-stats">200日線の上にいる銘柄 ${pct200} / 新高値 ${newHigh}件 vs 新安値 ${newLow}件</div>
+    ${signalStripHtml}
+    <details class="market-detail">
+      <summary>地合いの中身(点数の内訳と指標)</summary>
+      ${renderMarketDetailHtml(latest, history)}
+    </details>
+  `;
+}
+
+// データ鮮度チェック: 直近の平日(月〜金、土日はFriday扱い)の21:00 JSTを過ぎても
+// その平日の日付のデータが無い場合に stale=true を返す。祝日は考慮しない
+// (祝日明けの誤検知は許容 -- バナー文言で注記)。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function getStalenessInfo(generatedAt, now) {
+  now = now || new Date();
+  const nowJstMs = now.getTime() + JST_OFFSET_MS;
+  const nowJst = new Date(nowJstMs);
+  const day = nowJst.getUTCDay(); // 0=Sun .. 6=Sat (JST calendar day, via shifted-clock trick)
+  const todayMidnightJstMs = Date.UTC(nowJst.getUTCFullYear(), nowJst.getUTCMonth(), nowJst.getUTCDate());
+
+  let expectedMidnightJstMs = todayMidnightJstMs;
+  if (day === 0) expectedMidnightJstMs -= 2 * 86400000; // Sunday -> Friday
+  else if (day === 6) expectedMidnightJstMs -= 1 * 86400000; // Saturday -> Friday
+
+  const thresholdMs = expectedMidnightJstMs + 21 * 3600000; // expected date 21:00 JST
+  if (nowJstMs <= thresholdMs) return { stale: false };
+
+  if (!generatedAt) return { stale: true };
+  const genJstMs = new Date(generatedAt).getTime() + JST_OFFSET_MS;
+  const genJst = new Date(genJstMs);
+  const genMidnightJstMs = Date.UTC(genJst.getUTCFullYear(), genJst.getUTCMonth(), genJst.getUTCDate());
+
+  return { stale: genMidnightJstMs < expectedMidnightJstMs };
+}
+
+function renderStalenessWarning(report) {
+  const el = document.getElementById("staleness-warning");
+  if (!el) return;
+  const info = getStalenessInfo(report.generated_at);
+  if (info.stale) {
+    const when = report.generated_at
+      ? new Date(report.generated_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "-";
+    el.textContent = `⚠ データが最新ではありません(最終更新: ${when})。日次バッチが失敗している可能性があります。バッチ実行ページから daily.yml の実行履歴を確認してください。(祝日明けは誤検知の場合あり)`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+// 8条件完全一致の銘柄が極端に少ない場合の弱地合い警告バナー。
+function renderP1Warning(report) {
+  const el = document.getElementById("p1-warning");
+  if (!el) return;
+  if (report.p1_scarce) {
+    const p1 = report.priority_counts ? report.priority_counts.p1 : 0;
+    el.textContent = `⚠ 8条件完全一致の銘柄が${p1}件と極端に少ない状態です。地合いが弱い可能性が高く、新規エントリーは慎重に。`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 銘柄リストの永続フィルタ (設定画面で設定 → 次に変更するまでリストに適用)
+// localStorage に保存し、renderStockList が描画前に適用する。空欄の項目は無視。
+// 指標が欠損(null)の銘柄はそのフィルタでは除外しない(データ無しで黙って消えると
+// 気づけないため)。
+// ---------------------------------------------------------------------------
+const LIST_FILTER_SETTINGS_KEY = "minervini_list_filters";
+const LIST_FILTER_SEGMENTS = ["プライム", "スタンダード", "グロース"];
+
+// 全項目が無効(=絞り込みなし)のフィルタ。showSegmentsは「表示する市場」で、
+// 初期値は全市場チェック(=全表示=絞り込みなし)。恒久・一時どちらの初期値にも使う。
+function emptyListFilter() {
+  return {
+    minClose: null, maxClose: null,
+    minRs: null, minScore: null, minMcap: null, maxMcap: null,
+    showSegments: [...LIST_FILTER_SEGMENTS],
+  };
+}
+
+// 表示するエントリーステータス(2026-07-27)。以前は cooled ティア(追いかけ禁止)を
+// アコーディオンに隔離していたが、「見たいときだけ出す」のはフィルタの仕事なので
+// 一時フィルタのチェックボックスに移した。既定では EXTENDED(伸びすぎ)と
+// STALE(ブレイク鮮度切れ) = 追いかけ禁止だけ非表示にする。
+// 2026-07-30: 既定の非表示に「形成中」を追加した。形成中はユニバースの大半を
+// 占めていて、毎朝のスキャンではまず消したい塊なので、既定で見えている意味が薄い。
+//
+// 2026-08-13: チップの単位を「カードに出るバッジ」に揃えた。
+//
+// 以前はチップが12個あり、うち6個(ベース不合格・ベース形成中・高値更新中・
+// ボラ過大・ベース未検出・監視B)はカード側に**その名前で出ることが無かった**。
+// カードのバッジは setup_stage から「あと一歩」「形成中」の2つに畳まれるので、
+// チップの名前とカードの表示が一致しようが無い状態だった。伸びすぎと鮮度切れも
+// 同じ「追禁」バッジなのにチップだけ2個に割れていた。
+//
+// そこでチップ = バッジの6種類にする。目に見えているものだけを消せる、という
+// 対応にすれば、押した結果が予想できる。
+const CARD_BADGE_KINDS = ["BREAKOUT", "BREAKOUT_WEAK", "WATCH", "NEAR", "FORMING", "COOLED"];
+const CARD_BADGE_LABELS = {
+  BREAKOUT: "ブレイク",
+  BREAKOUT_WEAK: "ブレイク弱",
+  WATCH: "待機",
+  NEAR: "あと一歩",
+  FORMING: "形成中",
+  COOLED: "追禁",
+};
+// チップのラベルはバッジ名だけだと素っ気ないので、意味を添えて出す。
+const FILTER_STATUS_LABELS = {
+  BREAKOUT: "ブレイク(本日突破)",
+  BREAKOUT_WEAK: "ブレイク弱(出来高不足)",
+  WATCH: "待機(ピボット待ち)",
+  NEAR: "あと一歩(条件が1つだけ未達)",
+  FORMING: "形成中(セットアップ未成立)",
+  COOLED: "追禁(伸びすぎ・鮮度切れ)",
+};
+
+// カードのどのバッジになるかを返す。statusBadgeHtml と statusVisible の両方が
+// これ1本を見る(2つに分かれていた頃はフィルタと表示がズレる余地があった)。
+function cardBadgeKey(s) {
+  if (s.status === "BREAKOUT") return "BREAKOUT";
+  if (s.status === "BREAKOUT_WEAK") return "BREAKOUT_WEAK";
+  if (s.status === "WATCH_A" || s.status === "WATCH_B") return "WATCH"; // WATCH_Bは旧データ互換
+  if (s.status === "EXTENDED" || s.status === "STALE") return "COOLED";
+  const g = setupStageGroupKey(s);
+  if (g === "near") return "NEAR";
+  if (g) return "FORMING";
+  return null; // バッジ無し = チップの対象外。黙って消さない(消えたら気づけない)
+}
+
+const LIST_FILTER_DEFAULT_HIDDEN_STATUSES = ["COOLED", "FORMING"];
+function defaultShownStatuses() {
+  return CARD_BADGE_KINDS.filter((s) => !LIST_FILTER_DEFAULT_HIDDEN_STATUSES.includes(s));
+}
+
+// 既定(追いかけ禁止と形成中が非表示)から変えられているか。既定のままなら
+// 「フィルタ適用中」バッジ・除外件数バナーには数えない(常時点灯してノイズになるため)。
+function statusFilterCustom(f) {
+  const st = f && f.showStatuses;
+  if (!st) return false;
+  const def = defaultShownStatuses();
+  return st.length !== def.length || st.some((x) => !def.includes(x));
+}
+
+// リスト画面の一時フィルタ(「その時用」)。localStorageには保存せずメモリ保持
+// のみ = リロードで自動リセット。恒久フィルタ(設定画面/localStorage)とAND合成。
+// showStatuses は一時フィルタ側にだけ持つ(恒久フィルタ=設定画面はユニバースの
+// 絞り込み専用で、ステータスは日々切り替える表示トグルのため)。
+let adhocListFilter = { ...emptyListFilter(), showStatuses: defaultShownStatuses() };
+
+// ---- フィルタフォームのチップUI共通ヘルパ (2026-07-27 UI刷新) --------------
+// 市場/ステータスの表示トグルは、小さいチェックボックスから「押せるチップ」に
+// 変えた。中の <input type=checkbox> は視覚的に隠すだけで、値の読み書きは従来
+// どおり input.checked を見る(既存の readForm / applyAdhocFilterFromForm は無改修)。
+
+// チェック状態を .is-on クラスへ反映する。見た目は基本 CSS の :has() で付くが、
+// :has() 非対応環境(古いFirefox等)でもチップが点灯するようにする保険。
+function syncChipStates(wrap) {
+  if (!wrap) return;
+  wrap.querySelectorAll(".lf-chip").forEach((chip) => {
+    const cb = chip.querySelector("input[type=checkbox]");
+    chip.classList.toggle("is-on", !!(cb && cb.checked));
+  });
+}
+
+// チップ群の「全て / 解除」トグルを配線する。全部onなら押下で全部off、
+// それ以外(一部on/全部off)なら全部onにする。ラベルも状態に追従させる。
+// onChange は反映が必要なフォーム(恒久フィルタ)から渡す。
+function wireChipGroup(wrap, toggleBtn, onChange) {
+  if (!wrap) return;
+  const allOn = () => {
+    const cbs = wrap.querySelectorAll("input[type=checkbox]");
+    return cbs.length > 0 && Array.from(cbs).every((cb) => cb.checked);
+  };
+  const refresh = () => {
+    syncChipStates(wrap);
+    if (toggleBtn) toggleBtn.textContent = allOn() ? "解除" : "全て";
+  };
+  wrap.addEventListener("change", refresh);
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      const next = !allOn();
+      wrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = next; });
+      refresh();
+      if (onChange) onChange();
+    });
+  }
+  wrap._refreshChips = refresh;
+  refresh();
+}
+
+// フォームの値を流し込んだ後に呼ぶ(チップの点灯とトグルのラベルを合わせる)。
+function refreshChipGroup(wrap) {
+  if (wrap && typeof wrap._refreshChips === "function") wrap._refreshChips();
+  else syncChipStates(wrap);
+}
+
+function loadListFilters() {
+  const def = emptyListFilter();
+  try {
+    const raw = localStorage.getItem(LIST_FILTER_SETTINGS_KEY);
+    if (!raw) return def;
+    const p = JSON.parse(raw) || {};
+    const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+    // showSegments(表示する市場)。旧データの excludeSegments(除外する市場)は
+    // 反転して読み込む。どちらも無ければ全市場表示(絞り込みなし)。
+    let showSegments;
+    if (Array.isArray(p.showSegments)) {
+      showSegments = p.showSegments.filter((x) => LIST_FILTER_SEGMENTS.includes(x));
+    } else if (Array.isArray(p.excludeSegments)) {
+      showSegments = LIST_FILTER_SEGMENTS.filter((x) => !p.excludeSegments.includes(x));
+    } else {
+      showSegments = [...LIST_FILTER_SEGMENTS];
+    }
+    return {
+      minClose: num(p.minClose),
+      maxClose: num(p.maxClose),
+      minRs: num(p.minRs),
+      minScore: num(p.minScore),
+      minMcap: num(p.minMcap),
+      maxMcap: num(p.maxMcap),
+      showSegments,
+    };
+  } catch (e) {
+    return def;
+  }
+}
+
+function saveListFilters(f) {
+  try {
+    localStorage.setItem(LIST_FILTER_SETTINGS_KEY, JSON.stringify(f));
+  } catch (e) {
+    // 永続化不可(プライベートモード等)でも致命的ではない
+  }
+}
+
+// 設定画面「銘柄リストのフィルタ」フォームの初期化。batchビュー表示のたびに
+// 呼ばれ、保存値をフォームへ反映する。入力の変更で即保存し、リスト全ティアを
+// 裏で再描画しておく(リストが非表示でも次に開いた時点で反映済み)。
+function initListFilterSettings() {
+  const form = document.getElementById("list-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("lf-show-segments");
+
+  const f = loadListFilters();
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? "" : v;
+  };
+  setVal("lf-min-close", f.minClose);
+  setVal("lf-max-close", f.maxClose);
+  setVal("lf-min-rs", f.minRs);
+  setVal("lf-min-score", f.minScore);
+  setVal("lf-min-mcap", f.minMcap);
+  setVal("lf-max-mcap", f.maxMcap);
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = f.showSegments.includes(cb.value);
+    });
+    refreshChipGroup(segWrap);
+  }
+  updateListFilterStatus();
+
+  if (form.dataset.wired) return;
+  form.dataset.wired = "1";
+
+  const readForm = () => {
+    const num = (id) => {
+      const el = document.getElementById(id);
+      if (!el || el.value === "") return null;
+      const n = Number(el.value);
+      return isFinite(n) && n >= 0 ? n : null;
+    };
+    const segs = [];
+    if (segWrap) {
+      segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
+    }
+    return {
+      minClose: num("lf-min-close"),
+      maxClose: num("lf-max-close"),
+      minRs: num("lf-min-rs"),
+      minScore: num("lf-min-score"),
+      minMcap: num("lf-min-mcap"),
+      maxMcap: num("lf-max-mcap"),
+      showSegments: segs,
+    };
+  };
+
+  const persistAndRerender = () => {
+    saveListFilters(readForm());
+    updateListFilterStatus();
+    // リストを再描画。リスト非表示中でも裏で更新しておく。
+    rerenderStockList();
+  };
+
+  form.addEventListener("change", persistAndRerender);
+  form.addEventListener("input", (e) => {
+    if (e.target && e.target.tagName === "INPUT" && e.target.type === "number") {
+      persistAndRerender();
+    }
+  });
+
+  // 市場チップの「全て / 解除」トグル
+  wireChipGroup(
+    segWrap,
+    form.querySelector('.lf-toggle-all[data-target="lf-show-segments"]'),
+    persistAndRerender
+  );
+
+  const clearBtn = document.getElementById("lf-clear-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
+      if (segWrap) {
+        // クリア=絞り込みなし=全市場表示なので全チェック。
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
+        refreshChipGroup(segWrap);
+      }
+      persistAndRerender();
+    });
+  }
+
+  // 永続フィルタは入力の都度も反映されるが、ユーザーが「確定した」と分かるよう
+  // 明示の適用ボタンも用意。押下時に保存+全ティア再描画し、一瞬フィードバックを出す。
+  const applyBtn = document.getElementById("lf-apply-btn");
+  if (applyBtn) {
+    applyBtn.addEventListener("click", () => {
+      persistAndRerender();
+      const status = document.getElementById("lf-status");
+      if (status) {
+        const active = listFilterActive(loadListFilters());
+        status.textContent = "✓ 適用しました";
+        status.classList.toggle("lf-status-active", active);
+        clearTimeout(applyBtn._t);
+        applyBtn._t = setTimeout(updateListFilterStatus, 1500);
+      }
+    });
+  }
+}
+
+function updateListFilterStatus() {
+  const el = document.getElementById("lf-status");
+  if (!el) return;
+  const active = listFilterActive(loadListFilters());
+  el.textContent = active ? "● フィルタ適用中" : "フィルタなし";
+  el.classList.toggle("lf-status-active", active);
+}
+
+// リスト画面の一時フィルタ(alf-*)。initListView から毎回呼ばれる。
+// 値はメモリ(adhocListFilter)にだけ持ち、リロードで消える=「その時用」。
+// ビューを離れて戻っても保持されるよう、フォームは毎回 adhocListFilter から同期。
+function initAdhocFilter() {
+  const form = document.getElementById("adhoc-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("alf-show-segments");
+  const statWrap = document.getElementById("alf-show-statuses");
+
+  // 状態のチェックボックスは CARD_BADGE_KINDS から動的生成する
+  // (種類を増やしたときにHTML側の追記漏れが起きないように)。
+  // チップ = カードのバッジなので、押した結果が見た目と一致する。
+  if (statWrap && !statWrap.dataset.built) {
+    statWrap.dataset.built = "1";
+    statWrap.innerHTML = CARD_BADGE_KINDS.map(
+      (st) =>
+        `<label class="lf-chip"><input type="checkbox" value="${st}"><span>${escapeHtml(FILTER_STATUS_LABELS[st] || st)}</span></label>`
+    ).join("");
+  }
+
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? "" : v;
+  };
+  setVal("alf-min-close", adhocListFilter.minClose);
+  setVal("alf-max-close", adhocListFilter.maxClose);
+  setVal("alf-min-rs", adhocListFilter.minRs);
+  setVal("alf-min-score", adhocListFilter.minScore);
+  setVal("alf-min-mcap", adhocListFilter.minMcap);
+  setVal("alf-max-mcap", adhocListFilter.maxMcap);
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = adhocListFilter.showSegments.includes(cb.value);
+    });
+  }
+  if (statWrap) {
+    const shown = adhocListFilter.showStatuses || defaultShownStatuses();
+    statWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.checked = shown.includes(cb.value);
+    });
+  }
+  refreshChipGroup(segWrap);
+  refreshChipGroup(statWrap);
+  updateAdhocFilterBadge();
+
+  if (form.dataset.wired) return;
+  form.dataset.wired = "1";
+
+  // 市場/ステータスチップの「全て / 解除」トグル。一時フィルタは「適用」を
+  // 押したときだけ反映する仕様なので、ここでは再描画を呼ばない。
+  wireChipGroup(segWrap, form.querySelector('.lf-toggle-all[data-target="alf-show-segments"]'), null);
+  wireChipGroup(statWrap, form.querySelector('.lf-toggle-all[data-target="alf-show-statuses"]'), null);
+
+  // 反映は「適用」ボタン(initListTools側で配線)だけ。入力の都度反映はしない。
+  const clearBtn = document.getElementById("alf-clear-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      // フォームの見た目だけリセット(絞り込みなし=全市場チェック)。
+      // 実際の反映は「適用」を押したとき。
+      form.querySelectorAll("input[type=number]").forEach((el) => { el.value = ""; });
+      if (segWrap) {
+        segWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = true; });
+      }
+      // ステータスは「全部チェック」ではなく既定(追いかけ禁止だけ非表示)へ戻す。
+      // クリア直後に伸びすぎ銘柄がリストへ混ざるのは意図に反するため。
+      if (statWrap) {
+        const def = defaultShownStatuses();
+        statWrap.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+          cb.checked = def.includes(cb.value);
+        });
+      }
+      refreshChipGroup(segWrap);
+      refreshChipGroup(statWrap);
+    });
+  }
+}
+
+// リスト画面の一時フィルタフォーム(alf-*)を読んで adhocListFilter に反映+再描画。
+// 「適用」ボタン押下時に呼ぶ。
+function applyAdhocFilterFromForm() {
+  const form = document.getElementById("adhoc-filter-form");
+  if (!form) return;
+  const segWrap = document.getElementById("alf-show-segments");
+  const statWrap = document.getElementById("alf-show-statuses");
+  const num = (id) => {
+    const el = document.getElementById(id);
+    if (!el || el.value === "") return null;
+    const n = Number(el.value);
+    return isFinite(n) && n >= 0 ? n : null;
+  };
+  const segs = [];
+  if (segWrap) {
+    segWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => segs.push(cb.value));
+  }
+  const stats = [];
+  if (statWrap) {
+    statWrap.querySelectorAll("input[type=checkbox]:checked").forEach((cb) => stats.push(cb.value));
+  }
+  adhocListFilter = {
+    ...adhocListFilter,
+    minClose: num("alf-min-close"),
+    maxClose: num("alf-max-close"),
+    minRs: num("alf-min-rs"),
+    minScore: num("alf-min-score"),
+    minMcap: num("alf-min-mcap"),
+    maxMcap: num("alf-max-mcap"),
+    showSegments: segs,
+    // チェックボックスが未描画(旧HTML)の場合は既定へフォールバック。
+    showStatuses: statWrap ? stats : defaultShownStatuses(),
+  };
+  updateAdhocFilterBadge();
+  rerenderStockList();
+}
+
+// フィルタバーのsummaryに出す「適用中」バッジ。有効な項目数を数字で出す。
+function updateAdhocFilterBadge() {
+  const badge = document.getElementById("adhoc-filter-badge");
+  if (!badge) return;
+  const f = adhocListFilter;
+  let n = 0;
+  ["minClose", "maxClose", "minRs", "minScore", "minMcap", "maxMcap"].forEach((k) => {
+    if (f[k] != null) n++;
+  });
+  // 市場: 全表示なら絞り込みなし。チェックを外した数だけ絞り込みとして数える。
+  const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
+  n += Math.max(0, LIST_FILTER_SEGMENTS.length - shown);
+  // ステータス: 既定(追禁と形成中が非表示)から変えている時のみ1件として数える。
+  if (statusFilterCustom(f)) n += 1;
+  if (n > 0) {
+    badge.textContent = n;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+// 何かしらフィルタが有効か(件数表示やステータス文言の要否判定に使う)
+function listFilterActive(f) {
+  const shown = f.showSegments ? f.showSegments.length : LIST_FILTER_SEGMENTS.length;
+  return (
+    f.minClose != null || f.maxClose != null ||
+    f.minRs != null || f.minScore != null || f.minMcap != null ||
+    f.maxMcap != null || shown < LIST_FILTER_SEGMENTS.length ||
+    statusFilterCustom(f)
+  );
+}
+
+function stockPassesListFilter(s, f) {
+  if (f.minClose != null && s.close != null && s.close < f.minClose) return false;
+  if (f.maxClose != null && s.close != null && s.close > f.maxClose) return false;
+  if (f.minRs != null && s.rs != null && s.rs < f.minRs) return false;
+  if (f.minScore != null && s.total_score != null && s.total_score < f.minScore) return false;
+  if (f.minMcap != null && s.market_cap_oku != null && s.market_cap_oku < f.minMcap) return false;
+  if (f.maxMcap != null && s.market_cap_oku != null && s.market_cap_oku > f.maxMcap) return false;
+  // showSegments=表示する市場。全チェック(=全表示)のときは絞り込みなし。
+  // 一部だけ表示のとき、市場区分が判明していてリストに無い銘柄を除外。
+  const seg = f.showSegments;
+  if (seg && seg.length < LIST_FILTER_SEGMENTS.length && s.market_segment != null &&
+      !seg.includes(s.market_segment)) return false;
+  return true;
+}
+
+// 与えられた銘柄配列にフィルタを適用し、通過分と除外件数を返す。
+// 恒久フィルタ(設定画面/localStorage)と一時フィルタ(リスト画面/メモリ)の
+// 両方を満たした銘柄だけ通す(AND合成)。
+// 表示中のステータス集合(一時フィルタのチェックボックス。未設定なら既定)。
+function shownStatuses() {
+  return (adhocListFilter && adhocListFilter.showStatuses) || defaultShownStatuses();
+}
+
+// チップによる表示判定。チップとバッジは同じ cardBadgeKey を見るので、
+// 「チップに書いてある名前」と「カードに出ている名前」が必ず一致する。
+// バッジが付かない銘柄(status も進行度も無い異常データ)は消さずに残す。
+function statusVisible(s) {
+  const k = cardBadgeKey(s);
+  return k == null || shownStatuses().includes(k);
+}
+
+function applyListFilter(stocks) {
+  const perm = loadListFilters();
+  const adhoc = adhocListFilter;
+  // ステータスの出し分けは「除外件数」には数えない。既定で追禁・形成中を隠して
+  // いる状態が常に「フィルタでN件を除外中」と出るとノイズになるため。
+  const visible = stocks.filter((s) => statusVisible(s));
+  if (!listFilterActive(perm) && !listFilterActive(adhoc)) {
+    return { kept: visible, excluded: 0 };
+  }
+  const kept = visible.filter(
+    (s) => stockPassesListFilter(s, perm) && stockPassesListFilter(s, adhoc)
+  );
+  return { kept, excluded: visible.length - kept.length };
+}
+
+// 除外件数の小さな告知バナー(除外>0のときだけ返す。設定画面へのリンク付き)。
+function listFilterNoteEl(excluded) {
+  if (!excluded) return null;
+  const p = document.createElement("p");
+  p.className = "tier-note list-filter-note";
+  p.innerHTML =
+    `<i class="bi bi-funnel-fill"></i> フィルタで${excluded}件を除外中` +
+    ` <a href="#batch" class="list-filter-edit">設定</a>`;
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// リスト画面(2026-07-29改定): 本命/候補/監視の3タブ + ステータス別セクション分割を
+// 全部やめ、総合スコア降順のフラットな1リストにした。
+//
+// 統合できた理由: combined_score が VCPスコア欠損を 0 扱いに変わり(scoring.py)、
+// 「テクニカル70・VCP未成立」の銘柄は total_score 50 に沈むようになった。つまり
+// 順序そのものがティアの役割を果たすので、ティアで隔離する必要がなくなった。
+// ティア/セットアップ進行度/追いかけ禁止は行内のバッジで表す。log.md (143)。
+// ---------------------------------------------------------------------------
+
+// フィルタ適用済み・現在のソートキー順の銘柄配列。表示と前後ナビで同じ関数を使い、
+// 「画面の並びとスワイプの並びがズレる」事故を構造的に防ぐ。
+function visibleListStocks(report) {
+  const { kept, excluded } = applyListFilter(report.stocks || []);
+  const sortVal = CARD_SORTS[getCardSortKey()] || CARD_SORTS.total_score;
+  const sorted = [...kept].sort((a, b) => {
+    const av = sortVal(a);
+    const bv = sortVal(b);
+    if (av !== bv) return av > bv ? -1 : 1;
+    // 同点は「ブレイク > 待機 > 形成中」の順(build_site._sort_key と同じ考え方)。
+    const ar = STATUS_ORDER.indexOf(a.status);
+    const br = STATUS_ORDER.indexOf(b.status);
+    if (ar !== br) return (ar < 0 ? 99 : ar) - (br < 0 ? 99 : br);
+    return String(a.code || "").localeCompare(String(b.code || ""));
+  });
+  return { stocks: sorted, excluded };
+}
+
+function renderStockList(report) {
+  const container = document.getElementById("stock-list-body");
+  if (!container) return;
+  container.innerHTML = "";
+  const { stocks, excluded } = visibleListStocks(report);
+  updateListSummary(stocks.length, excluded);
+  const note = listFilterNoteEl(excluded);
+  if (note) container.appendChild(note);
+  if (!stocks.length) {
+    const empty = document.createElement("p");
+    empty.className = "tier-note";
+    empty.textContent = excluded ? "フィルタ条件に合う銘柄なし" : "該当銘柄なし";
+    container.appendChild(empty);
+    return;
+  }
+  container.appendChild(renderCardList(stocks));
+}
+
+// 件数表示。タブが無くなって「今何件見ているか」の手掛かりが消えたので出している。
+// 2026-07-30 にツールバー左からページヘッダ右上へ移した(表示/非表示は showView が
+// ビュー名で切り替えるので、ここでは中身だけ書く)。
+function updateListSummary(shown, excluded) {
+  const el = document.getElementById("list-summary");
+  if (!el) return;
+  el.textContent = excluded ? `${shown}件 (${excluded}件除外)` : `${shown}件`;
+}
+
+// ---------------------------------------------------------------------------
+// リスト画面の並び替え/フィルタ(ツールバーのボタン + ボトムシート)。
+// 並び替えはリスト全体を対象に、スコア/RS/前日比で実行。選択は localStorage
+// (CARD_SORT_STORAGE_KEY)に保存するので、リロードや個別株画面からの復帰後も
+// 維持される。フィルタ(その時用)はメモリ保持(adhocListFilter)のため
+// SPA内では維持、リロードで解除。
+// ---------------------------------------------------------------------------
+
+function rerenderStockList() {
+  const report = reportCache && reportCache.data;
+  if (!report) return;
+  renderStockList(report);
+}
+
+// 「リスト画面に表示されているのと同じ並び順」の銘柄コード配列。個別株画面の
+// 前後ナビ(＜/＞)と横スワイプが辿る順序に使う。チャート未生成(has_chart===false)
+// の銘柄は詳細ページに行けないので除外する。
+function orderedListCodes() {
+  const report = reportCache && reportCache.data;
+  if (!report) return [];
+  return visibleListStocks(report)
+    .stocks.filter((s) => s.has_chart !== false)
+    .map((s) => s.code);
+}
+
+// 個別株画面の前後銘柄。リストのフィルタ済み並び順で現在銘柄の前後を割り出し、
+// 横スワイプ(setupStockPanels の wireStockSwipe)が参照するモジュール変数へ格納しつつ、
+// ＜＞ボタンの遷移先(dataset.target)と有効/無効も同時に更新する。前後の切替は
+// ＜＞ボタンと横スワイプの両方で可能(体感を揃えるため ＜=上へ / ＞=下へ)。
+let stockNavPrevCode = null; // リストの上(前の銘柄, idx-1)
+let stockNavNextCode = null; // リストの下(次の銘柄, idx+1)
+function updateStockNav(code) {
+  const codes = orderedListCodes();
+  const idx = codes.indexOf(code);
+  stockNavPrevCode = idx > 0 ? codes[idx - 1] : null;
+  stockNavNextCode = idx >= 0 && idx < codes.length - 1 ? codes[idx + 1] : null;
+  // ＜=リストの上へ(前の銘柄) / ＞=リストの下へ(次の銘柄)。参照先が無い側は
+  // 右詰めにならないよう、スペースを保ったまま不可視化(is-empty)する。
+  const leftBtn = document.getElementById("stock-nav-next");  // ＜ = 前の銘柄(idx-1)
+  const rightBtn = document.getElementById("stock-nav-prev"); // ＞ = 次の銘柄(idx+1)
+  const set = (btn, target) => {
+    if (!btn) return;
+    btn.dataset.target = target || "";
+    btn.classList.toggle("is-empty", !target);
+  };
+  set(leftBtn, stockNavPrevCode);
+  set(rightBtn, stockNavNextCode);
+}
+
+// 前後ナビボタンのクリック配線(初回のみ)。dataset.target へハッシュ遷移する。
+function initStockNav() {
+  const wire = (id) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.target;
+      if (!target) return;
+      // ＞(stock-nav-prev)=次の銘柄(右から) / ＜(stock-nav-next)=前の銘柄(左から)
+      stockNavDir = id === "stock-nav-prev" ? 1 : -1;
+      window.location.hash = `stock/${encodeURIComponent(target)}`;
+    });
+  };
+  wire("stock-nav-next");
+  wire("stock-nav-prev");
+}
+
+// ソートボタンのラベルを、現在の並び替えキーに合わせて更新。
+function updateListSortLabel() {
+  const el = document.getElementById("list-sort-label");
+  if (!el) return;
+  el.textContent = CARD_SORT_LABELS[getCardSortKey()] || "スコア";
+}
+
+// ソートシートの選択状態を、現在の並び替えキーに同期。
+function syncSortSheet() {
+  const opts = document.getElementById("list-sort-options");
+  if (!opts) return;
+  const key = getCardSortKey();
+  opts.querySelectorAll("button[data-sort]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.sort === key);
+  });
+}
+
+// タブ横のフィルタ/並び替えボタン + ボトムシートの配線。initListView から毎回
+// 呼ばれるが、イベント登録は初回のみ(dataset.wired)。ラベル/バッジ同期は毎回。
+function initListTools() {
+  const filterBtn = document.getElementById("list-filter-btn");
+  const sortBtn = document.getElementById("list-sort-btn");
+  const backdrop = document.getElementById("list-sheet-backdrop");
+  const filterSheet = document.getElementById("filter-sheet");
+  const sortSheet = document.getElementById("sort-sheet");
+  if (!filterBtn || !sortBtn || !backdrop) return;
+
+  const closeSheets = () => {
+    backdrop.hidden = true;
+    [filterSheet, sortSheet].forEach((sheet) => {
+      if (sheet) { sheet.classList.remove("open"); sheet.hidden = true; }
+    });
+  };
+  const openSheet = (sheet) => {
+    if (!sheet) return;
+    sheet.hidden = false;
+    backdrop.hidden = false;
+    // 表示直後にopenを付けてスライドイン(transitionを効かせる)。
+    requestAnimationFrame(() => sheet.classList.add("open"));
+  };
+
+  // 毎回: ラベル/選択状態を最新へ同期。
+  updateListSortLabel();
+
+  if (filterBtn.dataset.wired) return;
+  filterBtn.dataset.wired = "1";
+
+  filterBtn.addEventListener("click", () => openSheet(filterSheet));
+  sortBtn.addEventListener("click", () => { syncSortSheet(); openSheet(sortSheet); });
+  backdrop.addEventListener("click", closeSheets);
+  document.querySelectorAll("#view-stocklist .sheet-close").forEach((b) => {
+    b.addEventListener("click", closeSheets);
+  });
+  // 「適用」ボタン: フォームの内容を一時フィルタへ反映してシートを閉じる。
+  const applyBtn = document.getElementById("alf-apply-btn");
+  if (applyBtn) applyBtn.addEventListener("click", () => { applyAdhocFilterFromForm(); closeSheets(); });
+
+  const opts = document.getElementById("list-sort-options");
+  if (opts) {
+    const applySort = (btn) => {
+      if (!btn || !CARD_SORTS[btn.dataset.sort]) return;
+      setCardSortKey(btn.dataset.sort);
+      syncSortSheet();
+      updateListSortLabel();
+      rerenderStockList();
+      closeSheets();
+    };
+    opts.addEventListener("click", (e) => applySort(e.target.closest("button[data-sort]")));
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSheets();
+  });
+}
+
+// 終値の前日比%(report.jsonのchange_pct)。旧report.json(フィールドなし)は空表示。
+// 表記は「終値（±X.XX%）」で、%部分だけ色付けする。
+function changePctHtml(s) {
+  const v = s.change_pct;
+  if (v == null) return "";
+  const cls = v > 0 ? "chg-pos" : v < 0 ? "chg-neg" : "chg-flat";
+  const sign = v > 0 ? "+" : "";
+  return `<span class="sc-chg-wrap">（<span class="sc-chg ${cls}">${sign}${Number(v).toFixed(2)}%</span>）</span>`;
+}
+
+// 状態バッジ(2026-07-29)。ステータス/セットアップ進行度を1個のバッジに畳む。
+// スコアには一切入らない情報なので、順位ではなくバッジで示すのが役割分担。
+// 種類は cardBadgeKey が決める。ここは見た目(色)を割り当てるだけ。
+// 伸びすぎと鮮度切れはどちらも「追禁」で、区別はマウスを乗せた説明にだけ残る。
+const BADGE_CLASS = {
+  BREAKOUT: "sc-badge-breakout",
+  BREAKOUT_WEAK: "sc-badge-breakout-weak",
+  WATCH: "sc-badge-watch",
+  NEAR: "sc-badge-near",
+  FORMING: "sc-badge-forming",
+  COOLED: "sc-badge-cooled",
+};
+
+function statusBadgeHtml(s) {
+  const k = cardBadgeKey(s);
+  if (!k) return "";
+  // 説明文は素のステータスがあればそちらを優先(伸びすぎ/鮮度切れを区別できる)。
+  const title = STATUS_LABELS[s.status] || FILTER_STATUS_LABELS[k] || k;
+  return `<span class="sc-badge ${BADGE_CLASS[k]}" title="${escapeHtml(title)}">${CARD_BADGE_LABELS[k]}</span>`;
+}
+
+// 決算をまたぐエントリーは、値動きの理由がチャートの外にある別種のリスク。個別画面には
+// 「次回決算」が出ているが、一覧を眺めている段階で気付けないと意味がないのでカードにも出す。
+// 日数はバッチが生成基準日から確定させた days_to_earnings をそのまま使う。画面で日付を
+// 引き算すると、バッチを回した日と見ている日がずれたときに嘘の日数を出してしまう。
+const EARNINGS_BADGE_MAX_DAYS = 5;
+
+function earningsBadgeHtml(s) {
+  const d = s ? s.days_to_earnings : null;
+  // 予定日が取れていない銘柄 (null) と、もう過ぎた銘柄 (負) には何も出さない。
+  if (typeof d !== "number" || !isFinite(d)) return "";
+  if (d < 0 || d > EARNINGS_BADGE_MAX_DAYS) return "";
+  const text = d === 0 ? "今日決算" : `決算まで${d}日`;
+  const title = s.next_earnings_date ? `次回決算 ${s.next_earnings_date}` : text;
+  return `<span class="sc-badge sc-badge-earnings" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+}
+
+// リスト画面: 横スクロール表を廃止し、1銘柄=薄型2〜3段カードでスマホ幅に収める。
+// 2026-07-29: ティア引数を廃止(タブ統合)。並びは呼び出し側(visibleListStocks)が
+// 確定済みなので、ここではソートせず渡された順のまま描画する。
+function renderCardList(stocks) {
+  const list = document.createElement("div");
+  list.className = "card-list";
+  for (const s of stocks) {
+    const card = document.createElement("div");
+    card.className = "stock-card";
+    // 追いかけ禁止は行ごと淡色にして「見えるが目立たない」状態にする。スコアには
+    // ペナルティを課さない(実測エッジのない減点は指標の意味を濁らせるため)。
+    if (s.tier === "cooled") card.classList.add("sc-cooled");
+    // 2026-07-27: ファンダ未入力(fund_stale)の黄色背景は撤廃。エントリー時には
+    // どのみち必ずファンダを確認するので、一覧段階では表示ノイズにしかならない
+    // (ユーザー要望)。クラス自体を付けないので、CSS側の規則も削除済み。
+    // has_chart===false の銘柄(チャートJSON未生成)は詳細ページへ遷移できない。
+    if (s.has_chart !== false) {
+      const go = () => {
+        window.location.hash = `stock/${encodeURIComponent(s.code)}`;
+      };
+      // キーボード操作対応: divのままフォーカス可能+Enter/Spaceで遷移。
+      card.setAttribute("role", "button");
+      card.tabIndex = 0;
+      card.addEventListener("click", go);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go();
+        }
+      });
+    } else {
+      card.classList.add("row-static");
+    }
+    // カードのレイアウト (2026-07-30 作り直し)。
+    //
+    // 以前は1段目に「名前+バッジ群+SC+RS」を全部詰めていたので、iPhone実機
+    // (幅390px)では名前が長い銘柄でRSチップが右端で切れていた。名前は可変長で
+    // 上限が読めない一方、SC/RSは毎行必ず見る固定幅の情報なので、可変のものと
+    // 固定のものを同じ行で競わせたのが敗因。
+    //
+    // そこで「行ごとに1つだけ伸縮するものを置く」構成に直す:
+    //   1段目: [銘柄名（コード）… 伸縮/省略] ......... [SC][RS] (固定・絶対に縮めない)
+    //   2段目: [状態/F不/買重バッジ] [終値（±%）] ..... [DU]    (左詰め+右端DU)
+    //   3段目: [セクター 強度 ・ 進行度/不足理由] 1行に省略
+    //
+    // 2段目は wrap させない。以前は flex-wrap + セクターの text-align:right で、
+    // DUの有無によって右端の位置が行ごとに動いて「崩れて見える」原因になっていた。
+    // 3段目も1行固定にする。「未達: A / B / C / D」が3行に折り返してカードの
+    // 大半を占めていたが、詳細は個別画面で読むもので一覧では要らない(全文はtitle)。
+    const stageText = setupStageBadgeText(s);
+    // sectorStrengthHtml は業種不明のとき "-" を返すが、3段目では区切り記号だけが
+    // 浮くので空扱いにする。
+    const sectorHtml = s.sector33 ? sectorStrengthHtml(s) : "";
+    const metaText = [sectorHtml, stageText ? escapeHtml(stageText) : ""]
+      .filter(Boolean)
+      .join(" ・ ");
+    const metaTitle = escapeHtml([s.sector33 || "", stageText].filter(Boolean).join(" / "));
+    const metaLine = metaText
+      ? `<div class="sc-row sc-row-meta${s.setup_stage && s.setup_stage.near ? " sc-stage-near" : ""}" title="${metaTitle}">${metaText}</div>`
+      : "";
+    card.innerHTML = `
+      <div class="sc-row sc-row-main">
+        <span class="sc-name">${escapeHtml(s.name ?? "-")}<span class="sc-code">（${escapeHtml(s.code)}）</span></span>
+        <span class="sc-chips">
+          <span class="sc-score-chip">SC ${s.total_score ?? "-"}</span>
+          <span class="sc-rs-chip">RS ${s.rs ?? "-"}</span>
+        </span>
+      </div>
+      <div class="sc-row sc-row-sub">
+        <span class="sc-flags">${statusBadgeHtml(s)}${earningsBadgeHtml(s)}${fundVerdictBadgeHtml(s)}${marginBadgeHtml(s.margin)}</span>
+        <span class="sc-close">${formatClose(s.close)}${changePctHtml(s)}</span>
+        <span class="sc-dryup">${dryupBadgeHtml(s)}</span>
+      </div>${metaLine}`;
+    list.appendChild(card);
+  }
+  return list;
+}
+
+function formatClose(v) {
+  return v == null ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: 1 });
+}
+
+// ---------------------------------------------------------------------------
+// セットアップ進行度(setup_stage。バックエンド build_setup_stage が付与)。
+// 2026-07-17〜07-28 は監視タブでこれを見出しにしたアコーディオングループ表示に
+// 使っていたが、2026-07-29のリスト統合でグループ分けそのものを廃止した。
+// 現在はカードの状態バッジ(あと一歩/形成中)と3段目の不足理由テキストにのみ使う。
+// ---------------------------------------------------------------------------
+
+function setupStageGroupKey(s) {
+  const st = s.setup_stage;
+  if (!st) return null;
+  if (st.near) return "near";
+  if (st.stage === "volatile" || st.stage === "no_base") return "inactive";
+  if (st.stage === "forming" || st.stage === "fresh_high" || st.stage === "rejected") return st.stage;
+  return "inactive";
+}
+
+// カード下段に出す進行度バッジ文言。REJECTEDはVコード -> 日本語ラベルに展開。
+function setupStageBadgeText(s) {
+  const st = s.setup_stage;
+  if (!st) return "";
+  if (st.stage === "rejected" && st.missing && st.missing.length) {
+    const labels = st.missing.map((m) => MUST_FLAG_LABELS.vcp[m] || m);
+    return `未達: ${labels.join(" / ")}`;
+  }
+  return st.detail || "";
+}
+
+// ---------------------------------------------------------------------------
+// Stock detail page (stock.html)
+// ---------------------------------------------------------------------------
+
+// SPAルーターから#stock/CODEへ遷移するたびに呼ばれる。codeOverrideがあれば
+// それを使い(SPAルート経由)、なければ旧来の?code=クエリを見る(stock.html直リンク互換)。
+// initStockPage の世代番号。initStockPage は showView から fire-and-forget で
+// 呼ばれるため、連続で銘柄を送ると複数回分が同時に走る。チャートJSONは
+// 先読み済みなら即時・未取得ならネットワーク待ちと解決順が入れ替わるので、
+// 「あとから始まった新しい銘柄が先に描画 → 遅れて解決した古い銘柄が上書き」
+// が起きてグラフが切り替わらないように見える。await のたびに世代を突き合わせ、
+// 追い越された古い実行は何も描かずに降りる。
+let stockPageSeq = 0;
+
+async function initStockPage(codeOverride) {
+  const code = codeOverride || new URLSearchParams(window.location.search).get("code");
+  const seq = ++stockPageSeq;
+
+  // 前の銘柄のチャート・イベントリスナーを必ず片付けてから描画し直す
+  // (teardownしないと銘柄を切り替えるたびにチャート/リスナーが積み上がる)。
+  teardownCharts();
+  teardownMarginChart();
+
+  const titleEl = document.getElementById("stock-title");
+  const metaEl = document.getElementById("stock-meta");
+  const mustEl = document.getElementById("must-checklist");
+  const scoreEl = document.getElementById("score-breakdown");
+  const fundEl = document.getElementById("fund-detail-body");
+  const marginEl = document.getElementById("margin-detail-body");
+  const copyBtn = document.getElementById("copy-stock-data-btn");
+  const sizingResultEl = document.getElementById("sizing-result");
+  if (metaEl) metaEl.innerHTML = "";
+  if (mustEl) mustEl.innerHTML = "";
+  if (scoreEl) scoreEl.innerHTML = "";
+  if (fundEl) fundEl.innerHTML = "";
+  if (marginEl) marginEl.innerHTML = "";
+  if (sizingResultEl) sizingResultEl.innerHTML = "";
+  if (copyBtn) copyBtn.hidden = true;
+
+  if (!code) {
+    if (titleEl) titleEl.textContent = "銘柄コードが指定されていません";
+    return;
+  }
+  // 先読み「完了済み」なら即描画できるので「読み込み中...」の点滅を出さない。
+  // 先読みが未完了のうちに追いついた場合は待ち時間があるので通常どおり出す
+  // (出さないと前の銘柄の画面が残り、切り替わっていないように見える)。
+  if (titleEl && !chartCacheReady.has(code)) titleEl.textContent = "読み込み中...";
+
+  // report.jsonはダッシュボード表示時のキャッシュ(reportCache)を再利用し、
+  // 直リンク等でキャッシュが無い時だけfetch+復号して格納する。チャートは
+  // loadChart 経由でメモリキャッシュ(前後銘柄の先読み結果)を再利用する。
+  // 直リンク時は断面の解決がまだなので snapshotSuffix は "" (大引)。ダッシュボードを
+  // 経由していれば選択中の断面がそのまま reportCache に入っている。
+  const reportPromise = reportCache
+    ? Promise.resolve(reportCache.data)
+    : window.MinerviniData.fetchJson(`data/report${snapshotSuffix}.json`).then((r) => {
+        reportCache = { data: r, fetchedAt: Date.now() };
+        return r;
+      });
+  const [report, chart] = await Promise.all([reportPromise, loadChart(code)]);
+  // 待っている間にさらに銘柄が送られていたら、この実行は古い。描画すると新しい
+  // 銘柄のチャートの上に重ねて作られてしまう(teardownCharts は await の前に
+  // 済んでいるので後片付けされない)ため、ここで降りる。
+  if (seq !== stockPageSeq) return;
+  const stock = report.stocks.find((s) => s.code === code);
+
+  if (titleEl) titleEl.textContent = `${code} ${stock ? stock.name : ""}`;
+  if (stock) renderStockMeta(stock);
+  setupYahooFinanceLink(code);
+  initStockNav();
+  updateStockNav(code);
+  prefetchAdjacentCharts(); // 前後1銘柄のチャートを先読みして次のスワイプ/＜＞を即応答に
+  setupStockPanels();
+  renderStockSummary(stock);
+  if (stock) renderStockFundamentals(code, stock.name, report.generated_at, seq);
+  if (stock) renderStockMargin(stock);
+  setupSizingCalculator(stock);
+  setupStockCopyButton(stock, chart, report);
+
+  if (!chart) {
+    const chartContainer = document.getElementById("chart-container");
+    if (chartContainer) chartContainer.textContent = "チャートデータがありません";
+    return;
+  }
+  renderCharts(chart);
+
+  if (stock) {
+    renderMustChecklist(stock.must_flags, stock.vcp_detail);
+    renderContractionTable(stock.vcp_detail);
+    renderScoreBreakdown(stock);
+  }
+}
+
+// 個別銘柄のYahoo!ファイナンス(日本)リンク。東証銘柄はコード+".T"。
+function setupYahooFinanceLink(code) {
+  const link = document.getElementById("yahoo-finance-link");
+  if (!link) return;
+  const digits = String(code || "").trim();
+  if (!digits) {
+    link.hidden = true;
+    return;
+  }
+  link.href = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(digits)}.T`;
+  link.hidden = false;
+}
+
+// 個別画面のパネル高さはCSSのapp shell(flex)が決める(JSでの実測上書きは廃止)。
+// bodyがスクロールしない前提で .stock-panels{flex:1;min-height:0} が残り高さを埋める。
+
+// 現在表示中のタブ(パネル)名。銘柄を切り替えても同じタブを維持するため、
+// 個別画面の外(モジュールスコープ)で覚えておく。既定はサマリー。
+let currentStockPanel = "summary";
+
+// アクティブなタブ+パネルを切り替える。切替のたびに currentStockPanel も更新し、
+// 次に別銘柄を開いたときに同じタブへ復元できるようにする。パネルは単一表示
+// (.active のみ display)なので、タブと対応パネルの両方に .active を付け替える。
+function updateStockActiveTab(panelName) {
+  currentStockPanel = panelName;
+  const tabs = document.getElementById("stock-tabs");
+  if (tabs) {
+    tabs.querySelectorAll(".stock-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.panel === panelName);
+    });
+  }
+  const panels = document.getElementById("stock-panels");
+  if (panels) {
+    panels.querySelectorAll(".stock-panel").forEach((p) => {
+      p.classList.toggle("active", p.dataset.panel === panelName);
+    });
+  }
+  // パネルは単一表示(非アクティブは display:none)。チャートは非表示中に生成されると
+  // clientWidth/Height=0 で描画されるため、チャートタブが表になった直後に実寸で
+  // リサイズし直す(次フレームでレイアウト確定後に resizeHandler を呼ぶ)。
+  if (panelName === "chart" && stockChartState && stockChartState.resizeHandler) {
+    requestAnimationFrame(() => {
+      if (stockChartState && stockChartState.resizeHandler) stockChartState.resizeHandler();
+    });
+  }
+}
+
+// 直近の銘柄遷移方向。次の描画時の切替アニメの向きに使う(1=次/-1=前/0=直接遷移)。
+let stockNavDir = 0;
+
+// 前後銘柄へハッシュ遷移する共通ヘルパ。dir<0=次(リストの下/idx+1)、dir>0=前(上/idx-1)。
+// アニメ向きは「次=右から(1)」「前=左から(-1)」で覚えておく。
+function navigateStock(dir) {
+  const target = dir < 0 ? stockNavNextCode : stockNavPrevCode;
+  if (!target) return;
+  stockNavDir = dir < 0 ? 1 : -1;
+  window.location.hash = `stock/${encodeURIComponent(target)}`;
+}
+
+// パネル切替のスライドインを再生する共通ヘルパ。dir>0=次(右から)/dir<0=前(左から)。
+// 同方向連続でも必ず再生されるよう reflow を強制してからクラスを付ける。
+// 指追従ドラッグ(wireStockSwipe)で付いたインラインの transform / transition は
+// アニメーションと競合するので、再生前に必ず剥がす。
+function playPanelSlide(container, dir) {
+  if (!container || !dir) return;
+  container.style.transition = "";
+  container.style.transform = "";
+  container.style.opacity = "";
+  const cls = dir > 0 ? "slide-next" : "slide-prev";
+  container.classList.remove("slide-next", "slide-prev");
+  void container.offsetWidth;
+  container.classList.add(cls);
+  container.addEventListener("animationend", () => container.classList.remove(cls), { once: true });
+}
+
+// 横スワイプ(タッチ/ペンのみ)を検出して onSwipe(dir) を呼ぶ共通配線。左スワイプ=次
+// (dir=+1)、右スワイプ=前(dir=-1)。縦優勢/移動量不足は無視。マウスは対象外
+// (デスクトップは各ビューのタブ/キーで操作)。縦スクロール中は pointercancel で誤爆しない。
+function wireLoopSwipe(el, onSwipe) {
+  const TH = 55;            // 切替とみなす最小横移動量(px)
+  const H_DOMINANCE = 1.4;  // 横 > 縦*係数 でないと縦スクロール扱いで無視
+  let activeId = null;
+  let sx = 0;
+  let sy = 0;
+  el.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (activeId !== null || e.pointerType === "mouse") return;
+      activeId = e.pointerId;
+      sx = e.clientX;
+      sy = e.clientY;
+    },
+    true
+  );
+  el.addEventListener(
+    "pointerup",
+    (e) => {
+      if (activeId === null || e.pointerId !== activeId) return;
+      activeId = null;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+      if (Math.abs(dx) < TH || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
+      onSwipe(dx < 0 ? 1 : -1);
+    },
+    true
+  );
+  el.addEventListener(
+    "pointercancel",
+    (e) => {
+      if (e.pointerId === activeId) activeId = null;
+    },
+    true
+  );
+}
+
+// パネル全体の横スワイプで前後の銘柄へ遷移する(初回のみ配線)。左スワイプ=次の銘柄
+// (リストの下/idx+1)、右スワイプ=前の銘柄(リストの上/idx-1)。縦スクロール中は
+// ブラウザがポインタを奪って pointercancel が飛ぶため誤爆しない。グラフの canvas が
+// ポインタキャプチャしても panels は祖先なのでキャプチャ段階のリスナーには届く。
+// マウスは対象外(デスクトップは矢印キーで操作。マウスドラッグはグラフの時間軸パン用)。
+//
+// 2026-07-27: 「指を離した瞬間にパッと切り替わる」離散的な挙動をやめ、指追従の
+// ドラッグにした。ドラッグ中はパネルが指と一緒に動いて薄くなり、閾値を超えて離すと
+// そのまま画面外へ抜けて次の銘柄が反対側から入る(playPanelSlide)。閾値未満、または
+// その方向に銘柄が無いときはゴムのように戻る。transform/opacity だけを触るので
+// レイアウトを起こさず60fpsに乗る。
+function wireStockSwipe(panels) {
+  const TH = 55;            // 銘柄切替とみなす最小横移動量(px)
+  const H_DOMINANCE = 1.4;  // 横 > 縦*係数 でないと縦スクロール扱いで無視
+  const START = 10;         // これを超えたら「横ドラッグ中」と確定する移動量(px)
+  const RUBBER = 0.28;      // 行き先が無い方向へ引いたときの追従率(ゴム感)
+  const EASE_OUT = "cubic-bezier(0.32, 0, 0.67, 0)";       // 画面外へ抜ける
+  const EASE_BACK = "cubic-bezier(0.22, 1.2, 0.36, 1)";    // 戻る(軽く行き過ぎる)
+
+  let activeId = null;
+  let sx = 0;
+  let sy = 0;
+  let dragging = false;  // 横ドラッグと確定したか
+  let locked = false;    // 縦スクロールと確定した(このジェスチャは無視)
+  let committing = false; // 遷移アニメ再生中(多重発火防止)
+
+  // 行き先があるか。dx<0(左へ引く)=次の銘柄、dx>0(右へ引く)=前の銘柄。
+  const hasTarget = (dx) => !!(dx < 0 ? stockNavNextCode : stockNavPrevCode);
+
+  const setOffset = (dx) => {
+    // 行き先が無ければ引きを大きく減衰させ、「ここで終わり」を手応えで伝える。
+    const x = hasTarget(dx) ? dx : dx * RUBBER;
+    const w = panels.offsetWidth || 320;
+    // 閾値の2倍引いたところで 0.45 まで落ちる程度の減光。切替の予告として使う。
+    const fade = Math.min(Math.abs(x) / (w * 0.6), 0.55);
+    panels.style.transform = `translate3d(${x}px,0,0)`;
+    panels.style.opacity = String(1 - fade);
+  };
+
+  const reset = (animated) => {
+    panels.style.transition = animated ? `transform 260ms ${EASE_BACK}, opacity 200ms ease-out` : "";
+    panels.style.transform = "";
+    panels.style.opacity = "";
+    if (animated) {
+      window.setTimeout(() => {
+        panels.style.transition = "";
+        panels.style.willChange = "";
+      }, 280);
+    } else {
+      panels.style.willChange = "";
+    }
+  };
+
+  panels.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (activeId !== null || e.pointerType === "mouse" || committing) return;
+      activeId = e.pointerId;
+      sx = e.clientX;
+      sy = e.clientY;
+      dragging = false;
+      locked = false;
+    },
+    true
+  );
+
+  panels.addEventListener(
+    "pointermove",
+    (e) => {
+      if (activeId === null || e.pointerId !== activeId || locked) return;
+      const dx = e.clientX - sx;
+      const dy = e.clientY - sy;
+      if (!dragging) {
+        // 方向が決まるまでは何もしない。先に縦が優勢になったらこのジェスチャは
+        // 縦スクロールとして手放す(以降 pointermove を無視)。
+        if (Math.abs(dy) > START && Math.abs(dy) >= Math.abs(dx)) {
+          locked = true;
+          return;
+        }
+        if (Math.abs(dx) < START || Math.abs(dx) < Math.abs(dy) * H_DOMINANCE) return;
+        dragging = true;
+        panels.style.transition = "";
+        panels.style.willChange = "transform, opacity";
+      }
+      setOffset(dx);
+    },
+    true
+  );
+
+  const finish = (e) => {
+    if (activeId === null || e.pointerId !== activeId) return;
+    activeId = null;
+    const dx = e.clientX - sx;
+    const dy = e.clientY - sy;
+    const wasDragging = dragging;
+    dragging = false;
+    if (locked) { locked = false; return; }
+
+    const commit =
+      Math.abs(dx) >= TH && Math.abs(dx) >= Math.abs(dy) * H_DOMINANCE && hasTarget(dx);
+    if (!commit) {
+      if (wasDragging) reset(true);
+      return;
+    }
+
+    // 閾値超え: 指の勢いを引き継いでそのまま画面外へ抜き、抜けきってから遷移する。
+    // 遷移後の描画で setupStockPanels が playPanelSlide を呼び、反対側から入る。
+    committing = true;
+    const w = panels.offsetWidth || 320;
+    panels.style.transition = `transform 150ms ${EASE_OUT}, opacity 150ms linear`;
+    panels.style.transform = `translate3d(${dx < 0 ? -w * 0.45 : w * 0.45}px,0,0)`;
+    panels.style.opacity = "0";
+    window.setTimeout(() => {
+      committing = false;
+      navigateStock(dx < 0 ? -1 : 1);
+      // hashchange→再描画は次のタスク以降なので、ここで即 reset すると一瞬だけ
+      // 「抜けたはずの元の銘柄」が中央に戻って見えてしまう。通常は再描画時の
+      // playPanelSlide がインラインスタイルを剥がすので、ここは保険として
+      // 遅らせて置くだけにする(再描画が走らなかったときの復帰用)。
+      window.setTimeout(() => {
+        if (activeId === null && !dragging && panels.style.opacity === "0") reset(false);
+      }, 400);
+    }, 150);
+  };
+  panels.addEventListener("pointerup", finish, true);
+  panels.addEventListener(
+    "pointercancel",
+    (e) => {
+      if (e.pointerId !== activeId) return;
+      activeId = null;
+      locked = false;
+      if (dragging) {
+        dragging = false;
+        reset(true);
+      }
+    },
+    true
+  );
+
+  // デスクトップ用の前後ナビ(←=前の銘柄 / →=次の銘柄)。個別株ビュー表示中かつ
+  // 入力欄にフォーカスが無いときだけ拾う。document へ1回だけ配線。
+  if (!document.body.dataset.stockKeyWired) {
+    document.body.dataset.stockKeyWired = "1";
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const view = document.getElementById("view-stock");
+      if (!view || view.hidden) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+      navigateStock(e.key === "ArrowRight" ? -1 : 1);
+    });
+  }
+}
+
+// 個別画面のタブUI。パネルは単一表示(タブのタップ/スライドで切替)、パネル全体の
+// 横スワイプは銘柄切替(wireStockSwipe)に割り当てる。銘柄遷移のたびに直前のタブを維持。
+function setupStockPanels() {
+  const panels = document.getElementById("stock-panels");
+  const tabs = document.getElementById("stock-tabs");
+  if (!panels || !tabs) return;
+
+  // 銘柄を切り替えても直前に見ていたタブを維持する(例: A株のグラフから
+  // スワイプでB株へ移ってもグラフタブのまま)。
+  const tabItems = Array.from(tabs.querySelectorAll(".stock-tab"));
+  const hasPanel = tabItems.some((b) => b.dataset.panel === currentStockPanel);
+  updateStockActiveTab(hasPanel ? currentStockPanel : "summary");
+
+  // 前後ナビ(スワイプ/＜＞/矢印キー)で来たときだけ、ほんの一瞬スライドインさせて
+  // 銘柄が切り替わったことを示す。直接遷移(stockNavDir=0)ではアニメしない。
+  if (stockNavDir !== 0) {
+    playPanelSlide(panels, stockNavDir);
+    stockNavDir = 0;
+  }
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
+
+  const goToTab = (btn) => {
+    if (btn && btn.dataset.panel) updateStockActiveTab(btn.dataset.panel);
+  };
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".stock-tab");
+    if (!btn) return;
+    goToTab(btn);
+  });
+  wireTabSlide(tabs, ".stock-tab", goToTab);
+  wireStockSwipe(panels);
+}
+
+// ピル型タブバー共通の「スライド切替」。タブボタンを押したまま横に滑らせると
+// 指の下のタブが .slide-target でハイライトされ、そこで離すとそのタブへ切り替わる
+// (例: 市況タブを押したまま右へスライド→市況分析の上で離す)。押した場所と同じ
+// タブで離した/バー外で離した場合は何もしない(タップは従来のclickで処理)。
+// スライド成立後に発火する合成clickはキャプチャ段階で握りつぶす(initDockSwipeと
+// 同じ手法)。activate(btn) には各タブ実装の setActive 相当を渡す。
+function wireTabSlide(tabs, tabSelector, activate) {
+  if (tabs.dataset.slideWired) return;
+  tabs.dataset.slideWired = "1";
+
+  let pointerId = null;
+  let startBtn = null;
+  let previewBtn = null;
+  let slid = false;
+
+  const btnAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const btn = el && el.closest ? el.closest(tabSelector) : null;
+    return btn && tabs.contains(btn) ? btn : null;
+  };
+  const setPreview = (btn) => {
+    if (previewBtn === btn) return;
+    if (previewBtn) previewBtn.classList.remove("slide-target");
+    previewBtn = btn;
+    if (previewBtn) previewBtn.classList.add("slide-target");
+  };
+
+  tabs.addEventListener("pointerdown", (e) => {
+    const btn = e.target.closest(tabSelector);
+    if (!btn || !tabs.contains(btn)) return;
+    pointerId = e.pointerId;
+    startBtn = btn;
+    slid = false;
+    // バー外に指が出てもpointermove/upを追い続けるためのキャプチャ。
+    try { tabs.setPointerCapture(e.pointerId); } catch (_) { /* 古いブラウザは追跡なしで動作 */ }
+  });
+
+  tabs.addEventListener("pointermove", (e) => {
+    if (pointerId === null || e.pointerId !== pointerId) return;
+    const btn = btnAt(e.clientX, e.clientY);
+    if (!btn) return; // バーから縦に外れた間は直前のハイライトを維持(指ブレ対策)
+    if (btn !== startBtn) slid = true;
+    setPreview(btn === startBtn ? null : btn); // 開始タブへ戻ったらキャンセル扱い
+  });
+
+  const finish = (e, commit) => {
+    if (pointerId === null || e.pointerId !== pointerId) return;
+    const target = commit && slid ? (btnAt(e.clientX, e.clientY) || previewBtn) : null;
+    setPreview(null);
+    pointerId = null;
+    startBtn = null;
+    if (target) activate(target);
+    // slid は直後の合成click握りつぶし用に残す(下のcaptureリスナーが消費)。
+  };
+  tabs.addEventListener("pointerup", (e) => finish(e, true));
+  tabs.addEventListener("pointercancel", (e) => finish(e, false));
+
+  tabs.addEventListener(
+    "click",
+    (e) => {
+      if (slid) {
+        e.stopPropagation();
+        e.preventDefault();
+        slid = false;
+      }
+    },
+    true
+  );
+}
+
+// リスト画面。2026-07-29に本命/候補/監視の3タブを廃止したので、ここでやることは
+// フィルタ/並び替えツールの配線だけになった(パネル切替のロジックは消滅)。
+function initListView() {
+  if (!document.getElementById("stock-list-body")) return;
+  initAdhocFilter();
+  initListTools();
+}
+
+// 設定画面のサブタブ切替(バッチ実行/履歴・フィルター設定・投資法)。
+// batchビュー表示のたびに呼ばれる。イベント登録は初回のみ(dataset.wired)。
+function initSettingsSubtabs() {
+  const tabs = document.getElementById("settings-subtabs");
+  if (!tabs) return;
+  const panels = document.querySelectorAll("#view-batch .settings-subpanel");
+
+  const setActive = (name) => {
+    tabs.querySelectorAll(".settings-subtab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.subtab === name);
+    });
+    panels.forEach((p) => p.classList.toggle("active", p.dataset.subpanel === name));
+  };
+
+  const initial = tabs.querySelector(".settings-subtab.active") || tabs.querySelector(".settings-subtab");
+  setActive(initial ? initial.dataset.subtab : "batch");
+
+  if (tabs.dataset.wired) return;
+  tabs.dataset.wired = "1";
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".settings-subtab");
+    if (!btn) return;
+    setActive(btn.dataset.subtab);
+  });
+}
+
+// 市況画面(市況データ/市況分析/レビュー)のタブ切替。タブのタップ/スライドに加え、
+// パネル全体の横スワイプでもループ切替(端でラップ)できる。切替時はスライドイン。
+// initDashboard はファンダ保存後などに再実行されうるため、dataset.wired で重複防止。
+function initMarketTabs() {
+  const panels = document.getElementById("market-panels");
+  const tabs = document.getElementById("market-tabs");
+  if (!panels || !tabs) return;
+
+  const setActive = (name) => {
+    tabs.querySelectorAll(".market-tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.panel === name);
+    });
+    panels.querySelectorAll(".market-panel").forEach((p) => {
+      const on = p.dataset.panel === name;
+      p.classList.toggle("active", on);
+      if (on) p.scrollTop = 0;
+    });
+    // レビューは大引バッチの産物で、市況データ/市況分析とは別ファイル(review.json)。
+    // 開いたときに初めて取りに行く(2回目以降はキャッシュを見るだけで何もしない)。
+    // 「過去の成績」(stats.json)はレビュー本体とは別ファイル・別ブロックなので、
+    // 片方が欠けてももう片方が出るよう独立して取りに行く。
+    if (name === "review") {
+      ensureReviewLoaded();
+      ensureReviewStatsLoaded();
+    }
+  };
+
+  const initial = (tabs.querySelector(".market-tab.active") || tabs.querySelector(".market-tab"));
+  setActive(initial ? initial.dataset.panel : "data");
+
+  if (panels.dataset.wired) return;
+  panels.dataset.wired = "1";
+
+  tabs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".market-tab");
+    if (!btn) return;
+    setActive(btn.dataset.panel);
+  });
+  wireTabSlide(tabs, ".market-tab", (btn) => setActive(btn.dataset.panel));
+
+  // 横スワイプでループ切替(タブの並び順に回り、端まで来たら反対の端へラップ)。
+  // タブ名はボタンから拾うので、タブが増えてもここは変更不要。dir>0=次,dir<0=前。
+  wireLoopSwipe(panels, (dir) => {
+    const names = Array.from(tabs.querySelectorAll(".market-tab")).map((b) => b.dataset.panel);
+    if (!names.length) return;
+    const cur = names.findIndex(
+      (n) => tabs.querySelector(`.market-tab[data-panel="${n}"]`).classList.contains("active")
+    );
+    const next = ((cur < 0 ? 0 : cur) + dir + names.length) % names.length;
+    setActive(names[next]);
+    playPanelSlide(panels, dir);
+  });
+}
+
+// ルールベース日本語サマリー (src/report/summary.py が生成した
+// {headline, points, cautions})。無ければセクションごと隠す
+// (次回daily実行前の古いreport.jsonでも壊れないように)。
+function renderStockSummary(stock) {
+  const el = document.getElementById("stock-summary");
+  if (!el) return;
+  el.innerHTML = "";
+  const s = stock && stock.summary;
+  if (!s || !s.headline) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+
+  const head = document.createElement("p");
+  head.className = "summary-headline";
+  head.textContent = s.headline;
+  el.appendChild(head);
+
+  // ポジ/ネガで色分け: cautions(注意点)は常にネガティブ(赤)。points は原則
+  // ポジティブ(緑)だが、時価総額・市場・次回決算などの中立な事実は色なし。
+  const lists = [
+    { items: s.points, className: "summary-points", prefix: "", tone: pointTone },
+    { items: s.cautions, className: "summary-cautions", prefix: "⚠ ", tone: () => "negative" },
+  ];
+  for (const { items, className, prefix, tone } of lists) {
+    if (!Array.isArray(items) || !items.length) continue;
+    const ul = document.createElement("ul");
+    ul.className = className;
+    for (const text of items) {
+      const li = document.createElement("li");
+      li.className = "summary-item summary-item-" + tone(text);
+      li.textContent = prefix + text;
+      ul.appendChild(li);
+    }
+    el.appendChild(ul);
+  }
+}
+
+// point 文の中で「中立な事実」を判定する接頭辞(時価総額/市場区分/次回決算など)。
+// これらは色を付けず、それ以外の point はポジティブ(緑)として扱う。
+const NEUTRAL_POINT_PREFIXES = ["時価総額", "市場", "次回決算", "EPS YoY推移", "予想PER", "会社計画", "セクター"];
+
+function pointTone(text) {
+  const t = String(text || "");
+  if (NEUTRAL_POINT_PREFIXES.some((p) => t.startsWith(p))) return "neutral";
+  return "positive";
+}
+
+function renderStockMeta(stock) {
+  const items = [
+    ["終値", stock.close],
+    ["ステータス", STATUS_LABELS[stock.status] || stock.status],
+    ["総合スコア", stock.total_score],
+    ["RS", stock.rs],
+    ["ピボット", stock.pivot],
+    ["推奨逆指値", stock.buy_stop],
+    ["推奨損切り", stock.stop_loss],
+    ["リスク%", stock.risk_pct],
+    // 以下は値がある場合のみ表示 (時価総額/市場区分/次回決算は2026-07-12追加。
+    // 市場区分は次回ユニバース再構築後、次回決算は3月期・9月期企業のみ入る)
+    ["時価総額", stock.market_cap_oku != null ? `${Number(stock.market_cap_oku).toLocaleString("ja-JP")}億円` : null],
+    ["市場", stock.market_segment ?? null],
+    ["次回決算", stock.next_earnings_date ?? null],
+  ];
+  document.getElementById("stock-meta").innerHTML = items
+    .filter(([, value], i) => i < 8 || value != null)
+    .map(
+      ([label, value]) =>
+        `<span class="chip"><span class="chip-label">${label}</span><span class="chip-value">${value ?? "-"}</span></span>`
+    )
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Stock detail page: fundamentals table (EPS/売上高 + 前年同期比)
+// ---------------------------------------------------------------------------
+
+// "2025Q1" -> "2024Q1" (前年同期のラベル)。Q4はFY(通期)の意味で使われている
+// ため、そのまま1年前のQ4と比較する。
+function shiftFiscalQuarterYoy(label) {
+  const m = /^(\d{4})Q([1-4])$/.exec(label || "");
+  if (!m) return null;
+  return `${Number(m[1]) - 1}Q${m[2]}`;
+}
+
+function growthPct(cur, prev) {
+  if (cur == null || prev == null || prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+function formatYoy(pct) {
+  if (pct == null || !Number.isFinite(pct)) return "-";
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function yoyClass(pct) {
+  if (pct == null || !Number.isFinite(pct)) return "";
+  return pct > 0 ? "yoy-positive" : pct < 0 ? "yoy-negative" : "";
+}
+
+function formatEps(v) {
+  return v == null ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+}
+
+// 円単位の売上高を億円表示に丸める(百万円/円単位のままだと桁が多く読みにくいため)。
+function formatRevenue(v) {
+  if (v == null) return "-";
+  return `${(Number(v) / 100000000).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}億円`;
+}
+
+// ファンダの表/グラフ表示切替の設定を localStorage に保持(引数ありでset)。
+const FUND_VIEW_KEY = "minervini-fund-view";
+function fundViewPref(v) {
+  if (v != null) {
+    try { localStorage.setItem(FUND_VIEW_KEY, v); } catch (e) {}
+    return v;
+  }
+  // 初期表示はグラフ。明示的に "table" を選んだ時だけ表にする。
+  let stored = "chart";
+  try { stored = localStorage.getItem(FUND_VIEW_KEY) || "chart"; } catch (e) {}
+  return stored === "table" ? "table" : "chart";
+}
+
+// EPS・売上高の推移バーチャート(YoY色分け付き)をSVGで生成する。
+// 直近最大8四半期を古い→新しい順(左→右)で描画。棒の色は前年同期比の
+// 正負(緑/赤)、YoYが無い期は中立色。EPSと売上は単位が違うので別パネル。
+function fundBarPanel(title, quarters, byQuarter, valueOf, fmt, yoyMetric) {
+  const qs = quarters.slice(-8);
+  if (!qs.length) return "";
+  const vals = qs.map(valueOf).filter((v) => v != null);
+  if (!vals.length) return "";
+  const maxV = Math.max(...vals, 0);
+  const minV = Math.min(...vals, 0);
+  const range = maxV - minV || 1;
+
+  const w = 320;
+  const h = 150;
+  const padTop = 22;
+  const padBottom = 30;
+  const plotH = h - padTop - padBottom;
+  const zeroY = padTop + (maxV / range) * plotH; // 0 の位置
+  const slot = w / qs.length;
+  const barW = Math.min(28, slot * 0.6);
+
+  const bars = qs
+    .map((q, i) => {
+      const v = valueOf(q);
+      if (v == null) return "";
+      const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+      const yoy = growthPct(yoyMetric(q), prev ? yoyMetric(prev) : null);
+      const fill = yoy == null ? "var(--text-dim)" : yoy > 0 ? "var(--accent)" : yoy < 0 ? "var(--danger)" : "var(--text-dim)";
+      const cx = slot * i + slot / 2;
+      const vH = (Math.abs(v) / range) * plotH;
+      const y = v >= 0 ? zeroY - vH : zeroY;
+      const label = escapeHtml(q.fiscal_quarter.replace(/^\d{2}/, ""));
+      const yoyTxt = yoy == null ? "" : `<text x="${cx.toFixed(1)}" y="${(y - 4).toFixed(1)}" class="fund-bar-yoy" text-anchor="middle" fill="${fill}">${formatYoy(yoy)}</text>`;
+      return `
+        <rect x="${(cx - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, vH).toFixed(1)}" rx="2" fill="${fill}" opacity="0.85"/>
+        ${yoyTxt}
+        <text x="${cx.toFixed(1)}" y="${(h - 14).toFixed(1)}" class="fund-bar-x" text-anchor="middle">${label}</text>`;
+    })
+    .join("");
+
+  return `
+    <div class="fund-chart-panel">
+      <div class="fund-chart-title">${title}</div>
+      <svg viewBox="0 0 ${w} ${h}" class="fund-bar-svg" preserveAspectRatio="xMidYMid meet" role="img">
+        <line x1="0" y1="${zeroY.toFixed(1)}" x2="${w}" y2="${zeroY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        ${bars}
+      </svg>
+    </div>`;
+}
+
+function fundChartHtml(quarters, byQuarter) {
+  const eps = fundBarPanel("EPS 推移(棒=EPS / 色=前年同期比)", quarters, byQuarter, (q) => q.eps, formatEps, (q) => q.eps);
+  const rev = fundBarPanel("売上高 推移(棒=売上高 / 色=前年同期比)", quarters, byQuarter, (q) => (q.revenue == null ? null : q.revenue / 1e8), formatRevenue, (q) => q.revenue);
+  if (!eps && !rev) return '<p class="tier-note">グラフ化できるデータがありません。</p>';
+  return `<div class="fund-chart-wrap">${eps}${rev}<p class="fund-chart-legend"><span class="lg-up">■</span> 前年同期比プラス　<span class="lg-down">■</span> マイナス　<span class="lg-neutral">■</span> 前年同期比なし</p></div>`;
+}
+
+// seq: 呼び出し元 initStockPage の世代番号。fetch を待つ間に銘柄が送られていたら
+// 古い銘柄のファンダで上書きしないよう降りる(未指定なら世代チェックなし)。
+async function renderStockFundamentals(code, name, reportGeneratedAt, seq) {
+  const container = document.getElementById("fund-detail-body");
+  if (!container) return;
+  container.innerHTML = "読み込み中...";
+
+  const authEnabled = window.MINERVINI_CONFIG.passkeyAuthEnabled;
+  const canEdit = !authEnabled || (window.MinerviniGitHub && window.MinerviniGitHub.hasToken());
+  const pending = window.MinerviniFundamentalsUI
+    ? window.MinerviniFundamentalsUI.reconcilePending(reportGeneratedAt)
+    : {};
+  const isPending = !!(window.MinerviniFundamentalsUI && window.MinerviniFundamentalsUI.isPending(pending, code));
+
+  let entry = null;
+  try {
+    const all = await window.MinerviniData.fetchJson("data/fundamentals_public.json", { optional: true });
+    entry = (all && all[code]) || null;
+  } catch (e) {
+    /* fetch failure: fall through to empty state below */
+  }
+  if (seq !== undefined && seq !== stockPageSeq) return; // 別の銘柄へ遷移済み
+
+  const btnHtml = `
+    <button type="button" id="fund-detail-edit-btn" class="fund-edit-btn"${canEdit ? "" : ' disabled title="先に🔓解錠してください"'}>ファンダ入力/編集</button>
+    ${isPending ? '<span class="pending-badge">入力済み・次回実行で本命に昇格予定</span>' : ""}
+  `;
+
+  const quarters = (entry && entry.quarters) || [];
+  if (!quarters.length) {
+    container.innerHTML = `${btnHtml}<p class="tier-note">ファンダデータがまだありません。「ファンダ入力/編集」から入力できます。</p>`;
+  } else {
+    const byQuarter = new Map(quarters.map((q) => [q.fiscal_quarter, q]));
+    const rowsHtml = quarters
+      .slice()
+      .reverse() // 直近の四半期を先頭に表示
+      .map((q) => {
+        const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+        const epsYoy = growthPct(q.eps, prev ? prev.eps : null);
+        const revYoy = growthPct(q.revenue, prev ? prev.revenue : null);
+        return `
+        <tr>
+          <td>${escapeHtml(q.fiscal_quarter)}</td>
+          <td>${formatEps(q.eps)}</td>
+          <td class="${yoyClass(epsYoy)}">${formatYoy(epsYoy)}</td>
+          <td>${formatRevenue(q.revenue)}</td>
+          <td class="${yoyClass(revYoy)}">${formatYoy(revYoy)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const metaLine = entry.checked_date
+      ? `<p class="tier-note">確認日: ${escapeHtml(entry.checked_date)}</p>`
+      : "";
+
+    // 表 / グラフ の切替(設定はlocalStorageに保持)。トグルは入力/編集ボタンと同じ行に置く。
+    const view = fundViewPref();
+    container.innerHTML = `
+      <div class="fund-detail-head">
+        ${btnHtml}
+        <div class="fund-view-toggle segmented" role="tablist">
+          <button type="button" class="${view === "chart" ? "active" : ""}" data-fund-view="chart">グラフ</button>
+          <button type="button" class="${view === "table" ? "active" : ""}" data-fund-view="table">表</button>
+        </div>
+      </div>
+      <div id="fund-view-chart" class="fund-view-panel"${view === "table" ? " hidden" : ""}>
+        ${fundChartHtml(quarters, byQuarter)}
+      </div>
+      <div id="fund-view-table" class="fund-view-panel"${view === "chart" ? " hidden" : ""}>
+        <div class="table-scroll">
+          <table class="fund-table fund-detail-table">
+            <thead>
+              <tr><th>会計四半期</th><th>EPS</th><th>EPS前年同期比</th><th>売上高</th><th>売上高前年同期比</th></tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+      ${metaLine}
+    `;
+
+    const toggle = container.querySelector(".fund-view-toggle");
+    if (toggle) {
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-fund-view]");
+        if (!btn) return;
+        const v = btn.dataset.fundView;
+        fundViewPref(v);
+        toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+        const tbl = container.querySelector("#fund-view-table");
+        const cht = container.querySelector("#fund-view-chart");
+        if (tbl) tbl.hidden = v !== "table";
+        if (cht) cht.hidden = v !== "chart";
+      });
+    }
+  }
+
+  const editBtn = document.getElementById("fund-detail-edit-btn");
+  if (editBtn && !editBtn.disabled) {
+    editBtn.addEventListener("click", () => window.MinerviniFundamentalsUI.openFundamentalsModal(code, name));
+  }
+  if (window.MinerviniFundamentalsUI) {
+    window.MinerviniFundamentalsUI.onSaved = () => renderStockFundamentals(code, name, reportGeneratedAt);
+  }
+}
+
+// 需給(信用取引週末残高)カード。表示専用(総合スコアには一切使わない)。
+// data/margin_weekly.json はJPXが週1回更新のため最大5営業日遅れる旨を注記する。
+function marginNum(v, digits = 1) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return n.toLocaleString("ja-JP", { maximumFractionDigits: digits });
+}
+
+function formatMarginDate(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// 信用倍率の推移グラフ(需給タブ)。LightweightChartsのライン1本。
+// 個別チャート(renderCharts)とは別インスタンスなので専用stateで破棄管理する。
+let marginChartState = null;
+
+function teardownMarginChart() {
+  if (!marginChartState) return;
+  const { chart, resizeHandler } = marginChartState;
+  window.removeEventListener("resize", resizeHandler);
+  try { chart.remove(); } catch (_) {}
+  marginChartState = null;
+}
+
+function renderMarginRatioChart(history) {
+  teardownMarginChart();
+  const el = document.getElementById("margin-ratio-chart");
+  const emptyEl = document.getElementById("margin-chart-empty");
+  if (!el) return;
+  el.innerHTML = "";
+  // ratioが取れる週(売残0でない週)だけを昇順で使う。2点未満なら線が引けない
+  // のでグラフ枠を隠して注記を出す。
+  const pts = (history || [])
+    .filter((h) => h && h.ratio != null && h.date)
+    .map((h) => ({ time: h.date, value: Number(h.ratio) }))
+    .filter((p) => Number.isFinite(p.value));
+  if (pts.length < 2) {
+    el.hidden = true;
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  el.hidden = false;
+  if (emptyEl) emptyEl.hidden = true;
+
+  const chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth,
+    height: el.clientHeight,
+    layout: { background: { color: CHART_COLORS.bg }, textColor: CHART_COLORS.text, fontSize: 11 },
+    grid: { vertLines: { color: CHART_COLORS.grid }, horzLines: { color: CHART_COLORS.grid } },
+    rightPriceScale: { minimumWidth: 52, borderColor: CHART_COLORS.grid },
+    localization: CHART_LOCALIZATION,
+    timeScale: { ...CHART_TIME_SCALE, visible: true, borderColor: CHART_COLORS.grid, fixRightEdge: true, fixLeftEdge: true, rightOffset: 0 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScale: false,
+    handleScroll: false,
+  });
+  const series = chart.addLineSeries({
+    color: "#f59e0b",
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerVisible: true,
+  });
+  series.setData(pts);
+  chart.timeScale().fitContent();
+
+  const resizeHandler = () => {
+    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    chart.timeScale().fitContent();
+  };
+  window.addEventListener("resize", resizeHandler);
+  // 需給タブが初期表示で画面外(横スクロール先)にあると生成時に幅が0になりうる
+  // ため、次フレームで実寸に合わせ直す。
+  requestAnimationFrame(resizeHandler);
+  marginChartState = { chart, resizeHandler };
+}
+
+// 需給タブの推移ビュー(グラフ/表)の状態。銘柄をまたいでも時間軸・ビュー種別は
+// 維持し、表の表示行数だけ銘柄切替でリセットする。
+let marginHistory = [];      // 現在銘柄の全履歴(日付昇順、{date, ratio, buy?, sell?})
+let marginView = "chart";    // "chart" | "table"
+let marginTfMonths = 1;      // グラフの表示期間(月)
+let marginTableRows = 8;     // 表の表示行数(+ボタンで増える)
+const MARGIN_TABLE_STEP = 8;
+let marginTabWired = false;
+
+// 履歴を「直近の週から N ヶ月分」に絞る。週次データなので日付基準で切る。
+function filterMarginByTf(history, months) {
+  const pts = (history || []).filter((h) => h && h.date);
+  if (!pts.length) return [];
+  const cutoff = new Date(pts[pts.length - 1].date);
+  cutoff.setMonth(cutoff.getMonth() - Number(months));
+  const cy = cutoff.toISOString().slice(0, 10);
+  return pts.filter((h) => h.date >= cy);
+}
+
+// 信用倍率の推移テーブル。上が最新・下ほど過去。+ボタンで下に行を足す。
+// buy/sell は新しいreport.jsonにのみ入るため、無ければ列ごと省く。
+function renderMarginTable() {
+  const body = document.getElementById("margin-table-body");
+  const moreBtn = document.getElementById("margin-table-more");
+  if (!body) return;
+  const rows = (marginHistory || []).filter((h) => h && h.date).slice().reverse();
+  if (!rows.length) {
+    body.innerHTML = '<p class="tier-note">履歴データがありません</p>';
+    if (moreBtn) moreBtn.hidden = true;
+    return;
+  }
+  const hasBuySell = rows.some((r) => r.buy != null || r.sell != null);
+  body.classList.toggle("margin-table-4col", hasBuySell);
+  const shown = rows.slice(0, marginTableRows);
+  const head = `<div class="margin-trow margin-thead"><span>日付</span><span>信用倍率</span>${hasBuySell ? "<span>買残</span><span>売残</span>" : ""}</div>`;
+  const trs = shown
+    .map((r) => {
+      const ratio = r.ratio != null ? `${marginNum(r.ratio, 2)}倍` : "-";
+      const bs = hasBuySell
+        ? `<span>${r.buy != null ? marginNum(r.buy, 0) : "-"}</span><span>${r.sell != null ? marginNum(r.sell, 0) : "-"}</span>`
+        : "";
+      return `<div class="margin-trow"><span>${formatMarginDate(r.date)}</span><span>${ratio}</span>${bs}</div>`;
+    })
+    .join("");
+  body.innerHTML = head + trs;
+  if (moreBtn) moreBtn.hidden = marginTableRows >= rows.length;
+}
+
+// グラフ/表のどちらを描くか。グラフは時間軸で絞ってから描画する。
+function applyMarginView() {
+  const chartWrap = document.getElementById("margin-view-chart");
+  const tableWrap = document.getElementById("margin-view-table");
+  if (chartWrap) chartWrap.hidden = marginView !== "chart";
+  if (tableWrap) tableWrap.hidden = marginView !== "table";
+  if (marginView === "chart") renderMarginRatioChart(filterMarginByTf(marginHistory, marginTfMonths));
+  else renderMarginTable();
+}
+
+// トグル群の配線は初回のみ(DOMは銘柄で作り直さないため)。
+function wireMarginTab() {
+  if (marginTabWired) return;
+  const vt = document.getElementById("margin-view-toggle");
+  const tf = document.getElementById("margin-tf-toggle");
+  const more = document.getElementById("margin-table-more");
+  if (vt) {
+    vt.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mview]");
+      if (!b) return;
+      marginView = b.dataset.mview;
+      vt.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      applyMarginView();
+    });
+  }
+  if (tf) {
+    tf.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mtf]");
+      if (!b) return;
+      marginTfMonths = Number(b.dataset.mtf);
+      tf.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      if (marginView === "chart") renderMarginRatioChart(filterMarginByTf(marginHistory, marginTfMonths));
+    });
+  }
+  if (more) {
+    more.addEventListener("click", () => {
+      marginTableRows += MARGIN_TABLE_STEP;
+      renderMarginTable();
+    });
+  }
+  marginTabWired = true;
+}
+
+function renderStockMargin(stock) {
+  const container = document.getElementById("margin-detail-body");
+  const m = stock && stock.margin;
+  wireMarginTab();
+  marginHistory = (m && m.history) || [];
+  marginTableRows = MARGIN_TABLE_STEP; // 銘柄切替で表示行数をリセット
+  applyMarginView();
+  if (!container) return;
+  if (!m) {
+    container.innerHTML = '<p class="tier-note">信用残データなし</p>';
+    return;
+  }
+
+  const ratioText = m.ratio != null ? `${marginNum(m.ratio, 2)}倍` : "売残なし";
+  const wowHtml =
+    m.buy_wow_pct != null
+      ? `<span class="sc-chg ${m.buy_wow_pct > 0 ? "chg-pos" : m.buy_wow_pct < 0 ? "chg-neg" : "chg-flat"}">（${m.buy_wow_pct > 0 ? "+" : ""}${marginNum(m.buy_wow_pct, 1)}%）</span>`
+      : "";
+  const dtcText = m.days_to_cover != null ? `平均出来高の${marginNum(m.days_to_cover, 1)}日分` : "-";
+  const dateText = m.date ? formatMarginDate(m.date) : "-";
+
+  container.innerHTML = `
+    <div class="margin-detail">
+      <div class="margin-ratio-big">${ratioText}${helpBtnHtml("margin_ratio")} ${marginBadgeHtml(m, { detail: true })}</div>
+      <div class="margin-row"><span>買残${helpBtnHtml("margin_buy")}</span><span>${marginNum(m.buy, 0)}株${wowHtml}</span></div>
+      <div class="margin-row"><span>売残${helpBtnHtml("margin_sell")}</span><span>${marginNum(m.sell, 0)}株</span></div>
+      <div class="margin-row"><span>買残回転日数${helpBtnHtml("days_to_cover")}</span><span>${dtcText}</span></div>
+      <p class="tier-note">${dateText}申込時点(週次データのため最大5営業日遅れることがあります)</p>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Stock detail page: 分析用データコピー
+// 個別株の全コンテキスト(テクニカル/8条件/VCP/直近値動き/ファンダ/市況)を
+// 自己完結のMarkdownテキストに整形してクリップボードへコピーする。
+// Claude等のAIに貼り付けてミネルヴィニ手法での分析相談に使う想定
+// (リポジトリの skills/minervini-analysis/SKILL.md がこの形式を読む前提)。
+// ---------------------------------------------------------------------------
+
+const TIER_COPY_LABELS = {
+  confirmed: "本命 (ファンダ強度確認済み: EPS YoY+25%/売上YoY+20%以上)",
+  pool: "候補プール (VCPセットアップあり・ファンダ未確認または基準未達)",
+  watchlist: "候補 (トレンドテンプレート8条件合格・セットアップ形成待ち)",
+  cooled: "追いかけ禁止 (ブレイク済みで手遅れ: EXTENDED=伸びすぎ / STALE=鮮度切れ)",
+};
+
+function copyNum(v, digits = 2) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return n.toLocaleString("ja-JP", { maximumFractionDigits: digits });
+}
+
+function copySignedPct(v, digits = 2) {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "-";
+  return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
+}
+
+function copyFlagLines(flags, labels, detailFn) {
+  return Object.entries(flags)
+    .map(([name, value]) => `- ${value ? "✓" : "✗"} ${labels[name] || name}${detailFn ? detailFn(name) : ""}`)
+    .join("\n");
+}
+
+// N本前の終値に対する騰落率 (直近値動きサマリー用)
+function closeChangePct(candles, bars) {
+  if (!candles || candles.length <= bars) return null;
+  const cur = candles[candles.length - 1].close;
+  const prev = candles[candles.length - 1 - bars].close;
+  return growthPct(cur, prev);
+}
+
+function volumeAvg(volume, bars) {
+  if (!volume || !volume.length) return null;
+  const slice = volume.slice(-bars);
+  if (!slice.length) return null;
+  return slice.reduce((sum, v) => sum + (v.value || 0), 0) / slice.length;
+}
+
+function buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData) {
+  const L = [];
+  L.push(`# ${stock.code} ${stock.name} — ミネルヴィニ式スクリーナー 分析用データ`);
+  L.push("");
+  L.push(`- データ生成日時: ${report.generated_at ?? "-"}`);
+  L.push(`- ティア: ${TIER_COPY_LABELS[stock.tier] || stock.tier || "-"}`);
+  L.push(`- エントリーステータス: ${stock.status ?? "-"}${STATUS_LABELS[stock.status] ? ` = ${STATUS_LABELS[stock.status]}` : ""}`);
+  L.push(`- セクター: ${stock.sector33 ?? "-"} (強度: ${stock.sector_strength ?? "-"} / 方向: ${stock.sector_direction ?? "-"})`);
+  if (stock.market_cap_oku != null || stock.market_segment) {
+    L.push(`- 時価総額: ${stock.market_cap_oku != null ? `約${Number(stock.market_cap_oku).toLocaleString("ja-JP")}億円` : "-"}${stock.market_segment ? ` / 市場区分: ${stock.market_segment}` : ""}`);
+  }
+  if (stock.next_earnings_date) L.push(`- 次回決算発表予定日: ${stock.next_earnings_date}`);
+  L.push("");
+
+  L.push("## 価格・テクニカル");
+  L.push("");
+  L.push("| 項目 | 値 |");
+  L.push("|---|---|");
+  L.push(`| 終値 | ${copyNum(stock.close, 1)} |`);
+  L.push(`| RSレーティング (1-99) | ${stock.rs ?? "-"} |`);
+  L.push(`| ピボット | ${copyNum(stock.pivot, 1)} |`);
+  L.push(`| 推奨逆指値 | ${copyNum(stock.buy_stop, 1)} |`);
+  L.push(`| 推奨損切り | ${copyNum(stock.stop_loss, 1)} |`);
+  L.push(`| リスク% (逆指値→損切り) | ${copyNum(stock.risk_pct)}% |`);
+  L.push(`| ピボットまでの距離 | ${copySignedPct(stock.dist_to_pivot)} |`);
+  L.push(`| 52週高値からの距離 | ${copySignedPct(stock.high52w_distance_pct != null ? -stock.high52w_distance_pct : null)} |`);
+  const dev = stock.ma_deviation_pct || {};
+  L.push(`| MA50乖離 | ${copySignedPct(dev.ma50)} |`);
+  L.push(`| MA150乖離 | ${copySignedPct(dev.ma150)} |`);
+  L.push(`| MA200乖離 | ${copySignedPct(dev.ma200)} |`);
+  L.push(`| EPS加速slope | ${copyNum(stock.eps_accel_slope)} |`);
+  L.push("");
+
+  L.push("## スコア");
+  L.push("");
+  L.push(`- テクニカルスコア: ${stock.tech_score ?? "-"}`);
+  L.push(`- フルスコア: ${stock.full_score ?? "-"}`);
+  L.push(`- VCPスコア: ${stock.vcp_score ?? "-"}`);
+  L.push(`- 総合スコア: ${stock.total_score ?? "-"}`);
+  L.push("");
+
+  const mustFlags = stock.must_flags || {};
+  L.push("## トレンドテンプレート8条件 (MUST)");
+  L.push("");
+  L.push(mustFlags.tt ? copyFlagLines(mustFlags.tt, MUST_FLAG_LABELS.tt) : "- データなし");
+  L.push("");
+  L.push("## VCP条件 (V1〜V7)");
+  L.push("");
+  const vcpDetail = stock.vcp_detail;
+  L.push(
+    mustFlags.vcp
+      ? copyFlagLines(mustFlags.vcp, MUST_FLAG_LABELS.vcp, (name) => _mustFlagDetailSuffix("vcp", name, vcpDetail))
+      : "- VCP評価なし (セットアップ未形成 or 評価対象外)"
+  );
+  if (vcpDetail && vcpDetail.shakeout_detected) L.push("- シェイクアウト検出: 直近安値のわずかな下抜け後、直前高値を更新済み");
+  if (stock.footprint) {
+    const depthLast = vcpDetail && vcpDetail.depth_last_pct;
+    L.push(`- フットプリント: ${stock.footprint}${depthLast != null ? ` (最終${depthLast}%)` : ""}`);
+  }
+  // footprint は深さしか持たないので、各収縮が「いつ・何日かけて」形成されたかを
+  // 表で補う。深さ5%でも29営業日かけた収縮と3日で終わった収縮では意味が違う。
+  const cRows = (vcpDetail && vcpDetail.contractions) || [];
+  if (cRows.length) {
+    L.push("");
+    L.push("### 収縮の内訳");
+    L.push("");
+    L.push("| T | 高値日 | 高値 | 安値日 | 安値 | 深さ | 下落(営業日) | 直前の戻し(営業日) |");
+    L.push("|---|---|---|---|---|---|---|---|");
+    for (const r of cRows) {
+      L.push(
+        `| T${r.t}${r.provisional ? " (形成中)" : ""} | ${r.high_date ?? "-"} | ${copyNum(r.high_price, 1)} | ` +
+        `${r.low_date ?? "-"} | ${copyNum(r.low_price, 1)} | ${r.depth_pct != null ? copyNum(r.depth_pct, 1) + "%" : "-"} | ` +
+        `${r.bars ?? "-"} | ${r.rally_bars == null ? "-" : r.rally_bars} |`
+      );
+    }
+  }
+  L.push("");
+
+  if (chart && Array.isArray(chart.candles) && chart.candles.length) {
+    const candles = chart.candles;
+    L.push("## 直近の値動き (直近20営業日)");
+    L.push("");
+    L.push("| 日付 | 始値 | 高値 | 安値 | 終値 | 出来高 |");
+    L.push("|---|---|---|---|---|---|");
+    const volByTime = new Map((chart.volume || []).map((v) => [v.time, v.value]));
+    for (const c of candles.slice(-20)) {
+      L.push(
+        `| ${c.time} | ${copyNum(c.open, 1)} | ${copyNum(c.high, 1)} | ${copyNum(c.low, 1)} | ${copyNum(c.close, 1)} | ${copyNum(volByTime.get(c.time), 0)} |`
+      );
+    }
+    L.push("");
+    L.push(`- 騰落率: 5日 ${copySignedPct(closeChangePct(candles, 5), 1)} / 20日 ${copySignedPct(closeChangePct(candles, 20), 1)} / 60日 ${copySignedPct(closeChangePct(candles, 60), 1)}`);
+    const vol10 = volumeAvg(chart.volume, 10);
+    const vol50 = volumeAvg(chart.volume, 50);
+    if (vol10 != null && vol50 != null && vol50 > 0) {
+      L.push(`- 出来高: 直近10日平均 ${copyNum(vol10, 0)} / 50日平均 ${copyNum(vol50, 0)} (比率 ${(vol10 / vol50).toFixed(2)}${vol10 / vol50 <= 0.8 ? " → ドライアップ水準" : ""})`);
+    }
+    L.push("");
+  }
+
+  L.push("## ファンダメンタルズ (四半期・Q4はFY通期扱い)");
+  L.push("");
+  const quarters = (fundEntry && fundEntry.quarters) || [];
+  if (quarters.length) {
+    const byQuarter = new Map(quarters.map((q) => [q.fiscal_quarter, q]));
+    L.push("| 会計四半期 | EPS | EPS前年同期比 | 売上高 | 売上高前年同期比 |");
+    L.push("|---|---|---|---|---|");
+    for (const q of quarters.slice().reverse()) {
+      const prev = byQuarter.get(shiftFiscalQuarterYoy(q.fiscal_quarter));
+      const epsYoy = growthPct(q.eps, prev ? prev.eps : null);
+      const revYoy = growthPct(q.revenue, prev ? prev.revenue : null);
+      L.push(`| ${q.fiscal_quarter} | ${formatEps(q.eps)} | ${formatYoy(epsYoy)} | ${formatRevenue(q.revenue)} | ${formatYoy(revYoy)} |`);
+    }
+    if (fundEntry.monthly_yoy != null) L.push(`- 月次YoY: ${fundEntry.monthly_yoy}`);
+    if (fundEntry.checked_date) L.push(`- 確認日: ${fundEntry.checked_date}`);
+  } else {
+    L.push("- ファンダデータなし");
+  }
+  const gv = stock.guidance_view;
+  if (gv) {
+    const gvParts = [];
+    if (gv.eps_plan != null) gvParts.push(`EPS ${copyNum(gv.eps_plan)}円${gv.eps_plan_yoy != null ? ` (前期比 ${copySignedPct(gv.eps_plan_yoy, 1)})` : ""}`);
+    if (gv.sales_plan_yoy != null) gvParts.push(`売上前期比 ${copySignedPct(gv.sales_plan_yoy, 1)}`);
+    if (gvParts.length) L.push(`- 会社計画(${gv.plan_fy}年度通期): ${gvParts.join(" / ")}`);
+    if (gv.eps_progress_pct != null) L.push(`- 通期計画進捗率: EPS ${copyNum(gv.eps_progress_pct, 1)}% (Q${gv.quarters_reported}時点、目安${(gv.quarters_reported * 25).toFixed(0)}%)`);
+    if (gv.forward_per != null) L.push(`- 予想PER: ${copyNum(gv.forward_per)}倍 (会社計画EPSベース)`);
+  }
+  L.push(`- カバレッジ: ${stock.fund_coverage ?? "-"}${stock.fund_stale ? " (古いデータ・再確認推奨)" : ""}`);
+  if (stock.fund_strong != null) {
+    const yoyParts = [];
+    if (stock.fund_eps_yoy != null) yoyParts.push(`直近EPS YoY ${stock.fund_eps_yoy > 0 ? "+" : ""}${stock.fund_eps_yoy}%`);
+    if (stock.fund_rev_yoy != null) yoyParts.push(`売上YoY ${stock.fund_rev_yoy > 0 ? "+" : ""}${stock.fund_rev_yoy}%`);
+    L.push(`- ファンダ強度判定: ${stock.fund_strong ? "合格" : "不合格"} (基準: EPS YoY≥+25%かつ売上YoY≥+20%${yoyParts.length ? ` / 実績: ${yoyParts.join("、")}` : ""})`);
+  }
+  if (stock.fund_verdict != null) {
+    const verdictLabel = { pass: "pass (フルサイズ)", unknown: "unknown (ハーフサイズ)", fail: "fail (エントリー取り止め)" }[stock.fund_verdict] ?? stock.fund_verdict;
+    L.push(`- サイズ係数: ${stock.fund_multiplier ?? "-"} — ${verdictLabel}。ファンダはランキング非算入で、エントリー可否とロット確信度にのみ使用`);
+  }
+  L.push("");
+
+  L.push("## 市況コンテキスト");
+  L.push("");
+  const indices = (indicesData && indicesData.indices) || [];
+  if (indices.length) {
+    L.push("| 指数 | 終値 | 前日比 |");
+    L.push("|---|---|---|");
+    for (const ix of indices) {
+      L.push(`| ${ix.name} | ${copyNum(ix.last)} | ${copySignedPct(ix.change_pct)} |`);
+    }
+    L.push("");
+  }
+  if (breadthLast) {
+    L.push(`- ユニバース: ${breadthLast.universe_size ?? "-"}銘柄中、トレンドテンプレート8条件合格 ${breadthLast.template_pass ?? "-"}件 (合格率 ${breadthLast.template_pass_rate != null ? (breadthLast.template_pass_rate * 100).toFixed(1) + "%" : "-"})`);
+    L.push(`- ブレイクアウト成功率(直近): ${breadthLast.breakout_success_rate != null ? (breadthLast.breakout_success_rate * 100).toFixed(0) + "%" : "-"}`);
+  }
+  if (report.p1_scarce) {
+    L.push("- 警告: 8条件完全一致の候補銘柄が極端に少なく、地合いが弱い可能性あり");
+  }
+  L.push("");
+  L.push("---");
+  L.push("上記は日本株ミネルヴィニ式(SEPA)スクリーナーの出力データです。SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理基準)に基づいて分析してください。");
+  return L.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// ダッシュボード: 前場/後場 振り返りデータのコピー
+// 市場全体のコンテキスト(指数/地合い/保有ポジション/ピックアップ銘柄)を
+// 自己完結のMarkdownに整形してクリップボードへ。スマホでClaudeに貼り付けて
+// 前場・後場の振り返り相談に使う想定(個別株の「分析用データをコピー」の
+// 市場サマリー版)。データはinitDashboardで読み込み済みの report/indices/
+// breadth/positions を使う(再フェッチしない)。
+// ---------------------------------------------------------------------------
+
+// エントリーステータスのうち「今日エントリー判断ができる」アクション対象。
+// バックエンドの pipeline.py ACTIONABLE_ENTRY_STATUSES と対で保守する。
+// EXTENDED(伸びすぎ)と STALE(鮮度切れ)は追いかけ禁止なので除外。
+const REVIEW_ACTIONABLE = new Set(["BREAKOUT", "BREAKOUT_WEAK", "WATCH_A"]);
+
+// ピックアップ銘柄の一覧テーブル(市場サマリー用の共通フォーマット)。
+function reviewStockTable(stocks, limit) {
+  if (!stocks.length) return "- 該当銘柄なし";
+  const rows = limit ? stocks.slice(0, limit) : stocks;
+  const L = [];
+  L.push("| コード | 銘柄名 | 終値 | 前日比 | RS | 総合SC | ステータス | ピボット | ピボットまで | リスク% | セクター(強度/方向) |");
+  L.push("|---|---|---|---|---|---|---|---|---|---|---|");
+  for (const s of rows) {
+    const statusTxt = s.status
+      ? `${s.status}${STATUS_LABELS[s.status] ? `(${STATUS_LABELS[s.status]})` : ""}`
+      : "-";
+    const sector = s.sector33
+      ? `${s.sector33}${s.sector_strength != null ? `(強${s.sector_strength}${s.sector_direction ? "/" + s.sector_direction : ""})` : ""}`
+      : "-";
+    L.push(
+      `| ${s.code} | ${s.name ?? "-"} | ${formatClose(s.close)} | ${s.change_pct != null ? copySignedPct(s.change_pct) : "-"} | ${s.rs ?? "-"} | ${s.total_score ?? "-"} | ${statusTxt} | ${copyNum(s.pivot, 1)} | ${s.dist_to_pivot != null ? copySignedPct(s.dist_to_pivot) : "-"} | ${s.risk_pct != null ? copyNum(s.risk_pct) + "%" : "-"} | ${sector} |`
+    );
+  }
+  if (limit && stocks.length > limit) {
+    L.push(`- ほか${stocks.length - limit}件(総合スコア上位${limit}件のみ表示)`);
+  }
+  return L.join("\n");
+}
+
+// セッション別のヘッダ/期待データセッション/締めの指示文。3ボタン(ザラ場前/前場/
+// 後場)いずれも「地合い予測」「ウォッチ銘柄予測」の2観点を必ず含める。
+const SESSION_MODES = {
+  "ザラ場前": {
+    title: "ザラ場前 作戦データ",
+    expectedSession: "引け後",
+    dataDesc: "前営業日 大引け時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前営業日 大引け時点**の出力データです。寄り付き前の作戦立案用に、以下2つの観点で予測してください。",
+      "",
+      "1. **地合い予測**: 主要指数・地合いシグナル・MA200上回り率・トレンドテンプレート合格率・直近ブレイクアウト成功率から、本日の地合いがどちらに振れやすいか(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、本日ブレイクアウトまたは押し目形成が期待できる銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+  "前場": {
+    title: "前場振り返り",
+    expectedSession: "前場",
+    dataDesc: "前場終了時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**前場終了時点**の出力データ(前場スナップショット)です。前場の値動き・地合い・保有ポジションを踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づき、後場に向けて以下2つの観点で分析してください。",
+      "",
+      "1. **地合い予測**: 前場の指数・地合いシグナル・値動きから、後場の地合いがどう振れそうか(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、後場にブレイクアウトまたは押し目形成が期待できる監視銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+  "後場": {
+    title: "後場振り返り",
+    expectedSession: "引け後",
+    dataDesc: "本日 大引け時点",
+    closing: [
+      "上記は日本株ミネルヴィニ式(SEPA)スクリーナーの**本日 大引け時点(EOD)**の出力データです。本日の値動き・地合い・保有ポジションを踏まえ、SEPA手法(トレンドテンプレート/ステージ分析/VCP/エントリー・リスク管理)に基づき、本日の総括に加えて翌営業日に向けて以下2つの観点で分析してください。",
+      "",
+      "1. **地合い予測**: 本日の指数・地合いシグナル・MA200上回り率・トレンドテンプレート合格率の推移から、翌営業日の地合い見通し(リスクオン/中立/リスクオフ)と根拠。",
+      "2. **ウォッチ銘柄予測**: ピックアップ銘柄の中から、翌営業日にブレイクアウトまたは押し目形成が期待できる監視銘柄を、ピボットまでの距離・RS・セクター強度・VCPステータスを根拠に優先順位付け。想定エントリー・ストップ・リスク%も添えてください。",
+    ],
+  },
+};
+
+function buildSessionReviewMarkdown(session, report, indices, breadth, positionsData) {
+  const mode = SESSION_MODES[session] || SESSION_MODES["後場"];
+  const L = [];
+  L.push(`# ${mode.title} — ミネルヴィニ式スクリーナー 市場サマリー`);
+  L.push("");
+  L.push(`- 生成日時: ${report.generated_at ? new Date(report.generated_at).toLocaleString("ja-JP") : "-"}`);
+  const dataSession = report.market_session;
+  // 期待セッションと実データのセッションが食い違う時だけ警告(例: 前場ボタンなのに
+  // 前場スナップショット未生成で EOD データを読んでいる、等)。
+  const mismatch = dataSession && dataSession !== mode.expectedSession;
+  L.push(`- データ断面: ${mode.dataDesc}(データのセッション: ${dataSession ?? "-"})${mismatch ? ` ⚠️(${session}ボタンですが、読み込んだデータは「${dataSession}」時点です。想定は「${mode.expectedSession}」)` : ""}`);
+  L.push(`- ユニバース: ${report.universe_size ?? "-"}銘柄 / トレンドテンプレート通過: ${report.template_pass ?? "-"}件`);
+  L.push("");
+
+  // --- 市況コンテキスト ---
+  L.push("## 市況コンテキスト");
+  L.push("");
+  const ixList = (indices && indices.indices) || [];
+  if (ixList.length) {
+    L.push("### 主要指数");
+    L.push("");
+    L.push("| 指数 | 値 | 前日比 |");
+    L.push("|---|---|---|");
+    for (const ix of ixList) {
+      L.push(`| ${ix.name} | ${copyNum(ix.last)} | ${ix.change_pct != null ? copySignedPct(ix.change_pct) : "-"} |`);
+    }
+    L.push("");
+  }
+  const bh = (breadth && breadth.history) || [];
+  const latest = bh.length ? bh[bh.length - 1] : null;
+  if (latest) {
+    L.push("### 地合い");
+    L.push("");
+    const sigMeta = MARKET_SIGNAL_META[latest.signal];
+    if (sigMeta) L.push(`- 地合いシグナル: ${sigMeta.label}${latest.market_score != null ? ` (地合いスコア ${latest.market_score})` : ""}`);
+    if (latest.pct_above_ma200 != null) L.push(`- MA200上回り率: ${(latest.pct_above_ma200 * 100).toFixed(1)}%`);
+    L.push(`- トレンドテンプレート合格率: ${latest.template_pass_rate != null ? (latest.template_pass_rate * 100).toFixed(1) + "%" : "-"} (${latest.template_pass ?? "-"}/${latest.universe_size ?? "-"})`);
+    if (latest.watch_count != null) L.push(`- セットアップ形成数: ${latest.watch_count}`);
+    if (latest.breakout_success_rate != null) L.push(`- 直近ブレイクアウト成功率: ${(latest.breakout_success_rate * 100).toFixed(0)}%`);
+    L.push("");
+  }
+  if (report.p1_scarce) {
+    L.push("- ⚠️ 警告: 8条件完全一致の候補銘柄が極端に少なく、地合いが弱い可能性あり");
+    L.push("");
+  }
+
+  // --- 保有ポジション ---
+  const positions = (positionsData && Array.isArray(positionsData.positions)) ? positionsData.positions : [];
+  L.push("## 保有ポジション");
+  L.push("");
+  if (positions.length) {
+    L.push("| コード | 銘柄名 | 建値 | 現在値 | 損益% | R | ストップ | ストップまで% | 保有日数 | シグナル |");
+    L.push("|---|---|---|---|---|---|---|---|---|---|");
+    for (const p of positions) {
+      const sig = (p.sell_signals || []).map((s) => (SELL_SIGNAL_LABELS[s] || { label: s }).label).join("・") || "-";
+      L.push(
+        `| ${p.code} | ${p.name ?? "-"} | ${formatClose(p.entry_price)} | ${p.close != null ? formatClose(p.close) : "-"} | ${p.pl_pct != null ? p.pl_pct.toFixed(2) + "%" : "-"} | ${p.r_multiple != null ? p.r_multiple.toFixed(2) : "-"} | ${formatClose(p.current_stop)} | ${p.dist_to_stop_pct != null ? p.dist_to_stop_pct.toFixed(2) + "%" : "-"} | ${p.days_held ?? "-"} | ${sig} |`
+      );
+    }
+  } else {
+    L.push("- 保有ポジションなし");
+  }
+  L.push("");
+
+  // --- ピックアップ銘柄 ---
+  const stocks = Array.isArray(report.stocks) ? report.stocks : [];
+  const byScore = (a, b) => (b.total_score ?? -Infinity) - (a.total_score ?? -Infinity);
+  const confirmed = stocks.filter((s) => s.tier === "confirmed").sort(byScore);
+  const actionable = stocks.filter((s) => REVIEW_ACTIONABLE.has(s.status)).sort(byScore);
+  const pool = stocks.filter((s) => s.tier === "pool").sort(byScore);
+  const watchlist = stocks.filter((s) => s.tier === "watchlist" && (s.priority === 1 || s.priority == null)).sort(byScore);
+
+  L.push("## ピックアップ銘柄");
+  L.push("");
+  L.push("### アクション対象(ブレイクアウト/監視) — 全ティア横断");
+  L.push("");
+  L.push(reviewStockTable(actionable));
+  L.push("");
+  L.push("### 本命(ファンダ強度確認済み)");
+  L.push("");
+  L.push(reviewStockTable(confirmed));
+  L.push("");
+  L.push("### 候補プール(VCPセットアップあり・ファンダ未確認/基準未達)");
+  L.push("");
+  L.push(reviewStockTable(pool, 20));
+  L.push("");
+  L.push("### ウォッチリスト(トレンドテンプレート8条件合格・セットアップ形成待ち)");
+  L.push("");
+  L.push(reviewStockTable(watchlist, 20));
+  L.push("");
+
+  L.push("---");
+  L.push("## 分析してほしい観点");
+  L.push("");
+  for (const line of mode.closing) L.push(line);
+  return L.join("\n");
+}
+
+// 前場/後場コピーボタンの配線。initDashboardが読み込み済みのデータを渡す。
+// initDashboardは再実行され得る(ファンダ保存後など)ので、addEventListenerで
+// なくonclick代入にして二重配線を防ぐ。
+function wireSessionReview(report, indices, breadth, positionsData) {
+  const statusEl = document.getElementById("session-review-status");
+  // ザラ場前(寄り前=前営業日EOD)と後場(当日EOD)は必ず canonical を渡す。
+  // 断面セレクタで前場を選んでいると initDashboard が渡してくるのは前場データ
+  // なので、そのまま使うと「後場情報をコピー」で前場の途中足が出てしまう。
+  // 大引断面のときだけ読み込み済みを再利用し、前場断面のときは canonical を取り直す。
+  const loaded = { report, indices, breadth, positionsData };
+  let canonicalCache = snapshotSuffix === "" ? loaded : null;
+  const getCanonical = async () => {
+    if (!canonicalCache) canonicalCache = (await loadSnapshotBundle("")) || loaded;
+    return canonicalCache;
+  };
+
+  const run = async (btn, session, getData) => {
+    const original = btn.textContent;
+    btn.textContent = "取得中...";
+    try {
+      const d = await getData();
+      const md = buildSessionReviewMarkdown(session, d.report, d.indices, d.breadth, d.positionsData);
+      await copyTextToClipboard(md);
+      btn.textContent = "コピーしました";
+      if (statusEl) statusEl.textContent = `${session}情報をコピーしました。Claudeに貼り付けてください。`;
+    } catch (e) {
+      btn.textContent = "コピー失敗";
+      if (statusEl) statusEl.textContent = `コピーに失敗しました: ${e.message || e}`;
+    } finally {
+      setTimeout(() => { btn.textContent = original; }, 2000);
+    }
+  };
+
+  const bind = (id, session, getData) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.onclick = () => run(btn, session, getData);
+  };
+
+  bind("copy-zaraba-mae-btn", "ザラ場前", getCanonical);
+  bind("copy-goba-btn", "後場", getCanonical);
+  bind("copy-maezyou-btn", "前場", async () => (await loadSnapshotBundle("_maezyou")) || (await getCanonical()));
+}
+
+// 断面ひと揃い(report/breadth/indices/positions)をフェッチする。suffix="" なら
+// canonical、"_maezyou" なら前場スナップショット。report が未生成(前場バッチ未実行)
+// なら null を返し、呼び出し側は canonical へフォールバックする
+// (Markdown側にセッション不一致の警告が出る)。
+// コピーボタン用なので indices もその断面のものを使う(ダッシュボード描画とは違い、
+// 貼り付け先のClaudeにはその時点の切り口で揃った数字を渡したいため)。
+async function loadSnapshotBundle(suffix) {
+  const report = await window.MinerviniData.fetchJson(`data/report${suffix}.json`, { optional: true });
+  if (!report) return null;
+  const [breadth, indices, positionsData] = await Promise.all([
+    window.MinerviniData.fetchJson(`data/breadth${suffix}.json`, { optional: true }).then((b) => b || { history: [] }),
+    window.MinerviniData.fetchJson(`data/indices${suffix}.json`, { optional: true }),
+    window.MinerviniData.fetchJson(`data/positions${suffix}.json`, { optional: true }),
+  ]);
+  return { report, breadth, indices, positionsData };
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // 非HTTPS/旧ブラウザ向けフォールバック
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
+
+// ---------------------------------------------------------------------------
+// ポジションサイジング計算機 (view-stock, 2026-07-11追加)。純フロント機能
+// (バックエンド変更なし)。総資金/リスク%はlocalStorageに保存し銘柄切替をまたいで復元する。
+// ---------------------------------------------------------------------------
+
+const SIZING_SETTINGS_KEY = "minervini_sizing_settings";
+
+let sizingStock = null;
+let sizingWired = false;
+
+function loadSizingSettings() {
+  try {
+    const raw = localStorage.getItem(SIZING_SETTINGS_KEY);
+    if (!raw) return { capital: null, riskPct: 1.0 };
+    const parsed = JSON.parse(raw);
+    return {
+      capital: typeof parsed.capital === "number" ? parsed.capital : null,
+      riskPct: typeof parsed.riskPct === "number" ? parsed.riskPct : 1.0,
+    };
+  } catch (e) {
+    return { capital: null, riskPct: 1.0 };
+  }
+}
+
+function saveSizingSettings(settings) {
+  try {
+    localStorage.setItem(SIZING_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {
+    // localStorageが使えない環境(プライベートモード等)は永続化を諦めるだけで致命的ではない
+  }
+}
+
+function renderSizingResult(stock) {
+  const el = document.getElementById("sizing-result");
+  if (!el) return;
+
+  if (!stock || stock.buy_stop == null || stock.stop_loss == null) {
+    el.innerHTML = '<p class="tier-note">セットアップ未確定のため計算不可</p>';
+    return;
+  }
+
+  // ファンダのサイズ係数 (2026-07-22)。fail=0(取り止め)/unknown=0.5(ハーフ)/
+  // pass=1.0。旧report.json(フィールドなし)は従来どおり係数1.0扱い。
+  const fundMult = typeof stock.fund_multiplier === "number" ? stock.fund_multiplier : 1.0;
+  if (fundMult === 0) {
+    el.innerHTML =
+      `<p class="sizing-warn sizing-warn-strong">🚫 エントリー取り止め(ファンダ不合格・サイズ係数0)${helpBtnHtml("fund_multiplier")}</p>` +
+      '<p class="tier-note">直近EPS/売上YoYが基準未達。セットアップが完成しても見送り。</p>';
+    return;
+  }
+
+  const capitalInput = document.getElementById("sizing-capital");
+  const capital = Number(capitalInput ? capitalInput.value : NaN);
+  const activeBtn = document.querySelector("#sizing-risk-toggle button.active");
+  const riskPct = activeBtn ? Number(activeBtn.dataset.risk) : 1.0;
+
+  if (!capital || capital <= 0) {
+    el.innerHTML = '<p class="tier-note">総資金を入力してください</p>';
+    return;
+  }
+
+  const riskPerShare = stock.buy_stop - stock.stop_loss;
+  if (!(riskPerShare > 0)) {
+    el.innerHTML = '<p class="tier-note">逆指値/損切りのデータ不整合のため計算できません</p>';
+    return;
+  }
+
+  const allowedLoss = capital * (riskPct / 100) * fundMult;
+  const theoreticalShares = allowedLoss / riskPerShare;
+  const orderShares = Math.floor(theoreticalShares / 100) * 100;
+  const halfNote =
+    fundMult < 1
+      ? `<p class="sizing-warn">ファンダ強度未確認のためハーフサイズ(係数0.5)を適用${helpBtnHtml("fund_multiplier")}</p>`
+      : "";
+
+  if (orderShares < 100) {
+    const oneUnitLoss = riskPerShare * 100;
+    const oneUnitPct = (oneUnitLoss / capital) * 100;
+    el.innerHTML = `${halfNote}<p class="sizing-warn">リスク許容内で1単元買えません(1単元の損失 = ${Math.round(oneUnitLoss).toLocaleString("ja-JP")}円 = 資金の${oneUnitPct.toFixed(2)}%)</p>`;
+    return;
+  }
+
+  const investedAmount = orderShares * stock.buy_stop;
+  const capitalRatio = (investedAmount / capital) * 100;
+  const actualLoss = orderShares * riskPerShare;
+
+  let concentrationWarning = "";
+  if (capitalRatio > 50) {
+    concentrationWarning = '<p class="sizing-warn sizing-warn-strong">⚠ 1銘柄への集中が50%を超えます</p>';
+  } else if (capitalRatio > 25) {
+    concentrationWarning = '<p class="sizing-warn">⚠ 1銘柄への集中が25%を超えます</p>';
+  }
+
+  el.innerHTML = `
+    <div class="sizing-output">
+      <div><span>発注株数</span><strong>${orderShares.toLocaleString("ja-JP")}株</strong></div>
+      <div><span>投入額</span><strong>${Math.round(investedAmount).toLocaleString("ja-JP")}円</strong></div>
+      <div><span>資金比</span><strong>${capitalRatio.toFixed(1)}%</strong></div>
+      <div><span>実損失額</span><strong>${Math.round(actualLoss).toLocaleString("ja-JP")}円</strong></div>
+    </div>
+    ${halfNote}
+    ${concentrationWarning}
+  `;
+}
+
+function setupSizingCalculator(stock) {
+  sizingStock = stock || null;
+  const capitalInput = document.getElementById("sizing-capital");
+  const riskToggle = document.getElementById("sizing-risk-toggle");
+  if (!capitalInput || !riskToggle) return;
+
+  const settings = loadSizingSettings();
+  if (settings.capital != null) capitalInput.value = settings.capital;
+  riskToggle.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.risk) === settings.riskPct);
+  });
+
+  if (!sizingWired) {
+    sizingWired = true;
+    capitalInput.addEventListener("input", () => {
+      saveSizingSettings({
+        capital: Number(capitalInput.value) || null,
+        riskPct: Number(document.querySelector("#sizing-risk-toggle button.active")?.dataset.risk) || 1.0,
+      });
+      renderSizingResult(sizingStock);
+    });
+    riskToggle.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-risk]");
+      if (!btn) return;
+      riskToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      saveSizingSettings({ capital: Number(capitalInput.value) || null, riskPct: Number(btn.dataset.risk) });
+      renderSizingResult(sizingStock);
+    });
+  }
+
+  renderSizingResult(sizingStock);
+}
+
+function setupStockCopyButton(stock, chart, report) {
+  const btn = document.getElementById("copy-stock-data-btn");
+  if (!btn) return;
+  if (!stock) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.disabled = false;
+  // onclick上書き方式: SPAで銘柄を切り替えてもリスナーが積み上がらない
+  btn.onclick = async () => {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "生成中...";
+    try {
+      const [fundEntry, breadthLast, indicesData] = await Promise.all([
+        window.MinerviniData.fetchJson("data/fundamentals_public.json", { optional: true })
+          .then((all) => (all && all[stock.code]) || null)
+          .catch(() => null),
+        window.MinerviniData.fetchJson("data/breadth.json", { optional: true })
+          .then((b) => (b && b.history && b.history.length ? b.history[b.history.length - 1] : null))
+          .catch(() => null),
+        window.MinerviniData.fetchJson("data/indices.json", { optional: true }).catch(() => null),
+      ]);
+      const text = buildAnalysisMarkdown(stock, chart, report, fundEntry, breadthLast, indicesData);
+      await copyTextToClipboard(text);
+      btn.textContent = "コピーしました";
+    } catch (e) {
+      btn.textContent = "コピー失敗";
+    }
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.disabled = false;
+    }, 1800);
+  };
+}
+
+// Formats every axis-level date as zero-padded "MM/DD": the auto tick marks
+// (tickMarkFormatter), the crosshair hover label (timeFormatter), and the
+// always-visible latest-date overlay (addLatestDateLabel) all go through the
+// same format so 目盛/ホバー/最新日 の3つの日付表示が完全に一致する。
+// Chart data uses "YYYY-MM-DD" strings, which Lightweight Charts parses into
+// a {year, month, day} BusinessDay object.
+function formatChartDate(time) {
+  let d;
+  if (typeof time === "string") {
+    // "YYYY-MM-DD" business-day string, as used by tickMarkFormatter
+    const [y, m, day] = time.split("-").map(Number);
+    d = new Date(y, m - 1, day);
+  } else if (typeof time === "object" && time !== null) {
+    // {year, month, day} BusinessDay object, as used by timeFormatter
+    d = new Date(time.year, time.month - 1, time.day);
+  } else {
+    // UTCTimestamp (seconds since epoch)
+    d = new Date(time * 1000);
+  }
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}`;
+}
+
+const CHART_LOCALIZATION = { timeFormatter: formatChartDate };
+const CHART_TIME_SCALE = { tickMarkFormatter: formatChartDate };
+const CHART_COLORS = {
+  bg: "#131720",
+  grid: "#232a38",
+  text: "#98a2b3",
+  up: "#34d399",
+  down: "#f87171",
+  volUp: "rgba(52, 211, 153, 0.45)",
+  volDown: "rgba(248, 113, 113, 0.45)",
+};
+
+// Aggregates the daily series into monthly bars (open=first, high=max,
+// low=min, close=last, volume=sum, rs=last), keyed by "YYYY-MM". The bar's
+// `time` is the month's first trading day; the last month may be partial.
+function aggregateMonthly(chart) {
+  const byMonth = new Map();
+  for (const c of chart.candles) {
+    const key = c.time.slice(0, 7);
+    const m = byMonth.get(key);
+    if (!m) {
+      byMonth.set(key, { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: 0, rs: null });
+    } else {
+      m.high = Math.max(m.high, c.high);
+      m.low = Math.min(m.low, c.low);
+      m.close = c.close;
+    }
+  }
+  for (const v of chart.volume || []) {
+    const m = byMonth.get(v.time.slice(0, 7));
+    if (m) m.volume += v.value;
+  }
+  for (const r of chart.rs_line || []) {
+    const m = byMonth.get(r.time.slice(0, 7));
+    if (m) m.rs = r.value;
+  }
+  const months = Array.from(byMonth.values());
+  return {
+    candles: months.map((m) => ({ time: m.time, open: m.open, high: m.high, low: m.low, close: m.close })),
+    volume: months.map((m) => ({ time: m.time, value: m.volume, color: m.close >= m.open ? CHART_COLORS.volUp : CHART_COLORS.volDown })),
+    rs_line: months.filter((m) => m.rs != null).map((m) => ({ time: m.time, value: m.rs })),
+  };
+}
+
+function colorizeVolume(chart) {
+  const dirByTime = new Map(chart.candles.map((c) => [c.time, c.close >= c.open]));
+  return (chart.volume || []).map((v) => ({
+    ...v,
+    color: dirByTime.get(v.time) === false ? CHART_COLORS.volDown : CHART_COLORS.volUp,
+  }));
+}
+
+function makeChart(el, { showTimeAxis }) {
+  return LightweightCharts.createChart(el, {
+    width: el.clientWidth,
+    height: el.clientHeight,
+    // fontSize 11 はCSS側 .latest-date-label の font-size と揃えるための明示指定
+    // (自動目盛と自前の最新日ラベルの文字サイズ・色を一致させる)。
+    layout: { background: { color: CHART_COLORS.bg }, textColor: CHART_COLORS.text, fontSize: 11 },
+    grid: { vertLines: { color: CHART_COLORS.grid }, horzLines: { color: CHART_COLORS.grid } },
+    // Fixed-width right axis keeps all panes horizontally aligned.
+    rightPriceScale: { minimumWidth: 72, borderColor: CHART_COLORS.grid },
+    localization: CHART_LOCALIZATION,
+    // fixRightEdge: the latest bar stays pinned to the right edge, so the
+    // axis dates always count back from the newest date.
+    timeScale: { ...CHART_TIME_SCALE, visible: showTimeAxis, borderColor: CHART_COLORS.grid, fixRightEdge: true, rightOffset: 0 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    // 価格軸ドラッグでの縮尺変更を無効化(オートスケール固定)。時間軸は可。
+    handleScale: {
+      axisPressedMouseMove: { time: true, price: false },
+      mouseWheel: true,
+      pinch: true,
+    },
+    // スマホ: 縦横ともタッチドラッグはチャートに掴ませない。横スワイプは
+    // パネル全体のジェスチャ(wireStockSwipe)に渡して前後銘柄へ切り替えるため。
+    // マウス操作(pressedMouseMove/ホイール)での時間軸移動は従来どおり可。
+    handleScroll: {
+      vertTouchDrag: false,
+      horzTouchDrag: false,
+      pressedMouseMove: true,
+      mouseWheel: true,
+    },
+  });
+}
+
+// VCPジグザグをprice paneのcanvasに直接描く Series Primitive (Lightweight
+// Charts 4.1+)。従来の addLineSeries は同一時刻に2点を保持できず、収縮のmerge後に
+// 前収縮の谷と次収縮の山が同一足へ重なると片方が落ちて収縮が1つ消えていた
+// (Joshin 8173 等でfootprintの収縮数と見た目がズレる原因)。primitiveなら同一足の
+// 2点も縦セグメントとして描けるので、footprint(NT)の収縮数と折れ線が必ず一致する。
+// points: [{time, price, isHigh, label}] を時系列順に受け取り、折れ線+Tラベルを描く。
+function createVcpZigzagPrimitive(points, opts) {
+  let _chart = null;
+  let _series = null;
+  let _requestUpdate = null;
+  const renderer = {
+    draw(target) {
+      if (!opts.isVisible() || !_chart || !_series || points.length < 2) return;
+      const timeScale = _chart.timeScale();
+      const coords = points.map((p) => {
+        const x = timeScale.timeToCoordinate(p.time);
+        const y = _series.priceToCoordinate(p.price);
+        return x == null || y == null ? null : { x, y, isHigh: p.isHigh, label: p.label };
+      });
+      target.useMediaCoordinateSpace((scope) => {
+        const ctx = scope.context;
+        ctx.save();
+        // 折れ線本体。vcp_forming(IMMATURE)は破線+細めで検出済み実線と区別する。
+        ctx.strokeStyle = opts.color;
+        ctx.lineWidth = opts.dashed ? 1 : 2;
+        ctx.setLineDash(opts.dashed ? [4, 3] : []);
+        ctx.beginPath();
+        let started = false;
+        for (const c of coords) {
+          if (!c) { started = false; continue; }
+          if (!started) { ctx.moveTo(c.x, c.y); started = true; }
+          else ctx.lineTo(c.x, c.y);
+        }
+        ctx.stroke();
+        // Tラベル: 山は上・谷は下に出し、足やヒゲに被らないよう頂点から少しずらす。
+        ctx.setLineDash([]);
+        ctx.fillStyle = opts.color;
+        ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.textAlign = "center";
+        for (const c of coords) {
+          if (!c) continue;
+          ctx.textBaseline = c.isHigh ? "bottom" : "top";
+          ctx.fillText(c.label, c.x, c.y + (c.isHigh ? -6 : 6));
+        }
+        ctx.restore();
+      });
+    },
+  };
+  const paneView = { renderer: () => renderer, zOrder: () => "top" };
+  return {
+    attached(param) {
+      _chart = param.chart;
+      _series = param.series;
+      _requestUpdate = param.requestUpdate;
+    },
+    detached() {
+      _chart = null;
+      _series = null;
+      _requestUpdate = null;
+    },
+    paneViews() {
+      return [paneView];
+    },
+    requestUpdate() {
+      if (_requestUpdate) _requestUpdate();
+    },
+  };
+}
+
+// ピボット/損切りの文字ラベルをチャート「左端」に描く Series Primitive
+// (2026-07-27 ユーザー要望)。Lightweight Charts の createPriceLine({title}) は
+// タイトルを右端(価格軸のすぐ内側)に描き、位置を変えるオプションが無い。右端は
+// 最新足・OHLCVレジェンド・価格軸ラベルと重なって読みづらいので、price line 側の
+// title は空にして、ラベルだけここで左端に描画する(水平線と価格軸の数値ラベルは
+// 従来どおり createPriceLine が描く)。
+// getItems: () => [{price, text, color}] を毎フレーム読む(トグルのON/OFF追従)。
+function createEdgeLabelPrimitive(getItems) {
+  let _series = null;
+  let _requestUpdate = null;
+  const renderer = {
+    draw(target) {
+      if (!_series) return;
+      const items = (getItems() || []).filter((it) => it && it.price != null);
+      if (!items.length) return;
+      target.useMediaCoordinateSpace((scope) => {
+        const ctx = scope.context;
+        ctx.save();
+        ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        for (const it of items) {
+          const y = _series.priceToCoordinate(it.price);
+          if (y == null) continue;
+          const tw = ctx.measureText(it.text).width;
+          // ローソク足に被っても読めるよう、背景を敷いてから文字を置く。
+          ctx.fillStyle = "rgba(11, 14, 20, 0.78)";
+          ctx.fillRect(3, y - 15, tw + 8, 14);
+          ctx.fillStyle = it.color;
+          ctx.fillText(it.text, 7, y - 4);
+        }
+        ctx.restore();
+      });
+    },
+  };
+  const paneView = { renderer: () => renderer, zOrder: () => "top" };
+  return {
+    attached(param) {
+      _series = param.series;
+      _requestUpdate = param.requestUpdate;
+    },
+    detached() {
+      _series = null;
+      _requestUpdate = null;
+    },
+    paneViews() {
+      return [paneView];
+    },
+    requestUpdate() {
+      if (_requestUpdate) _requestUpdate();
+    },
+  };
+}
+
+// ---- 自前の日付軸 (#chart-date-axis) -----------------------------------
+// ライブラリの時間軸(visible:false)の代わりに、目盛・ホバー・最新日の全日付を
+// 1本のstripにDOMで描画する。縦位置はCSS(.chart-date-axis .cda-label の top)で
+// 完全に制御できるため、ライブラリ内部の固定オフセットに縛られず微調整できる。
+const DATE_AXIS_MIN_GAP = 46; // 静的ラベル同士の最小間隔(px)
+
+// 静的な目盛ラベル群を再描画。最新バーを起点に右→左へ、最小間隔を空けて配置する
+// (fixRightEdgeで最新が右端に固定されるため、この並びが自然)。
+function renderDateAxis(axisEl, chart, candles, formatFn) {
+  if (!axisEl || !chart) return;
+  axisEl.querySelectorAll(".cda-label:not(.cda-hover)").forEach((n) => n.remove());
+  const width = axisEl.clientWidth;
+  if (!candles || !candles.length || width <= 0) return;
+  const ts = chart.timeScale();
+  const placed = [];
+  let lastX = Infinity;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    const t = candles[i].time;
+    const x = ts.timeToCoordinate(t);
+    if (x == null || x < 0 || x > width) continue;
+    if (lastX - x < DATE_AXIS_MIN_GAP) continue;
+    placed.push({ x, t });
+    lastX = x;
+  }
+  for (const { x, t } of placed) {
+    const el = document.createElement("span");
+    el.className = "cda-label";
+    el.textContent = formatFn(t);
+    el.style.left = `${x}px`;
+    axisEl.appendChild(el);
+  }
+}
+
+// ホバー中の日付を強調ラベルとしてstrip上に表示(ライブラリのクロスヘア日付の代替)。
+// time が null のときは消す。静的ラベルより前面・太字で、重なっても上に乗る。
+function setDateAxisHover(axisEl, chart, time, formatFn) {
+  if (!axisEl || !chart) return;
+  let hover = axisEl.querySelector(".cda-hover");
+  const x = time != null ? chart.timeScale().timeToCoordinate(time) : null;
+  if (x == null) {
+    if (hover) hover.remove();
+    return;
+  }
+  if (!hover) {
+    hover = document.createElement("span");
+    hover.className = "cda-label cda-hover";
+    axisEl.appendChild(hover);
+  }
+  hover.textContent = formatFn(time);
+  hover.style.left = `${x}px`;
+}
+
+// Two-way pan/zoom sync so dragging any pane moves the others in lockstep.
+function syncTimeScales(charts) {
+  let syncing = false;
+  for (const source of charts) {
+    source.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (syncing || !range) return;
+      syncing = true;
+      for (const target of charts) {
+        if (target !== source) target.timeScale().setVisibleLogicalRange(range);
+      }
+      syncing = false;
+    });
+  }
+}
+
+// 期間ボタン(1ヶ月〜2年)の営業日換算。初期表示は日足1ヶ月。
+const DEFAULT_DAILY_BARS = 22;
+
+// SPA化前は銘柄詳細ページを開くたびにフルリロードされていたため
+// renderCharts()の中身(チャートインスタンス・resizeリスナー・チェックボックス/
+// 期間トグルのイベントリスナー)は使い捨てで問題なかった。SPA化後は同じDOMを
+// 再利用して別銘柄を描画し直すため、前回分を確実に破棄してから作り直す。
+let stockChartState = null;
+
+// VCPトグルのチェック状態は銘柄切替をまたいで維持する(ユーザー要望 2026-07-23:
+// チェックしたまま＞で銘柄を送りたい。描画データが無い銘柄ではチェックあり
+// のままdisabledになり、データがある銘柄に戻れば自動で線が復帰する)。
+let vcpToggleSticky = true;
+
+function teardownCharts() {
+  if (!stockChartState) return;
+  const { charts, resizeHandler, dateAxisEl } = stockChartState;
+  window.removeEventListener("resize", resizeHandler);
+  for (const c of charts) c.remove();
+  if (dateAxisEl) dateAxisEl.innerHTML = "";
+  stockChartState = null;
+}
+
+function renderCharts(chart) {
+  // 二重描画の保険。呼び出し元(initStockPage)は await の前に teardown している
+  // ので、そこから戻るまでの間に別経路で描かれていた場合に備えてもう一度畳む。
+  // stockChartState が null なら何もしないので二重呼び出しは無害。
+  teardownCharts();
+
+  const monthly = aggregateMonthly(chart);
+  const dailyVolume = colorizeVolume(chart);
+
+  const priceEl = document.getElementById("chart-container");
+  const volEl = document.getElementById("volume-container");
+  const rsEl = document.getElementById("rs-container");
+  const hasRs = !!(chart.rs_line && chart.rs_line.length);
+  // 銘柄を切り替えた時にRS無し→ありへ戻せるよう、DOMからremove()するのではなく
+  // hidden切り替えにする(remove()すると次にRSありの銘柄を見てもrs-cardが復活しない)。
+  const rsCard = document.getElementById("rs-card");
+  if (rsCard) rsCard.hidden = !hasRs;
+
+  // 日付軸は最下段のペイン(RSがあればRS、無ければ出来高)だけに表示する。
+  // 3ペイン全部に出すと同じ日付が重複するため。パン/ズームはtimeScale.visible
+  // と独立してsyncTimeScales()で同期されるので、表示を1つに絞っても連動は保たれる。
+  // ライブラリの時間軸は全ペインで非表示にし、日付は下部の自前strip
+  // (#chart-date-axis)にDOMで描く。ライブラリの軸テキストは strip 上端からの
+  // 固定オフセットで縦位置が決まり動かせないため、縦位置を自前で制御できるよう
+  // にした(目盛/ホバー/最新日をすべて renderDateAxis / setDateAxisHover が描画)。
+  const priceChart = makeChart(priceEl, { showTimeAxis: false });
+  const volChart = makeChart(volEl, { showTimeAxis: false });
+  const rsChart = hasRs ? makeChart(rsEl, { showTimeAxis: false }) : null;
+
+  const candleSeries = priceChart.addCandlestickSeries({
+    upColor: CHART_COLORS.up,
+    downColor: CHART_COLORS.down,
+    borderUpColor: CHART_COLORS.up,
+    borderDownColor: CHART_COLORS.down,
+    wickUpColor: CHART_COLORS.up,
+    wickDownColor: CHART_COLORS.down,
+  });
+  const ma50 = priceChart.addLineSeries({ color: "#60a5fa", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  const ma150 = priceChart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  const ma200 = priceChart.addLineSeries({ color: "#c084fc", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+
+  // 決算発表(カタリスト)マーカー: ローソク下に「その日は決算開示があった」ことを
+  // 示す。値動きが純粋なものか決算ドリブンかを一目で見分けるための目印。
+  // chart.earnings は build_chart_data がバー日付にスナップ済み(time昇順・ユニーク)。
+  // "2026Q1" → "26Q1" と短縮してマーカー文字に使う。日足のみで表示し、月足では
+  // 日付軸がバーと噛み合わないので setTimeframe 側でクリアする。
+  const earningsMarkers = (chart.earnings || []).map((e) => ({
+    time: e.time,
+    position: "belowBar",
+    color: "#f59e0b",
+    shape: "circle",
+    text: e.quarter ? `決算 ${String(e.quarter).replace(/^\d{2}/, "")}` : "決算",
+  }));
+
+  const volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" } });
+  // Pin the histogram base to the pane's bottom edge so the auto-scaled
+  // axis never extends into negative territory.
+  volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0 } });
+
+  const rsSeries = rsChart ? rsChart.addLineSeries({ color: "#2dd4bf", lineWidth: 1 }) : null;
+
+  // VCPジグザグ線: markers(swing_high/swing_low、build_chart_dataが日付付きで
+  // 出力)を時系列に結んだ折れ線。収縮が右へ行くほど狭くなる様子を可視化する。
+  // 旧charts JSON(timeフィールドなし)はfilterで全滅→トグルがdisabledになる
+  // だけなので後方互換。日足専用(月足では日付軸と噛み合わないためクリア)。
+  // chart.markers は収縮ごとに swing_high → swing_low の順。swing_high の出現
+  // 回数で収縮番号(T1,T2,…)を振る。描画は Series Primitive(canvas直描き)で、
+  // merge後に前収縮の谷と次収縮の山が同一足へ重なっても両点を縦セグメントとして
+  // 保持できる(旧lineSeriesは同時刻の片方を落として収縮が消えていた)。
+  const vcpRaw = (chart.markers || []).filter((m) => m.time && m.price != null);
+  let vcpT = 0;
+  const vcpPts = vcpRaw.map((m) => {
+    if (m.type === "swing_high") vcpT += 1;
+    return { time: m.time, price: m.price, isHigh: m.type === "swing_high", label: "T" + vcpT };
+  });
+  vcpPts.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  // vcp_forming=true はIMMATURE(ベース熟成中)の形成途中ライン。
+  const vcpForming = !!chart.vcp_forming;
+  // primitive API は Lightweight Charts 4.1+。CDNが旧版ならトグルをdisableにする。
+  const vcpSupported = typeof candleSeries.attachPrimitive === "function";
+  const vcpDrawable = vcpSupported && vcpPts.length >= 2;
+  // sticky(チェック維持)でONのまま来た場合、実描画は初回の setTimeframe が行う。
+  let vcpOn = vcpDrawable && vcpToggleSticky;
+  const vcpPrimitive = vcpDrawable
+    ? createVcpZigzagPrimitive(vcpPts, {
+        color: "#facc15",
+        dashed: vcpForming,
+        isVisible: () => vcpOn && currentTf === "D",
+      })
+    : null;
+  if (vcpPrimitive) candleSeries.attachPrimitive(vcpPrimitive);
+
+  // Pivot / stop-loss horizontal lines: OFF by default, toggled via the
+  // checkboxes in the toolbar. Handles are kept so the lines can be removed.
+  let pivotLine = null;
+  let stopLine = null;
+
+  // 「ピボット」「損切り」の文字はチャート左端に自前描画する(右端は最新足と
+  // レジェンドで混み合うため)。primitive 非対応の旧CDNではラベル無しで水平線
+  // だけになる(致命的ではないのでフォールバックとして許容)。
+  const edgeLabelPrimitive =
+    typeof candleSeries.attachPrimitive === "function"
+      ? createEdgeLabelPrimitive(() =>
+          [
+            pivotLine ? { price: chart.pivot, text: "ピボット", color: CHART_COLORS.up } : null,
+            stopLine ? { price: chart.stop_loss, text: "損切り", color: CHART_COLORS.down } : null,
+          ].filter(Boolean)
+        )
+      : null;
+  if (edgeLabelPrimitive) candleSeries.attachPrimitive(edgeLabelPrimitive);
+
+  function wireLineToggle(id, price, apply, opts = {}) {
+    const boxOld = document.getElementById(id);
+    if (!boxOld) return;
+    // SPA再描画のたびに呼ばれるので、cloneNodeで前回分のchangeリスナーごと
+    // 使い捨てる(そのままだと銘柄を切り替えるたびにリスナーが積み上がる)。
+    const box = boxOld.cloneNode(true);
+    boxOld.replaceWith(box);
+    box.disabled = false;
+    box.closest("label")?.classList.remove("disabled");
+    // sticky指定時はチェック状態を銘柄切替をまたいで維持する(データなし銘柄
+    // ではチェックありのままdisabled)。非stickyは従来どおり毎回リセット。
+    // リセットはdisable判定より前に行う(後だとreturnで素通りしてチェック入り
+    // disabledが残る)。
+    box.checked = opts.sticky ? opts.sticky.get() : false;
+    if (price == null) {
+      box.disabled = true;
+      box.closest("label")?.classList.add("disabled");
+      return;
+    }
+    box.addEventListener("change", () => {
+      if (opts.sticky) opts.sticky.set(box.checked);
+      apply(box.checked);
+    });
+  }
+
+  wireLineToggle(
+    "toggle-vcp",
+    vcpDrawable ? 1 : null,
+    (on) => {
+      vcpOn = on;
+      if (vcpPrimitive) vcpPrimitive.requestUpdate();
+    },
+    { sticky: { get: () => vcpToggleSticky, set: (v) => { vcpToggleSticky = v; } } }
+  );
+  // title は空。文字ラベルは edgeLabelPrimitive が左端に描く。
+  wireLineToggle("toggle-pivot", chart.pivot, (on) => {
+    if (on && !pivotLine) {
+      pivotLine = candleSeries.createPriceLine({ price: chart.pivot, color: CHART_COLORS.up, lineWidth: 1, lineStyle: 2, title: "" });
+    } else if (!on && pivotLine) {
+      candleSeries.removePriceLine(pivotLine);
+      pivotLine = null;
+    }
+    if (edgeLabelPrimitive) edgeLabelPrimitive.requestUpdate();
+  });
+  wireLineToggle("toggle-stop", chart.stop_loss, (on) => {
+    if (on && !stopLine) {
+      stopLine = candleSeries.createPriceLine({ price: chart.stop_loss, color: CHART_COLORS.down, lineWidth: 1, lineStyle: 2, title: "" });
+    } else if (!on && stopLine) {
+      candleSeries.removePriceLine(stopLine);
+      stopLine = null;
+    }
+    if (edgeLabelPrimitive) edgeLabelPrimitive.requestUpdate();
+  });
+
+  const charts = [priceChart, volChart, ...(rsChart ? [rsChart] : [])];
+  syncTimeScales(charts);
+  window.__minerviniCharts = charts; // debug/testing handle
+
+  // 自前日付軸の描画先と、その基準となる最下段チャート(x座標の変換元)。
+  const dateAxisEl = document.getElementById("chart-date-axis");
+  const bottomChart = rsChart || volChart;
+
+  // ---- crosshair OHLCV legend -------------------------------------------
+  // Lookup tables keyed by bar time so hovering ANY pane can resolve the
+  // full 日付/OHLC/出来高 row for that day (or month, on the monthly view).
+  function buildBarLookup(candles, volume) {
+    const volByTime = new Map((volume || []).map((v) => [v.time, v.value]));
+    const map = new Map();
+    for (const c of candles) map.set(c.time, { ...c, volume: volByTime.get(c.time) });
+    return map;
+  }
+  const barLookup = {
+    D: buildBarLookup(chart.candles, chart.volume),
+    M: buildBarLookup(monthly.candles, monthly.volume),
+  };
+  // RSラインの時刻→値 (クロスヘアを3チャートに同期する際、RSペインの横線を
+  // その日のRS値に合わせるため)。
+  const rsLookup = {
+    D: new Map((chart.rs_line || []).map((p) => [p.time, p.value])),
+    M: new Map((monthly.rs_line || []).map((p) => [p.time, p.value])),
+  };
+  let currentTf = "D";
+
+  const legendEl = document.getElementById("ohlc-legend");
+
+  function timeKey(time) {
+    if (typeof time === "string") return time;
+    if (typeof time === "object" && time !== null) {
+      const mm = String(time.month).padStart(2, "0");
+      const dd = String(time.day).padStart(2, "0");
+      return `${time.year}-${mm}-${dd}`;
+    }
+    return null;
+  }
+
+  function fmtPrice(v) {
+    return v == null ? "-" : v.toLocaleString("ja-JP");
+  }
+
+  function fmtVolume(v) {
+    if (v == null) return "-";
+    if (v >= 1e8) return (v / 1e8).toFixed(2) + "億";
+    if (v >= 1e4) return (v / 1e4).toFixed(1) + "万";
+    return String(Math.round(v));
+  }
+
+  // bar.time は常にゼロ埋め済みの "YYYY-MM-DD" 文字列(日足・月足集計後とも
+  // 同形式)なので、区切りを「/」に変えるだけで桁揺れなしの表示になる。
+  // 常時表示の最新日付ラベル(addLatestDateLabel)と区切り文字を揃えることで
+  // ホバー時/非ホバー時/チャート右下の最新日表示すべてを同じデザインにする。
+  function formatLegendDate(dateStr) {
+    return dateStr ? dateStr.replaceAll("-", "/") : "-";
+  }
+
+  function updateLegend(bar) {
+    if (!legendEl) return;
+    if (!bar) {
+      legendEl.innerHTML = "";
+      return;
+    }
+    const dirClass = bar.close >= bar.open ? "chg-up" : "chg-down";
+    legendEl.innerHTML = `
+      <span class="lg-date">${formatLegendDate(bar.time)}</span>
+      <span>始 <b class="${dirClass}">${fmtPrice(bar.open)}</b></span>
+      <span>高 <b class="${dirClass}">${fmtPrice(bar.high)}</b></span>
+      <span>安 <b class="${dirClass}">${fmtPrice(bar.low)}</b></span>
+      <span>終 <b class="${dirClass}">${fmtPrice(bar.close)}</b></span>
+      <span>出来高 <b>${fmtVolume(bar.volume)}</b></span>`;
+  }
+
+  function latestBar() {
+    const candles = currentTf === "M" ? monthly.candles : chart.candles;
+    if (!candles.length) return null;
+    return barLookup[currentTf].get(candles[candles.length - 1].time) || null;
+  }
+
+  // チャート→そのペインの主系列。クロスヘアを他ペインへ複製する際に使う。
+  const chartSeries = new Map([[priceChart, candleSeries], [volChart, volSeries]]);
+  if (rsChart && rsSeries) chartSeries.set(rsChart, rsSeries);
+
+  // 他ペインの横線を「その日の各ペインの値」に合わせる(株価=終値/出来高=出来高/RS=RS値)。
+  function paneValue(targetChart, key, bar) {
+    if (targetChart === priceChart) return bar ? bar.close : null;
+    if (targetChart === volChart) return bar ? bar.volume : null;
+    return rsLookup[currentTf].get(key);
+  }
+
+  // ホバー中の日をどのペインでもクロスヘアで指せるように、他の2ペインへ複製する。
+  let syncingCross = false;
+  for (const c of charts) {
+    c.subscribeCrosshairMove((param) => {
+      const key = param.time != null ? timeKey(param.time) : null;
+      const bar = key ? barLookup[currentTf].get(key) : null;
+      updateLegend(bar || latestBar()); // fall back to the latest bar when not hovering
+      setDateAxisHover(dateAxisEl, bottomChart, param.time, formatChartDate);
+      if (syncingCross) return; // setCrosshairPositionの再入を防ぐ
+      syncingCross = true;
+      for (const other of charts) {
+        if (other === c) continue;
+        if (param.time == null) {
+          other.clearCrosshairPosition();
+        } else {
+          const series = chartSeries.get(other);
+          const val = paneValue(other, key, bar);
+          if (series && val != null) other.setCrosshairPosition(val, param.time, series);
+          else other.clearCrosshairPosition();
+        }
+      }
+      syncingCross = false;
+    });
+  }
+
+  // 現在の期間設定(setTimeframe に渡された tf)を覚えておく。リサイズで
+  // バー間隔が再計算されると表示本数がずれるため、resizeHandler から
+  // applyVisibleRange() を呼び直して初期表示本数(既定=1ヶ月/22営業日)を保つ。
+  let currentTfVal = String(DEFAULT_DAILY_BARS);
+
+  // currentTfVal に基づいて全チャートの可視範囲を適用する。月足は全期間(fitContent)、
+  // 日足は最新バーを右端に固定してそこから指定本数だけ遡って表示。
+  function applyVisibleRange() {
+    if (currentTfVal === "M") {
+      for (const c of charts) c.timeScale().fitContent();
+    } else {
+      const bars = parseInt(currentTfVal, 10) || DEFAULT_DAILY_BARS;
+      const n = chart.candles.length;
+      const range = { from: Math.max(0, n - bars), to: n };
+      for (const c of charts) c.timeScale().setVisibleLogicalRange(range);
+    }
+  }
+
+  // tf: "M" (月足・全期間) or 表示する日足本数 (数値文字列)。
+  function setTimeframe(tf) {
+    const isMonthly = tf === "M";
+    currentTf = isMonthly ? "M" : "D";
+    currentTfVal = tf;
+    candleSeries.setData(isMonthly ? monthly.candles : chart.candles);
+    volSeries.setData(isMonthly ? monthly.volume : dailyVolume);
+    if (rsSeries) rsSeries.setData(isMonthly ? monthly.rs_line : chart.rs_line);
+    // Daily MAs have no meaning on monthly bars; hide them there.
+    ma50.setData(isMonthly ? [] : chart.ma50 || []);
+    ma150.setData(isMonthly ? [] : chart.ma150 || []);
+    ma200.setData(isMonthly ? [] : chart.ma200 || []);
+    // 決算マーカーは日足のバー日付基準。月足では噛み合わないのでクリアする。
+    candleSeries.setMarkers(isMonthly ? [] : earningsMarkers);
+    // VCPジグザグ線も日足専用(トグルONのときだけ日足復帰で再表示)。描画可否は
+    // primitiveのisVisible(vcpOn && currentTf==="D")が判定するので再描画を促すだけ。
+    if (vcpPrimitive) vcpPrimitive.requestUpdate();
+    applyVisibleRange();
+    updateLegend(latestBar());
+  }
+
+  setTimeframe(String(DEFAULT_DAILY_BARS));
+
+  // 自前日付軸: 現在の期間(日足/月足)に応じた目盛ラベルを描画し、パン/ズーム・
+  // 期間変更(setVisibleLogicalRange/fitContent)で発火する範囲変更イベントに
+  // 合わせて再描画する。formatChartDate は目盛/ホバー/最新日で共通(MM/DD)。
+  const drawAxis = () =>
+    renderDateAxis(dateAxisEl, bottomChart, currentTf === "M" ? monthly.candles : chart.candles, formatChartDate);
+  if (bottomChart) {
+    bottomChart.timeScale().subscribeVisibleLogicalRangeChange(drawAxis);
+    requestAnimationFrame(drawAxis);
+  }
+
+  const toggleOld = document.getElementById("timeframe-toggle");
+  if (toggleOld) {
+    // 同上の理由でcloneして前回分のclickリスナーを捨てる。あわせて
+    // 表示状態(1ヶ月ボタンがactive)をデフォルトにリセットしておく。
+    const toggle = toggleOld.cloneNode(true);
+    toggleOld.replaceWith(toggle);
+    toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tf === String(DEFAULT_DAILY_BARS)));
+    const applyTf = (btn) => {
+      toggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      setTimeframe(btn.dataset.tf);
+    };
+    toggle.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-tf]");
+      if (!btn) return;
+      applyTf(btn);
+    });
+    // cloneNodeでdata-slide-wired属性ごと複製されるとwireTabSlideが再配線を
+    // スキップしてしまう(リスナーはcloneされないので死ぬ)ため、必ず消してから配線。
+    delete toggle.dataset.slideWired;
+    wireTabSlide(toggle, "button[data-tf]", applyTf);
+  }
+
+  const resizeHandler = () => {
+    for (const [c, el] of [[priceChart, priceEl], [volChart, volEl], ...(rsChart ? [[rsChart, rsEl]] : [])]) {
+      c.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    }
+    // 幅が変わるとバー間隔が再計算され表示本数がずれるため、可視範囲を再適用して
+    // 初期表示(1ヶ月=22営業日)を保つ。特にチャートタブが非表示→表示になった直後
+    // (0幅で生成→実寸へリサイズ)で効く。
+    applyVisibleRange();
+    drawAxis();
+  };
+  window.addEventListener("resize", resizeHandler);
+
+  stockChartState = { charts, resizeHandler, dateAxisEl };
+}
+
+// Japanese labels for the MUST-condition flags. Unknown keys fall back to
+// the raw flag name so新規条件を足してもUIが壊れない.
+const MUST_FLAG_LABELS = {
+  tt: {
+    close_above_ma150_ma200: "終値が150日線・200日線より上",
+    ma150_above_ma200: "150日線が200日線より上",
+    ma200_uptrend_1m: "200日線が1ヶ月以上上向き かつ 21日で+5%以上",
+    ma_stack_50_150_200: "50日線 > 150日線 > 200日線",
+    close_above_ma50: "終値が50日線より上",
+    above_low52w_margin: "52週安値から+25%以上",
+    within_high52w_margin: "52週高値から-25%以内",
+    rs_above_min: "RSレーティング70以上",
+  },
+  vcp: {
+    V1: "収縮回数が2〜6回",
+    V2: "収縮の深さが段階的に減少",
+    V3: "最初の収縮が35%以内",
+    V4: "最後の収縮が一定以内",
+    V5: "出来高ドライアップ",
+    V6: "ベース期間が15〜200日",
+    V7: "収縮の安値が切り上がり",
+  },
+};
+
+// V4/V5は設定駆動・V5はOR判定のため、vcpDetailの実測値/閾値があれば行に追記する。
+function _mustFlagDetailSuffix(key, name, vcpDetail) {
+  if (key !== "vcp" || !vcpDetail) return "";
+  if (name === "V4") {
+    const last = vcpDetail.depth_last_pct;
+    const threshold = vcpDetail.last_depth_max_pct;
+    if (last == null || threshold == null) return "";
+    return ` (実測${last}% ≤ ${threshold}%)`;
+  }
+  if (name === "V5") {
+    const dryup = vcpDetail.volume_dryup;
+    if (!dryup || dryup.recent10_median == null || dryup.vol_ma50 == null) return "";
+    const ratio = dryup.vol_ma50 ? Math.round((dryup.recent10_median / dryup.vol_ma50) * 100) : null;
+    const thresholdPct = dryup.median_ratio_threshold != null ? Math.round(dryup.median_ratio_threshold * 100) : null;
+    const via = dryup.sub_a_pass ? "水準" : dryup.sub_b_pass ? "トレンド" : "";
+    const ratioText = ratio != null && thresholdPct != null ? ` (直近10日中央値 ${ratio}% ≤ ${thresholdPct}%)` : "";
+    return via ? `${ratioText}[${via}判定]` : ratioText;
+  }
+  return "";
+}
+
+function renderMustChecklist(mustFlags, vcpDetail) {
+  const el = document.getElementById("must-checklist");
+  el.innerHTML = "";
+  if (!mustFlags) {
+    el.textContent = "データなし";
+    return;
+  }
+  const groupLabels = { tt: "トレンドテンプレート (8条件)", vcp: "VCP (V1〜V7)" };
+  for (const key of ["tt", "vcp"]) {
+    const flags = mustFlags[key];
+    if (!flags) continue;
+    const h4 = document.createElement("h4");
+    h4.textContent = groupLabels[key];
+    el.appendChild(h4);
+    if (key === "vcp" && vcpDetail && vcpDetail.shakeout_detected) {
+      const badge = document.createElement("span");
+      badge.className = "sell-signal-badge signal-badge-accent";
+      badge.textContent = "シェイクアウト検出";
+      el.appendChild(badge);
+    }
+    const ul = document.createElement("ul");
+    const labels = MUST_FLAG_LABELS[key] || {};
+    for (const [name, value] of Object.entries(flags)) {
+      const li = document.createElement("li");
+      li.textContent = `${value ? "✓" : "✗"} ${labels[name] || name}${_mustFlagDetailSuffix(key, name, vcpDetail)}`;
+      li.className = value ? "flag-pass" : "flag-fail";
+      ul.appendChild(li);
+    }
+    el.appendChild(ul);
+  }
+}
+
+// 収縮の内訳テーブル。footprint は深さの列("19/5/3")しか持たないため、
+// 「T2の5%は29営業日かけた収縮」「T3の3%は3日で終わった収縮」といった時間軸が
+// 読めない。build_site._build_contraction_rows() が確定させた行をそのまま描く
+// (T番号もサーバ側で採番済みなので、フロントで数え直さない)。
+function renderContractionTable(vcpDetail) {
+  const el = document.getElementById("contraction-table");
+  if (!el) return;
+  el.innerHTML = "";
+  const rows = (vcpDetail && vcpDetail.contractions) || [];
+  if (!rows.length) {
+    el.textContent = "収縮データなし";
+    return;
+  }
+  const num = (v, d) => (v == null ? "-" : Number(v).toFixed(d));
+  const table = document.createElement("table");
+  table.className = "contraction-table";
+  const head =
+    "<thead><tr><th>T</th><th>高値日</th><th>高値</th><th>安値日</th><th>安値</th>" +
+    "<th>深さ</th><th>下落<br>(営業日)</th><th>直前の戻し<br>(営業日)</th></tr></thead>";
+  const body = rows
+    .map(
+      (r) =>
+        `<tr${r.provisional ? ' class="contraction-provisional"' : ""}>` +
+        `<td>T${r.t}${r.provisional ? " <span class=\"tag-provisional\">形成中</span>" : ""}</td>` +
+        `<td>${r.high_date || "-"}</td><td>${num(r.high_price, 1)}</td>` +
+        `<td>${r.low_date || "-"}</td><td>${num(r.low_price, 1)}</td>` +
+        `<td>${r.depth_pct == null ? "-" : num(r.depth_pct, 1) + "%"}</td>` +
+        `<td>${r.bars == null ? "-" : r.bars}</td>` +
+        `<td>${r.rally_bars == null ? "-" : r.rally_bars}</td></tr>`
+    )
+    .join("");
+  table.innerHTML = head + "<tbody>" + body + "</tbody>";
+  const wrap = document.createElement("div");
+  wrap.className = "table-scroll";
+  wrap.appendChild(table);
+  el.appendChild(wrap);
+}
+
+// tech_score の3成分(当日断面パーセンタイル)。等ウェイト平均なので、
+// 「成分値 = そのままパーセンタイル」でフロント側の再計算は不要。
+// report.json の score_pct(build_site が latest_row から通す)をそのまま出す。
+const SCORE_PCT_COMPONENTS = [
+  { key: "ma200_slope", label: "200日線の傾き", helpKey: "ma200_slope_21d" },
+  { key: "low52w_ratio", label: "52週安値からの倍率", helpKey: "low52w_ratio" },
+  // dryup は attach_score_percentiles の時点で符号反転済み(枯れているほど高い)。
+  { key: "dryup", label: "出来高の枯れ", helpKey: "dryup" },
+];
+
+// 2026-07-29: 一覧をスコア1本に統合した代わりに、内訳はここで見る設計にした。
+// 上段=合成スコア(総合/テクニカル/VCP)、下段=テクニカルの3成分パーセンタイル。
+function renderScoreBreakdown(stock) {
+  const el = document.getElementById("score-breakdown");
+  el.innerHTML = "";
+  const bar = (label, value, helpKey, cls) => {
+    const row = document.createElement("div");
+    row.className = "score-bar-row" + (cls ? " " + cls : "");
+    const pct = Math.max(0, Math.min(100, value));
+    row.innerHTML =
+      `<span>${label}${helpKey ? helpBtnHtml(helpKey) : ""}</span>` +
+      `<div class="score-bar"><div class="score-bar-fill" style="width:${pct}%"></div></div>` +
+      `<span>${value}</span>`;
+    el.appendChild(row);
+  };
+
+  const items = [
+    { label: "総合スコア", value: stock.total_score, helpKey: "total_score" },
+    { label: "テクニカルスコア", value: stock.tech_score, helpKey: "tech_score" },
+    { label: "VCPスコア", value: stock.vcp_score, helpKey: "vcp_score" },
+    { label: "フルスコア", value: stock.full_score, helpKey: "full_score" },
+  ];
+  for (const item of items) {
+    if (item.value == null) continue;
+    bar(item.label, item.value, item.helpKey);
+  }
+
+  // テクニカルスコアの3成分。旧report.json(score_pct無し)では何も出さない。
+  const pct = stock.score_pct;
+  if (!pct) return;
+  const head = document.createElement("div");
+  head.className = "score-subhead";
+  head.innerHTML = `テクニカルの内訳 <small>当日の全銘柄中の順位(パーセンタイル)</small>`;
+  el.appendChild(head);
+  for (const c of SCORE_PCT_COMPONENTS) {
+    const v = pct[c.key];
+    if (v == null) continue;
+    bar(c.label, Math.round(v * 10) / 10, c.helpKey, "score-bar-sub");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 保有ポジション (view-positions, 2026-07-11追加): docs/data/positions.json を
+// 描画する。書き込みUIは無い(manual/positions.csvをGitHub web編集/ローカル編集で
+// 運用する前提。passkeyAuthEnabled: false と同じ思想)。
+// ---------------------------------------------------------------------------
+
+const SELL_SIGNAL_LABELS = {
+  STOP_BREACH: { label: "ストップ割れ", className: "signal-badge-danger" },
+  MA50_BREAK: { label: "50日線割れ", className: "signal-badge-danger" },
+  MA200_BREAK: { label: "200日線割れ", className: "signal-badge-danger" },
+  TAKE_PROFIT_ZONE: { label: "2R到達", className: "signal-badge-accent" },
+  BREAKEVEN_READY: { label: "建値SL推奨", className: "signal-badge-warn" },
+};
+
+function renderPositionsWarningBanner(positionsData) {
+  const el = document.getElementById("positions-warning");
+  if (!el) return;
+  const withSignals = (positionsData?.positions || []).filter((p) => (p.sell_signals || []).length > 0);
+  if (!withSignals.length) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = `⚠ 保有${withSignals.length}銘柄に売りシグナル。<a href="#positions">保有ビューを確認</a>`;
+}
+
+async function initPositionsView() {
+  const container = document.getElementById("positions-table-wrap");
+  const emptyEl = document.getElementById("positions-empty");
+  const warnEl = document.getElementById("positions-warnings");
+  const metaEl = document.getElementById("positions-meta");
+  if (!container) return;
+
+  let data = null;
+  try {
+    data = await window.MinerviniData.fetchJson("data/positions.json", { optional: true });
+  } catch (e) {
+    data = null;
+  }
+
+  const positions = data && Array.isArray(data.positions) ? data.positions : [];
+
+  if (metaEl) {
+    metaEl.textContent = data && data.generated_at
+      ? `最終更新: ${new Date(data.generated_at).toLocaleString("ja-JP")}`
+      : "";
+  }
+
+  if (!positions.length) {
+    container.innerHTML = "";
+    if (warnEl) warnEl.hidden = true;
+    if (emptyEl) {
+      emptyEl.hidden = false;
+      emptyEl.innerHTML = '保有ポジションはありません。'
+        + '<a href="https://github.com/allan3maximin/minervini/edit/master/manual/positions.csv" target="_blank" rel="noopener">manual/positions.csv</a> に行を追加してください。';
+    }
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+
+  const sorted = [...positions].sort((a, b) => {
+    const aHas = (a.sell_signals || []).length > 0 ? 1 : 0;
+    const bHas = (b.sell_signals || []).length > 0 ? 1 : 0;
+    return bHas - aHas;
+  });
+
+  const rows = sorted
+    .map((p) => {
+      const badges = (p.sell_signals || [])
+        .map((sig) => {
+          const meta = SELL_SIGNAL_LABELS[sig] || { label: sig, className: "" };
+          return `<span class="sell-signal-badge ${meta.className}">${escapeHtml(meta.label)}</span>`;
+        })
+        .join(" ");
+      const signalsCell = badges || (p.data_missing ? "データなし" : "-");
+      // data_missing行は詳細ページが無いのでクリック/フォーカス不可(row-static)。
+      const rowAttrs = p.data_missing ? 'class="row-static"' : 'tabindex="0" role="button"';
+      return `
+        <tr ${rowAttrs} data-code="${escapeHtml(p.code)}">
+          <td>${escapeHtml(p.code)}</td>
+          <td>${escapeHtml(p.name || "")}</td>
+          <td>${formatClose(p.entry_price)}</td>
+          <td>${p.close != null ? formatClose(p.close) : "-"}</td>
+          <td>${p.pl_pct != null ? p.pl_pct.toFixed(2) + "%" : "-"}</td>
+          <td>${p.r_multiple != null ? p.r_multiple.toFixed(2) : "-"}</td>
+          <td>${formatClose(p.current_stop)}</td>
+          <td>${p.dist_to_stop_pct != null ? p.dist_to_stop_pct.toFixed(2) + "%" : "-"}</td>
+          <td>${p.days_held}</td>
+          <td>${signalsCell}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="table-scroll">
+      <table class="positions-table">
+        <thead>
+          <tr>
+            <th>コード</th><th>銘柄名</th><th>建値</th><th>現在値</th><th>損益%</th>
+            <th>R${helpBtnHtml("r_multiple")}</th><th>ストップ</th><th>ストップまで%</th><th>保有日数</th><th>シグナル${helpBtnHtml("breakeven_sl")}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  container.querySelectorAll("tr[data-code]:not(.row-static)").forEach((tr) => {
+    const go = () => {
+      window.location.hash = "stock/" + tr.dataset.code;
+    };
+    tr.addEventListener("click", go);
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        go();
+      }
+    });
+  });
+
+  if (warnEl) {
+    if (data.warnings && data.warnings.length) {
+      warnEl.hidden = false;
+      warnEl.innerHTML = data.warnings.map((w) => escapeHtml(w)).join("<br>");
+    } else {
+      warnEl.hidden = true;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SPA router (Dockナビ): index.htmlの5ビューをlocation.hashで切り替える。
+// セクターマップ/バッチ実行は表示のたびに再init(ヒートマップはコンテナが
+// 見えて初めてclientWidthが正しく取れるため、バッチ実行は履歴を毎回最新化
+// するため)。銘柄詳細は"stock/CODE"の形でパラメータ付きハッシュを取る
+// (Dockメニューには出さない、ダッシュボードからのドリルダウン専用ビュー)。
+// ---------------------------------------------------------------------------
+
+const VIEWS = ["dashboard", "heatmap", "stocklist", "invest", "positions", "batch", "stock"];
+
+// 投資法ページ(view-invest)の一覧→詳細ナビ。
+// #invest        = 一覧(invest-menu)を表示。
+// #invest/<id>   = 対応する data-section の詳細1枚だけ表示(戻るリンクで #invest に戻る)。
+// ハッシュ遷移で駆動するため、ブラウザ/端末の「戻る」でも一覧に戻れる。
+function initInvestView(param) {
+  // ページャ。data-section の並び順に1枚ずつ表示し、下部の前に/次にで送る。
+  const pager = document.getElementById("invest-pager");
+  if (!pager) return;
+  const sections = Array.from(pager.querySelectorAll(".invest-section"));
+  if (!sections.length) return;
+  const ids = sections.map((s) => s.dataset.section);
+  // paramが無い/不正なら先頭を表示。
+  let idx = ids.indexOf(param);
+  if (idx < 0) idx = 0;
+  sections.forEach((s, i) => { s.hidden = i !== idx; });
+
+  const prev = document.getElementById("invest-prev");
+  const next = document.getElementById("invest-next");
+  const pos = document.getElementById("invest-pager-pos");
+  if (prev) {
+    const hasPrev = idx > 0;
+    prev.classList.toggle("is-hidden", !hasPrev);
+    prev.href = hasPrev ? `#invest/${ids[idx - 1]}` : "#invest";
+  }
+  if (next) {
+    const hasNext = idx < ids.length - 1;
+    next.classList.toggle("is-hidden", !hasNext);
+    next.href = hasNext ? `#invest/${ids[idx + 1]}` : "#invest";
+  }
+  if (pos) pos.textContent = `${idx + 1} / ${sections.length}`;
+
+  // 前回のスクロール位置を引き継がないようリセット。
+  pager.scrollTop = 0;
+}
+
+function showView(hash) {
+  const [rawName, param] = hash.split("/");
+  const name = VIEWS.includes(rawName) ? rawName : "dashboard";
+  for (const v of VIEWS) {
+    const section = document.getElementById(`view-${v}`);
+    if (section) section.hidden = v !== name;
+  }
+  // bodyはスクロールしない(app shell)。ビュー自身が縦スクロールを持つので、
+  // ページ切替時に前回のスクロール位置を引き継がないようリセットする。
+  const activeSection = document.getElementById(`view-${name}`);
+  if (activeSection) activeSection.scrollTop = 0;
+  // 2026-07-30: タイトル(MinerviniScreener)は全ビューで常時表示にした。以前は
+  // 縦領域を稼ぐためダッシュボード以外で隠していたが、上部に何も無いと現在地の
+  // 手掛かりが無く、件数の置き場所も無かった(ユーザー要望)。
+  // 代わりに嵩む要素だけ出し分ける: 最終更新行はダッシュボードのみ、
+  // 件数はリスト画面のみ。
+  const pageHeader = document.querySelector(".page-header");
+  if (pageHeader) pageHeader.hidden = false;
+  const metaLine = document.getElementById("generated-at");
+  if (metaLine) metaLine.hidden = name !== "dashboard";
+  currentViewName = name;
+  applySnapshotSwitchVisibility();
+  const listCount = document.getElementById("list-summary");
+  if (listCount) listCount.hidden = name !== "stocklist";
+  document.querySelectorAll(".dock-btn").forEach((btn) => {
+    const active = btn.dataset.view === name;
+    btn.classList.toggle("active", active);
+    // スクリーンリーダー向けに現在地を通知(見た目の.activeと常に同期)。
+    if (active) {
+      btn.setAttribute("aria-current", "page");
+    } else {
+      btn.removeAttribute("aria-current");
+    }
+  });
+  // ヒートマップは独立ページ。コンテナが見えて初めてclientWidthが
+  // 正しく取れるため、ヒートマップ表示のたびに再init。
+  if (name === "heatmap" && typeof initHeatmap === "function") {
+    initHeatmap();
+  }
+  if (name === "batch" && window.MinerviniBatch) {
+    window.MinerviniBatch.initBatchView();
+  }
+  if (name === "batch") {
+    initSettingsSubtabs();
+    initListFilterSettings();
+  }
+  if (name === "invest") {
+    initInvestView(param);
+  }
+  if (name === "positions") {
+    initPositionsView();
+  }
+  if (name === "stocklist") {
+    initListView();
+  }
+  if (name === "stock") {
+    initStockPage(param ? decodeURIComponent(param) : null);
+  }
+}
+
+// 旧initDockSwipe(スワイプ方向→隣のビューへ移動)は廃止。方向とビュー順の
+// 対応が直感と逆に感じられる問題があったため、タブと同じ wireTabSlide
+// (押したまま滑らせて指の下のボタンで離す=そのビューへ移動)に統一した。
+// 離した場所がそのまま行き先なので方向の解釈違いが起きない。
+
+function initRouter() {
+  const dock = document.getElementById("dock-nav");
+  if (!dock) return;
+  wireTabSlide(dock, ".dock-btn", (btn) => {
+    window.location.hash = btn.dataset.view;
+  });
+  dock.querySelectorAll(".dock-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.location.hash = btn.dataset.view;
+    });
+  });
+  window.addEventListener("hashchange", () => {
+    showView(window.location.hash.replace("#", "") || "dashboard");
+  });
+  showView(window.location.hash.replace("#", "") || "dashboard");
+}
+
+// ---------------------------------------------------------------------------
+// 起動時パスキーゲート: report.json が暗号化封筒ならデータ鍵が入るまで
+// 全ビューの初期化を止め、ロック画面を出す。平文なら従来どおり素通し
+// (=データ暗号化を有効にした時点で自動的にゲートが立ち上がる)。
+// 鍵は webauthn-vault.js の解錠(パスキー) or 初回セットアップで入り、
+// secure-fetch.js の setDataKey() が "minervini-unlocked" を発火して閉じる。
+// ---------------------------------------------------------------------------
+
+async function ensureDataAccess() {
+  const overlay = document.getElementById("lock-screen");
+  const hideOverlay = () => { if (overlay) overlay.hidden = true; };
+
+  // リロード時: sessionStorageに保持した読み取り用データ鍵で先に解錠を試みる
+  // (パスキー不要)。成功すればこのままゲートを素通しできる。
+  if (!window.MinerviniData.hasDataKey()) {
+    try { await window.MinerviniData.restoreDataKey(); } catch (e) { /* 無視 */ }
+  }
+
+  let probe = null;
+  try {
+    const resp = await fetch("data/report.json", { cache: "no-store" });
+    if (resp.ok) probe = await resp.json();
+  } catch (e) {
+    probe = null;
+  }
+
+  // 平文 or 取得不能、または既に鍵あり(復元成功含む) → ゲート不要。
+  // オーバーレイ(初期描画から出しっぱなしのスプラッシュ)を消して素通し。
+  if (!window.MinerviniData.isEnvelope(probe) || window.MinerviniData.hasDataKey()) {
+    hideOverlay();
+    return;
+  }
+
+  // 暗号化+未解錠 → アクセスしたこのタイミングでパスキー解錠を促す。
+  // LOADING 表示を "TAP TO UNLOCK" ボタンに差し替えるだけ(説明文は持たない)。
+  const loadingEl = document.getElementById("lock-loading");
+  const unlockBtn = document.getElementById("lock-unlock-btn");
+  const errEl = document.getElementById("lock-error");
+  if (loadingEl) loadingEl.hidden = true;
+  if (unlockBtn) unlockBtn.hidden = false;
+  if (!overlay || !unlockBtn) return;
+
+  // ボタンの中身はアイコン+ラベルなので、状態表示で差し替える際は innerHTML を
+  // 使う(textContent で書き換えるとアイコンが消える)。初期HTMLを控えておく。
+  const btnHtmlIdle = unlockBtn.innerHTML;
+  const btnHtmlBusy = '<span class="lock-spinner" aria-hidden="true"></span>AUTHENTICATING';
+
+  let vault = null;
+  try {
+    vault = await window.MinerviniVault.fetchVault();
+  } catch (e) {
+    /* 取得失敗は解錠ボタン押下時に再試行する */
+  }
+
+  await new Promise((resolve) => {
+    function check() {
+      if (window.MinerviniData.hasDataKey()) {
+        overlay.hidden = true;
+        window.removeEventListener("minervini-unlocked", check);
+        resolve();
+      }
+    }
+    window.addEventListener("minervini-unlocked", check);
+
+    // 2026-07-27: 「ボタンを探して押す」手間をなくすため、ロック画面のどこを
+    // タップしても解錠が走るようにした(ボタンは押せる場所の目印として残す。
+    // ボタンのクリックもオーバーレイまでバブリングするので配線は1本でよい)。
+    // なお navigator.credentials.get() はユーザー操作(user activation)が必須で、
+    // ページ読み込みだけで自動的にFace IDを出すことはブラウザ仕様上できない。
+    // 同一セッション内のリロードは上の restoreDataKey() で素通しされるので、
+    // 認証が要るのは新しいセッションの初回だけ。
+    let busy = false;
+    const doUnlock = async () => {
+      if (busy) return;
+      busy = true;
+      if (errEl) errEl.hidden = true;
+      unlockBtn.disabled = true;
+      unlockBtn.innerHTML = btnHtmlBusy;
+      try {
+        if (!vault) vault = await window.MinerviniVault.fetchVault();
+        if (!vault) {
+          throw new Error("保管庫(vault.json)がまだありません。GitHub上でセットアップしてください。");
+        }
+        const result = await window.MinerviniVault.unlock(vault);
+        if (!result || !result.hasDataKey) {
+          throw new Error("保管庫にデータ鍵が入っていません。データ鍵込みで再セットアップしてください。");
+        }
+        // ついでに書き込み系ボタンも解錠状態にしておく(二度目のFace IDを要求しない)。
+        applyLockState(true);
+        const hdrBtn = document.getElementById("vault-unlock-btn");
+        if (hdrBtn) {
+          hdrBtn.textContent = "🔒 解錠済み";
+          hdrBtn.disabled = true;
+        }
+        check();
+      } catch (e) {
+        if (errEl) {
+          errEl.textContent = e.message || String(e);
+          errEl.hidden = false;
+        }
+      } finally {
+        busy = false;
+        unlockBtn.disabled = false;
+        unlockBtn.innerHTML = btnHtmlIdle;
+      }
+    };
+    overlay.addEventListener("click", doUnlock);
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        doUnlock();
+      }
+    });
+    overlay.classList.add("is-tappable");
+    overlay.tabIndex = 0;
+    overlay.setAttribute("role", "button");
+    overlay.focus();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 市況「レビュー」タブ (2026-07-31)
+//
+// 大引バッチが吐く docs/data/review.json を読んで、その日の相場を機械的に
+// まとめて出すだけのタブ。ここは描画専用で、判定も集計も一切しない
+// (何を出すかはバックエンド側が決める。フロントで再計算すると両者の数字が
+// ずれたときにどちらが正しいのか分からなくなる)。
+//
+// review.json は「どのキーも欠けうる」前提で書く。前場バッチが落ちた日は
+// has_maezyou:false で afternoon や前場の列がまるごと来ないし、日中の値動きが
+// 取れなければ shape.available:false、履歴が浅ければ followup が空になる。
+// 欠けたブロックは黙って畳んで、来ているものだけ描く(「データがありません」を
+// 至る所に並べると、何が読めて何が読めないのかかえって分からなくなる)。
+//
+// ヘッダの断面切替(大引/前場)とは連動させない。レビューは大引が終わって初めて
+// 作れる集計なので、前場を選んでいる間も中身は大引のまま。代わりにパネルの先頭に
+// 「大引時点の集計」と一言添えて取り違えを防ぐ。
+// ---------------------------------------------------------------------------
+
+// review.json の signal は GREEN/AMBER/RED。画面の表記は市況分析タブと同じ
+// 攻め/中立/守り に揃える(同じ地合いを2通りの言い方で出すと混乱するため)。
+const REVIEW_SIGNAL_KEY = { GREEN: "green", AMBER: "yellow", YELLOW: "yellow", RED: "red" };
+
+// スコア内訳の内部キー→日本語。運用ルール(2026-07-30)により内部キーは画面に出さない。
+// 知らないキーが増えた日はキーのまま出す(黙って消すと増えたことに気付けない)。
+const REVIEW_BREAKDOWN_LABEL = {
+  breadth: "値上がり銘柄の広がり",
+  index_trend: "指数の向き",
+  momentum: "勢い",
+  risk_appetite: "リスクの取りやすさ",
+};
+
+// 監視バケットの内部キー→日本語(HANDOFF の stage_log と同じ対応)。review.json 側が
+// すでに日本語ラベルで送ってくる想定だが、内部キーが素通しで来ても読めるようにしておく。
+const REVIEW_BUCKET_LABEL = {
+  order: "発注",
+  watch: "監視",
+  cooled: "追撃禁止",
+  near: "あと一歩",
+  forming: "形成中",
+  fresh_high: "新高値直後",
+  rejected: "未達",
+  inactive: "対象外",
+  unknown: "不明",
+};
+
+// 後場の判定。色は既存の3色(accent/warn/danger)から選ぶだけで新しい色は作らない。
+const REVIEW_VERDICT_TONE = { "伸長": "review-up", "失速": "review-down", "横ばい": "review-flat", "不明": "review-flat" };
+
+// 3断面の列。review.json 側で欠けている列は自動的に落ちる(前場バッチが落ちた日など)。
+const REVIEW_COLS = [
+  { key: "prev_close", label: "前日終値" },
+  { key: "maezyou", label: "前場" },
+  { key: "close", label: "大引" },
+];
+
+function reviewSignalMeta(v) {
+  const key = REVIEW_SIGNAL_KEY[String(v ?? "").toUpperCase()];
+  return key ? MARKET_SIGNAL_META[key] : null;
+}
+
+// 数値の体裁。整数はそのまま、小数は1桁まで。数値でないものはそのまま出す
+// (バックエンドが文字列を入れてきても壊さない)。
+function reviewNum(v, unit) {
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  if (!isFinite(n)) return escapeHtml(String(v));
+  const s = Number.isInteger(n) ? n.toLocaleString("ja-JP") : n.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
+  return escapeHtml(s + (unit || ""));
+}
+
+function reviewSigned(v, unit) {
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  if (!isFinite(n)) return escapeHtml(String(v));
+  const abs = Math.abs(n);
+  const body = Number.isInteger(n) ? abs.toLocaleString("ja-JP") : abs.toFixed(1);
+  const sign = n > 0 ? "+" : n < 0 ? "-" : "±";
+  return escapeHtml(`${sign}${body}${unit || ""}`);
+}
+
+// 増えた=緑 / 減った=赤 / 変わらず=無色。数値以外は無色。
+function reviewTone(v) {
+  const n = Number(v);
+  if (v == null || !isFinite(n) || n === 0) return "review-flat";
+  return n > 0 ? "review-up" : "review-down";
+}
+
+function reviewBlockHtml(title, sub, bodyParts) {
+  const body = bodyParts.filter(Boolean).join("");
+  if (!body) return "";
+  const subHtml = sub ? `<span class="review-block-sub">${escapeHtml(sub)}</span>` : "";
+  return `<section class="review-block"><h3 class="review-block-title">${escapeHtml(title)}${subHtml}</h3>${body}</section>`;
+}
+
+function reviewHeadingHtml(text, sub) {
+  const subHtml = sub ? `<span class="market-detail-heading-sub">${escapeHtml(sub)}</span>` : "";
+  return `<h4 class="market-detail-heading">${escapeHtml(text)}${subHtml}</h4>`;
+}
+
+function reviewListHtml(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<ul class="review-points">${items.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`;
+}
+
+// 銘柄1行。既存の銘柄カードと同じくタップで個別銘柄画面(#stock/CODE)へ飛ばす。
+// 遷移そのものは親コンテナ側の委譲で処理する(行ごとにリスナーを付けない)。
+function reviewStockRowHtml(s) {
+  if (!s || !s.code) return "";
+  const nums = [];
+  if (s.close != null) nums.push(`終値 ${reviewNum(s.close)}`);
+  if (s.pivot != null) nums.push(`ピボット ${reviewNum(s.pivot)}`);
+  const note = s.note ? `<div class="review-stock-note">${escapeHtml(s.note)}</div>` : "";
+  return `
+    <div class="review-stock-row" role="button" tabindex="0" data-review-code="${escapeHtml(s.code)}">
+      <div class="review-stock-head">
+        <span class="review-stock-name">${escapeHtml(s.name || s.code)}<span class="review-stock-code">${escapeHtml(s.code)}</span></span>
+        <span class="review-stock-nums">${nums.join(" / ")}</span>
+      </div>
+      ${note}
+    </div>`;
+}
+
+// 銘柄が多い日は縦に長くなりすぎるので、先頭5件だけ出して残りは折りたたむ。
+// <details> なので開閉に JS を持たない。
+function reviewStockListHtml(items, limit = 5) {
+  const rows = items.map(reviewStockRowHtml).filter(Boolean);
+  if (!rows.length) return "";
+  const head = rows.slice(0, limit).join("");
+  const rest = rows.slice(limit);
+  if (!rest.length) return head;
+  return `${head}<details class="review-more"><summary>もっと見る(残り${rest.length}件)</summary>${rest.join("")}</details>`;
+}
+
+function reviewStockGroupHtml(title, desc, items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const rows = reviewStockListHtml(items);
+  if (!rows) return "";
+  return `
+    <div class="review-group">
+      <div class="review-group-head">
+        <span class="review-group-title">${escapeHtml(title)}</span>
+        <span class="review-group-count">${items.length}件</span>
+      </div>
+      <p class="review-group-desc">${escapeHtml(desc)}</p>
+      ${rows}
+    </div>`;
+}
+
+// 既定で畳んでおくブロック。開閉に JS を持たせたくないので <details> を使う。
+// 中身は普通のブロックと同じなので、見た目のクラスは reviewBlockHtml と揃える。
+function reviewFoldBlockHtml(title, sub, bodyParts) {
+  const body = bodyParts.filter(Boolean).join("");
+  if (!body) return "";
+  const subHtml = sub ? `<span class="review-block-sub">${escapeHtml(sub)}</span>` : "";
+  return `<details class="review-block review-block-fold"><summary class="review-block-title">${escapeHtml(title)}${subHtml}</summary><div class="review-fold-body">${body}</div></details>`;
+}
+
+// --------------------------------------------------------------- 断片ビルダー
+// 以下は「結論 / 根拠 / 行動 / 検証」の4ブロックから拾い直して使う部品。
+// 1つの部品を1つの見出しに対応させておくと、どのブロックへ移しても壊れない。
+
+// 前日終値→前場→大引 のスコアと地合い。列は来ているものだけ並べる。
+function reviewStepsHtml(m) {
+  if (!m || typeof m !== "object") return "";
+  const score = m.score || {};
+  const signal = m.signal || {};
+  const steps = REVIEW_COLS.filter((c) => score[c.key] != null || signal[c.key] != null).map((c) => {
+    const meta = reviewSignalMeta(signal[c.key]);
+    const chip = meta ? `<span class="review-chip ${meta.className}">${escapeHtml(meta.label)}</span>` : "";
+    const sc = score[c.key] != null ? `<span class="review-step-score">${reviewNum(score[c.key])}</span>` : "";
+    return `<div class="review-step"><span class="review-step-label">${escapeHtml(c.label)}</span>${sc}${chip}</div>`;
+  });
+  if (!steps.length) return "";
+  return (
+    reviewHeadingHtml("地合いスコアの推移", "点数と攻め・中立・守り") +
+    `<div class="review-steps">${steps.join('<span class="review-step-arrow" aria-hidden="true">→</span>')}</div>`
+  );
+}
+
+// 1日の値動きの形(寄り天・後場高など)。日中の値が取れない日は available:false で来る。
+function reviewShapeHtml(m) {
+  const shape = m && m.shape;
+  if (!shape || shape.available === false || (!shape.label && !shape.detail)) return "";
+  const detail = shape.detail ? `<span class="review-shape-detail">${escapeHtml(shape.detail)}</span>` : "";
+  return (
+    reviewHeadingHtml("1日の値動きの形") +
+    `<div class="review-shape"><span class="review-shape-label">${escapeHtml(shape.label || "-")}</span>${detail}</div>`
+  );
+}
+
+// 後場で失速したか伸びたか。結論ブロックに置くので判定と理由だけ。数字の比較表は
+// 根拠ブロック側 (reviewAfternoonMetricsHtml) に分けている。
+function reviewVerdictHtml(a) {
+  if (!a || typeof a !== "object") return "";
+  const parts = [];
+  if (a.verdict) {
+    const tone = REVIEW_VERDICT_TONE[a.verdict] || "review-flat";
+    parts.push(`<div class="review-verdict ${tone}">${escapeHtml(a.verdict)}</div>`);
+  }
+  const reasons = reviewListHtml(a.reasons);
+  if (reasons) parts.push(reasons);
+  if (!parts.length) return "";
+  return reviewHeadingHtml("後場はどうだったか", "前場と比べて伸びたか失速したか") + parts.join("");
+}
+
+function reviewBreakdownHtml(m) {
+  const bd = m && m.breakdown_delta;
+  if (!bd || typeof bd !== "object" || !Object.keys(bd).length) return "";
+  const rows = Object.keys(bd)
+    .map((k) => {
+      const label = REVIEW_BREAKDOWN_LABEL[k] || k;
+      return `<div class="market-detail-row"><span>${escapeHtml(label)}</span><span class="${reviewTone(bd[k])}">${reviewSigned(bd[k], "pt")}</span></div>`;
+    })
+    .join("");
+  return reviewHeadingHtml("点数の増減", "前日終値からの差") + `<div class="market-detail-indicators">${rows}</div>`;
+}
+
+function reviewDriversHtml(m) {
+  const drivers = reviewListHtml(m && m.drivers);
+  return drivers ? reviewHeadingHtml("動いた理由") + drivers : "";
+}
+
+function reviewIndexMovesHtml(m) {
+  const moves = Array.isArray(m && m.index_moves) ? m.index_moves.filter((x) => x && (x.name || x.key)) : [];
+  if (!moves.length) return "";
+  // 前場の値が1本も来ていない日(前場バッチが落ちた日)は、空欄だけの列を出しても
+  // 意味が無いので列ごと落とす。
+  const hasMaezyou = moves.some((x) => x.maezyou_pct != null);
+  const rows = moves
+    .map(
+      (x) => `<tr>
+        <td>${escapeHtml(x.name || x.key)}</td>
+        ${hasMaezyou ? `<td class="${reviewTone(x.maezyou_pct)}">${reviewSigned(x.maezyou_pct, "%")}</td>` : ""}
+        <td class="${reviewTone(x.close_pct)}">${reviewSigned(x.close_pct, "%")}</td>
+      </tr>`
+    )
+    .join("");
+  return (
+    reviewHeadingHtml("主な指数の騰落", "前日終値からの変化") +
+    `<div class="market-detail-table-wrap"><table class="market-detail-table">
+      <thead><tr><th></th>${hasMaezyou ? "<th>前場</th>" : ""}<th>大引</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`
+  );
+}
+
+function reviewAfternoonMetricsHtml(a) {
+  const metrics = Array.isArray(a && a.metrics) ? a.metrics.filter((x) => x && x.label) : [];
+  if (!metrics.length) return "";
+  const rows = metrics
+    .map((x) => {
+      const unit = x.unit || "";
+      // 差は前場と大引が両方揃っているときだけ出す(片方欠けた行は空欄)。
+      const both = typeof x.maezyou === "number" && typeof x.close === "number";
+      const diff = both ? x.close - x.maezyou : null;
+      return `<tr>
+        <td>${escapeHtml(x.label)}</td>
+        <td>${reviewNum(x.maezyou, unit)}</td>
+        <td>${reviewNum(x.close, unit)}</td>
+        <td class="${reviewTone(diff)}">${both ? reviewSigned(diff, unit) : "-"}</td>
+      </tr>`;
+    })
+    .join("");
+  return (
+    reviewHeadingHtml("前場と大引の数字", "前場の数字と大引の数字を比べたもの") +
+    `<div class="market-detail-table-wrap"><table class="market-detail-table">
+      <thead><tr><th></th><th>前場</th><th>大引</th><th>差</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`
+  );
+}
+
+function reviewCountsHtml(c) {
+  if (!c || typeof c !== "object") return "";
+  const items = [];
+  if (c.maezyou_breakout != null) items.push(`<span>前場でブレイク <b>${reviewNum(c.maezyou_breakout)}件</b></span>`);
+  if (c.close_breakout != null) items.push(`<span>大引でブレイク <b>${reviewNum(c.close_breakout)}件</b></span>`);
+  if (c.held != null) items.push(`<span>引けまで維持 <b>${reviewNum(c.held)}件</b></span>`);
+  return items.length ? `<div class="review-counts">${items.join("")}</div>` : "";
+}
+
+function reviewFunnelHtml(b) {
+  const funnel = Array.isArray(b && b.stage_funnel) ? b.stage_funnel.filter((x) => x && x.label != null) : [];
+  if (!funnel.length) return "";
+  // 前日終値/前場/大引 のうち、1行でも値が入っている列だけ表示する。
+  const cols = REVIEW_COLS.filter((c) => funnel.some((x) => x[c.key] != null));
+  const head = cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("");
+  const rows = funnel
+    .map((x) => {
+      const label = REVIEW_BUCKET_LABEL[x.label] || x.label;
+      const tds = cols.map((c) => `<td>${reviewNum(x[c.key])}</td>`).join("");
+      return `<tr><td>${escapeHtml(label)}</td>${tds}</tr>`;
+    })
+    .join("");
+  return (
+    reviewHeadingHtml("段階ごとの銘柄数", "件") +
+    `<div class="market-detail-table-wrap"><table class="market-detail-table">
+      <thead><tr><th></th>${head}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`
+  );
+}
+
+function reviewPivotHtml(b) {
+  const md = b && b.median_dist_to_pivot;
+  if (!md || typeof md !== "object" || (md.maezyou == null && md.close == null)) return "";
+  const both = typeof md.maezyou === "number" && typeof md.close === "number";
+  // 距離が縮む=買い場に近づく なので、減った方を緑にする(増減の色を逆に取る)。
+  const tone = both ? reviewTone(md.maezyou - md.close) : "review-flat";
+  return (
+    reviewHeadingHtml("ピボットまでの距離", "真ん中の銘柄") +
+    `<div class="market-detail-indicators"><div class="market-detail-row"><span>前場 → 大引</span><span class="${tone}">${reviewNum(md.maezyou, "%")} → ${reviewNum(md.close, "%")}</span></div></div>`
+  );
+}
+
+// 「だましの実測率」。件数だけ並べても、きょうのだましが多いのか少ないのかを測る
+// ものさしが無い。直近の通算を横に置くことで初めて「きょうは悪い日だった」が言える。
+// 割合の計算はバックエンドで済んでいるので、ここは来た値を並べるだけ。
+function reviewBaselineHtml(b) {
+  if (!b || typeof b !== "object") return "";
+  if (b.held_rate == null && b.today_held_rate == null) return "";
+
+  // 件数が足りないのに「62%」と言い切って見せるのがこの手の数字で一番まずいので、
+  // その場合は薄字にして参考値だと明示する(消しはしない。消すと基準が無いことに
+  // 気付けないまま件数だけ眺めることになる)。
+  const weak = b.reliable === false;
+  const rows = [];
+  if (b.held_rate != null) {
+    const sub = [];
+    if (b.days != null) sub.push(`直近${reviewNum(b.days)}営業日`);
+    if (b.sample != null) sub.push(`${reviewNum(b.sample)}件のうち`);
+    const subHtml = sub.length ? `<span class="market-detail-sub">${sub.join(" / ")}</span>` : "";
+    rows.push(
+      `<div class="market-detail-row"><span>前場でブレイクした銘柄が引けまで持った割合${subHtml}</span><span>${formatPct1(b.held_rate)}</span></div>`
+    );
+  }
+  if (b.today_held_rate != null) {
+    rows.push(`<div class="market-detail-row"><span>今日の分</span><span>${formatPct1(b.today_held_rate)}</span></div>`);
+  }
+  if (!rows.length) return "";
+
+  const note = weak ? `<p class="review-group-desc review-weak-note">参考値(件数が足りません)</p>` : "";
+  return (
+    reviewHeadingHtml("だましの実測率", "前場のブレイクがどれくらい引けまで持つか") +
+    `<div class="market-detail-indicators${weak ? " review-unreliable" : ""}">${rows.join("")}</div>` +
+    note
+  );
+}
+
+// 決算発表が近い銘柄。大引でブレイクした銘柄・発注候補のうち、発表日が目前のものを
+// バックエンドが選んで渡してくる(候補から外してはいない。跨ぐかどうかを決めるのは見る人)。
+// 日数はレコードの days_to_earnings をそのまま出す。画面で日付を数え直すと、バッチを
+// 回した日と画面を見ている日がずれたときに嘘の日数になる。
+// 銘柄カードのバッジ (earningsBadgeHtml) と同じ言い回しにして、一覧と表現を揃える。
+function reviewEarningsSoonHtml(items) {
+  const rows = Array.isArray(items) ? items.filter((x) => x && x.code) : [];
+  if (!rows.length) return "";
+  // 行そのものは既存の銘柄行を使い回す(見た目とタップ遷移を他のグループと揃えるため)。
+  // 残り日数と予定日は、その行の補足 (note) として渡す。
+  const decorated = rows.map((x) => {
+    const d = x.days_to_earnings;
+    const when = typeof d === "number" && isFinite(d) ? (d === 0 ? "今日決算" : `決算まで${d}日`) : "";
+    const on = x.next_earnings_date ? `(${x.next_earnings_date})` : "";
+    const note = [when, on].filter(Boolean).join(" ");
+    return note ? Object.assign({}, x, { note }) : x;
+  });
+  return reviewStockGroupHtml("決算発表が近い", "発表を跨ぐかどうかを決めてから入る銘柄", decorated);
+}
+
+// 前日「あと一歩」だった銘柄が今日どうなったかの答え合わせ。
+// 履歴が浅いうちは空で来るので、その場合は見出しごと出さない。
+function reviewFollowupHtml(f) {
+  if (!f || typeof f !== "object") return "";
+  const parts = [];
+  if (f.hit_rate != null) {
+    parts.push(`<div class="review-counts"><span>前日の見立てが当たった割合 <b>${formatPct1(f.hit_rate)}</b></span></div>`);
+  }
+  const items = Array.isArray(f.items) ? f.items.filter((x) => x && x.code) : [];
+  if (items.length) {
+    const rows = items
+      .map(
+        (x) => `<tr data-review-code="${escapeHtml(x.code)}" role="button" tabindex="0">
+          <td><span class="review-followup-name" title="${escapeHtml(x.name || x.code)}">${escapeHtml(x.name || x.code)}</span><span class="review-stock-code">${escapeHtml(x.code)}</span></td>
+          <td>${escapeHtml(x.yesterday ?? "-")}</td>
+          <td>${escapeHtml(x.today ?? "-")}</td>
+          <td>${escapeHtml(x.result ?? "-")}</td>
+        </tr>`
+      )
+      .join("");
+    parts.push(
+      `<div class="market-detail-table-wrap"><table class="market-detail-table review-followup-table">
+        <thead><tr><th></th><th>前日</th><th>今日</th><th>結果</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`
+    );
+  }
+  const body = parts.filter(Boolean).join("");
+  return body ? reviewHeadingHtml("前日の答え合わせ", "前日「あと一歩」だった銘柄の行き先") + body : "";
+}
+
+function reviewBreakoutRateHtml(b) {
+  if (!b || typeof b !== "object" || b.breakout_success_rate == null) return "";
+  return (
+    reviewHeadingHtml("ブレイクがそのまま伸びた割合") +
+    `<div class="market-detail-indicators"><div class="market-detail-row"><span>これまでの通算</span><span>${formatPct1(b.breakout_success_rate)}</span></div></div>`
+  );
+}
+
+// ------------------------------------------------------------ 4つのブロック
+// 上から「結論 → 根拠 → 行動 → 検証」。読む人が途中でやめても困らない順にする。
+
+// ブロック1: 今日の結論。ここだけ読めば終わる人向け。
+function reviewSummaryHtml(data) {
+  const m = data.market;
+  return reviewBlockHtml("今日の結論", "ここだけ読めば足りる要点", [
+    reviewStepsHtml(m),
+    reviewShapeHtml(m),
+    reviewVerdictHtml(data.afternoon),
+  ]);
+}
+
+// ブロック2: なぜそうなったか。結論の裏取りなので既定では畳んでおく。
+function reviewWhyHtml(data) {
+  const m = data.market;
+  return reviewFoldBlockHtml("なぜそうなったか", "点数の内訳と指数の動き", [
+    reviewBreakdownHtml(m),
+    reviewDriversHtml(m),
+    reviewIndexMovesHtml(m),
+    reviewAfternoonMetricsHtml(data.afternoon),
+  ]);
+}
+
+// ブロック3: 明日どうするか。手を動かすための材料だけをここに集める。
+function reviewActionHtml(data) {
+  const st = data.stocks || {};
+  const b = data.buckets || {};
+  return reviewBlockHtml("明日どうするか", "見ておく銘柄と、いまの段階", [
+    reviewCountsHtml(st.counts),
+    reviewStockGroupHtml("新しく候補入り", "今日新たに発注候補へ上がってきた銘柄", st.new_candidates),
+    reviewStockGroupHtml("候補から外れた", "今日候補から落ちた銘柄", st.dropped),
+    reviewStockGroupHtml("だまし", "前場はブレイクしていたが、大引で押し戻された銘柄", st.fakeout),
+    reviewStockGroupHtml("引け際のブレイク", "前場は監視だったが、引けにかけてブレイクした銘柄", st.late_breakout),
+    // 上のグループを横断する注意喚起なので銘柄の並びの最後に置く。
+    reviewEarningsSoonHtml(st.earnings_soon),
+    reviewFunnelHtml(b),
+    reviewPivotHtml(b),
+  ]);
+}
+
+// ブロック4: 見立ての答え合わせ。当たっていたかの数字はすべてここへ集約する
+// (行動の材料に混ぜると、いま見るべき銘柄が埋もれる)。
+function reviewVerifyHtml(data) {
+  return reviewBlockHtml("見立ての答え合わせ", "出した見立てが当たっていたか", [
+    reviewFollowupHtml(data.followup),
+    reviewBaselineHtml((data.stocks || {}).baseline),
+    reviewBreakoutRateHtml(data.buckets),
+  ]);
+}
+
+// 「過去の成績」(docs/data/stats.json)。帯ごとの表を1つ組み立てる。
+// win_rate は 0〜1 の割合なので formatPct1 で100倍する。median_return は
+// バックエンドが既に%で入れてくるので、ここで100倍してはいけない。
+function reviewStatsTableHtml(section, title, desc) {
+  if (!section || typeof section !== "object") return "";
+  const rows = Array.isArray(section.rows) ? section.rows.filter((r) => r && r.label != null) : [];
+  if (!rows.length) return "";
+
+  const body = rows
+    .map((r) => {
+      // 件数が足りない帯は消さずに薄字で残す。消すと「その帯にはまだサンプルが無い」
+      // ことに気付けず、残った帯だけを見て全体を語ってしまう。
+      const weak = r.reliable === false;
+      const note = weak ? `<span class="review-weak-note">参考値</span>` : "";
+      // 薄字の行で中央値だけ緑/赤に光ると「参考値」の断りが効かなくなるので色は付けない。
+      const tone = weak ? "review-flat" : reviewTone(r.median_return);
+      return `<tr class="${weak ? "review-unreliable" : ""}">
+        <td>${escapeHtml(String(r.label))}${note}</td>
+        <td>${reviewNum(r.n, "件")}</td>
+        <td>${formatPct1(r.win_rate)}</td>
+        <td class="${tone}">${reviewSigned(r.median_return, "%")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  // min_n は「何件から言い切ってよいか」の線引き。薄字の理由が画面から読めるよう添える。
+  const minNote =
+    section.min_n != null
+      ? `<p class="review-group-desc">${escapeHtml(`${section.min_n}件に満たない帯は参考値として薄く出しています。`)}</p>`
+      : "";
+
+  return (
+    reviewHeadingHtml(title, desc) +
+    `<div class="market-detail-table-wrap"><table class="market-detail-table">
+      <thead><tr><th></th><th>件数</th><th>上がった割合</th><th>値動きの真ん中</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>` +
+    minNote
+  );
+}
+
+function reviewStatsHtml(data) {
+  if (!data || typeof data !== "object") return "";
+  const parts = [
+    reviewStatsTableHtml(data.regime, "地合いスコアの帯ごと", "候補が出た日の地合いスコア"),
+    reviewStatsTableHtml(data.volume, "ブレイク日の出来高の帯ごと", "50日平均出来高の何倍だったか"),
+  ];
+
+  const notes = Array.isArray(data.notes) ? data.notes.filter(Boolean) : [];
+  if (notes.length) {
+    parts.push(`<div class="review-notes">${notes.map((n) => `<div class="review-note">${escapeHtml(n)}</div>`).join("")}</div>`);
+  }
+
+  // 副題は「いつからいつまでの候補を何営業日追ったか」。どれか欠けても文が壊れないようにする。
+  const w = data.window || {};
+  const span = w.from && w.to ? `${w.from}〜${w.to} の候補` : "";
+  const forward = data.forward_days != null ? `${data.forward_days}営業日追跡` : "";
+  const sub = span && forward ? `${span}を${forward}` : span || forward;
+
+  return reviewBlockHtml("過去の成績", sub, parts);
+}
+
+function renderReviewStats(data) {
+  const el = document.getElementById("review-stats-body");
+  if (!el) return;
+  el.innerHTML = reviewStatsHtml(data);
+}
+
+// 過去の成績は「あれば足す」ブロック。stats.json は履歴が溜まってから初めて作られるので、
+// 無い日はレビュー本体だけ描いて黙って畳む(レビューごと落とさない)。レビューと同じく
+// 大引にしか作れない集計なので、断面(大引/前場)のサフィックスは付けない。
+let reviewStatsLoadPromise = null;
+
+function ensureReviewStatsLoaded() {
+  if (reviewStatsLoadPromise) return reviewStatsLoadPromise;
+  reviewStatsLoadPromise = window.MinerviniData
+    .fetchJson("data/stats.json", { optional: true })
+    .then((data) => {
+      renderReviewStats(data);
+      return data;
+    })
+    .catch(() => {
+      // 読めなかったときだけキャッシュを捨てて、次にタブを押したら取り直せるようにする。
+      // 画面にはエラーを出さない(このブロックが無いこと自体は普通の状態なので)。
+      reviewStatsLoadPromise = null;
+      return null;
+    });
+  return reviewStatsLoadPromise;
+}
+
+function reviewPlaceholderHtml(message) {
+  return `<p class="tier-note review-placeholder">${escapeHtml(message)}</p>`;
+}
+
+function renderReview(data) {
+  const el = document.getElementById("review-body");
+  if (!el) return;
+  wireReviewNavigation(el);
+
+  if (!data || typeof data !== "object") {
+    el.innerHTML = reviewPlaceholderHtml("まだレビューがありません(大引のバッチ実行後に作られます)。");
+    return;
+  }
+
+  // 見出し: 対象日と作った時刻。ヘッダの断面切替とは無関係なので、そこも一言添える。
+  const when = data.generated_at ? new Date(data.generated_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const metaBits = [];
+  if (data.date) metaBits.push(escapeHtml(data.date));
+  if (when) metaBits.push(`${escapeHtml(when)}時点`);
+  const head = `
+    <div class="review-head">
+      <div class="review-head-title">今日の振り返り${metaBits.length ? `<span class="review-head-meta">${metaBits.join(" / ")}</span>` : ""}</div>
+      <p class="tier-note review-head-note">レビューは大引時点の集計です(ヘッダで「前場」を選んでいても中身は変わりません)。</p>
+    </div>`;
+
+  // 注意書き。前場が無い日は理由が notes に入ってくることが多いが、入っていなくても
+  // 前場との比較が消えている理由が画面から読み取れるよう1行足す。
+  const notes = Array.isArray(data.notes) ? data.notes.filter(Boolean) : [];
+  if (data.has_maezyou === false) notes.push("前場のデータが無いため、前場との比較は省略しています。");
+  const notesHtml = notes.length
+    ? `<div class="review-notes">${notes.map((n) => `<div class="review-note">${escapeHtml(n)}</div>`).join("")}</div>`
+    : "";
+
+  // 結論 → 根拠 → 行動 → 検証。並べ替えるときはこの順番の意味ごと考え直すこと。
+  const blocks = [
+    reviewSummaryHtml(data),
+    reviewWhyHtml(data),
+    reviewActionHtml(data),
+    reviewVerifyHtml(data),
+  ].filter(Boolean);
+
+  el.innerHTML =
+    head +
+    notesHtml +
+    (blocks.length ? blocks.join("") : reviewPlaceholderHtml("この日のレビューには表示できる中身がありませんでした。"));
+}
+
+// 行のタップ→個別銘柄画面。行ごとにリスナーを付けず、描き直しても配線が
+// 生き残るようコンテナ1つに委譲する(既存の銘柄カードと同じハッシュ遷移)。
+function wireReviewNavigation(el) {
+  if (el.dataset.wired) return;
+  el.dataset.wired = "1";
+  const go = (row) => {
+    const code = row.dataset.reviewCode;
+    if (code) window.location.hash = `stock/${encodeURIComponent(code)}`;
+  };
+  el.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-review-code]");
+    if (row) go(row);
+  });
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = e.target.closest("[data-review-code]");
+    if (!row) return;
+    e.preventDefault();
+    go(row);
+  });
+}
+
+// レビューは市況ページを開くたびに取り直さない(大引に1回しか変わらないため)。
+// 失敗したときだけキャッシュを捨てて、次にタブを押したときに取り直せるようにする。
+let reviewLoadPromise = null;
+
+function ensureReviewLoaded() {
+  if (reviewLoadPromise) return reviewLoadPromise;
+  reviewLoadPromise = window.MinerviniData
+    .fetchJson("data/review.json", { optional: true })
+    .then((data) => {
+      renderReview(data);
+      return data;
+    })
+    .catch(() => {
+      reviewLoadPromise = null;
+      const el = document.getElementById("review-body");
+      if (el) el.innerHTML = reviewPlaceholderHtml("レビューを読み込めませんでした。もう一度タブを開くと取り直します。");
+      return null;
+    });
+  return reviewLoadPromise;
+}
+
+async function bootApp() {
+  await ensureDataAccess();
+  // ダッシュボード(index.html)判定。2026-07-29のリスト統合で #confirmed-tier-body が
+  // 消えたため、単一リストのコンテナ #stock-list-body を目印にする。
+  if (document.getElementById("stock-list-body")) {
+    initDashboard();
+  }
+  // 銘柄詳細(view-stock)はDockナビを持つSPAシェル(index.html)内の1ビューに
+  // なったため、initStockPage()はここで直接呼ばず、initRouter()内のshowView()が
+  // hashが"stock/CODE"の時にだけ呼ぶ。
+  if (document.getElementById("dock-nav")) {
+    initRouter();
+  }
+}
+
+bootApp();
